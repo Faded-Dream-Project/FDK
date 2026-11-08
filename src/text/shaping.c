@@ -1,5 +1,5 @@
 /*
- * shaping.c — M-2 level 1: complex-script text shaping (1.1.0).
+ * shaping.c — M-2 level 1: complex-script text shaping (1.0.0).
  *
  * The gap this closes (ROADMAP B-02): before this file, every FDK
  * text walk was codepoint-at-a-time LTR with pair kerning — Arabic,
@@ -34,7 +34,7 @@
  * the Entry caret read the per-codepoint logical pen attribution.
  * There is still exactly ONE rounding rule in the text stack: the
  * pen floors per glyph and rounds once at the end. The pen itself
- * accumulates in f64 (1.1.0-rc2, the re-landed f64 shaped-pen fix): an
+ * accumulates in f64 (1.0.0-rc2, the re-landed f64 shaped-pen fix): an
  * f32 accumulator takes one rounding per glyph and at extreme scale
  * (thousands of glyphs) the drift moved measure, wrap and caret
  * geometry by whole pixels; the f32 snapshots the consumers see are
@@ -1284,7 +1284,7 @@ static bool sh_shape_segment(sh_segment *seg, sh_bidi *b,
         fdk_f64 y_off = (fdk_f64)poss[i].y_offset / 64.0;
         fdk_f64 adv = (fdk_f64)poss[i].x_advance / 64.0;
 
-        /* The pen accumulates in f64 (1.1.0-rc2, the re-landed f64
+        /* The pen accumulates in f64 (1.0.0-rc2, the re-landed f64
          * shaped-pen fix): a long line's cumulative advance in f32
          * picks up one rounding per glyph — at extreme scale
          * (thousands of glyphs) the drift moved measure, wrap and

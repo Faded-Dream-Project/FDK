@@ -344,7 +344,7 @@ static void uninstall_theme(void) {
     FDK_INFO("theme: setting cleared — back to the built-in theme");
 }
 
-/* The scheme-variant pass (1.1.0): when the desktop prefers a
+/* The scheme-variant pass (1.0.0): when the desktop prefers a
  * scheme and the resolved theme has a sibling face for it, prefer
  * the sibling. Sibling naming: "<internal name>-dark" /
  * "<internal name>-light" resolved through the SAME discovery — a

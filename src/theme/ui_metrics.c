@@ -1,6 +1,6 @@
 #define FDK_LOG_TAG "theme"
 /*
- * ui_metrics.c — the process's UI font size and scale (1.1.0)
+ * ui_metrics.c — the process's UI font size and scale (1.0.0)
  *
  * One answer, process-wide, to "what size is the UI text?" — the
  * same posture as color_scheme.c (which this file deliberately

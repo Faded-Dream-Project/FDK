@@ -162,18 +162,18 @@ similar default UI font is picked up automatically; override with
 ## Pre-release versions in package metadata
 
 While the version string carries a hyphenated pre-release suffix —
-`1.1.0-rc2` today — the five package grammars disagree about that
+`1.0.0-rc2` today — the five package grammars disagree about that
 suffix, and four of them reject it outright, so the pipeline
 translates it once, at the metadata layer (`fdk_packver` in
 `packaging/ci/common.sh`):
 
-| Family | Raw `1.1.0-rc1` becomes | Why |
+| Family | Raw `1.0.0-rc1` becomes | Why |
 | --- | --- | --- |
-| deb | `1.1.0~rc1` | dpkg accepts `1.1.0-rc1` but orders it **above** the future `1.1.0` final (the hyphen starts the debian revision); `~` is dpkg's native pre-release marker and sorts before the final |
-| rpm | `1.1.0~rc1` | `-` is the Version/Release separator — `Version: 1.1.0-rc1` is an illegal spec (`Illegal char '-'`); `~` is rpm's pre-release marker |
-| apk | `1.1.0_rc1` | `-` is reserved for the `-rN` pkgrel; `_rc` is apk's native pre-release suffix family |
-| arch | `1.1.0rc1` | `pkgver` forbids hyphens entirely |
-| xbps | `1.1.0rc1` | versions must not contain dashes, underscores, or special chars (void-packages Manual); a dash also makes the pkgname-version split ambiguous, which broke repository lookups |
+| deb | `1.0.0~rc1` | dpkg accepts `1.0.0-rc1` but orders it **above** the future `1.0.0` final (the hyphen starts the debian revision); `~` is dpkg's native pre-release marker and sorts before the final |
+| rpm | `1.0.0~rc1` | `-` is the Version/Release separator — `Version: 1.0.0-rc1` is an illegal spec (`Illegal char '-'`); `~` is rpm's pre-release marker |
+| apk | `1.0.0_rc1` | `-` is reserved for the `-rN` pkgrel; `_rc` is apk's native pre-release suffix family |
+| arch | `1.0.0rc1` | `pkgver` forbids hyphens entirely |
+| xbps | `1.0.0rc1` | versions must not contain dashes, underscores, or special chars (void-packages Manual); a dash also makes the pkgname-version split ambiguous, which broke repository lookups |
 
 Two scope rules keep this honest. First, the mapping touches
 **package metadata only** — the `Version` fields, the package

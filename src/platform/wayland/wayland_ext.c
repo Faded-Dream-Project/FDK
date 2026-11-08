@@ -1,5 +1,5 @@
 /*
- * wayland_ext.c — Wayland extension-surface adoption (1.1.0)
+ * wayland_ext.c — Wayland extension-surface adoption (1.0.0)
  *
  * The Wayland half of include/fdk/fdk_extend.h's ext_surface_adopt
  * platform op: an add-on created a wl_surface through the wl_display*
@@ -180,7 +180,7 @@ fdk_result fdk_wayland_ext_surface_adopt(fdk_platform_connection *conn,
 }
 
 /* The documented native-display accessor behind
- * fdk_ext_get_native_display() (1.1.0): the connection's
+ * fdk_ext_get_native_display() (1.0.0): the connection's
  * struct wl_display*, borrowed for the connection's lifetime. */
 void *fdk_wayland_native_display(fdk_platform_connection *conn) {
     return (conn != NULL) ? (void *)conn->display : NULL;
@@ -191,7 +191,7 @@ void *fdk_wayland_native_display(fdk_platform_connection *conn) {
  * slots size themselves from it at the next acquire/present — the
  * same fields xdg_surface_configure updates for normal windows.
  *
- * 1.1.0-rc1 (found live on labwc and sway, 2026-10-26): this op ALSO
+ * 1.0.0-rc1 (found live on labwc and sway, 2026-10-26): this op ALSO
  * flips `configured` — the flag present()'s first-configure gate
  * reads — and commits the deferred first frame. The add-on contract
  * (fdk_extend.h, and fdk-shell-overlay's layer_configure): notify_configure
@@ -241,7 +241,7 @@ fdk_result fdk_wayland_ext_surface_native(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
-/* ---- Subsurfaces (1.1.0, D-2 / B-16) -------------------------------------
+/* ---- Subsurfaces (1.0.0, D-2 / B-16) -------------------------------------
  *
  * The Wayland half of fdk_ext_subsurface_create: a wl_subsurface
  * role on a fresh wl_surface, parented to the parent's surface.

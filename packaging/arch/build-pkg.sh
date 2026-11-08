@@ -17,8 +17,8 @@ fdk_require_release_posture
 
 VERSION="$(fdk_expected_version)"
 # Package metadata version: makepkg's pkgver forbids hyphens ("pkgver is
-# not allowed to contain ... hyphens"), so the raw "1.1.0-rc1" drops the
-# hyphen (1.1.0rc1, the Arch pre-release spelling). The tarball name and
+# not allowed to contain ... hyphens"), so the raw "1.0.0-rc1" drops the
+# hyphen (1.0.0rc1, the Arch pre-release spelling). The tarball name and
 # its top directory follow pkgver (build()/check()/package() cd
 # "$srcdir/fdk-$pkgver"), so they use the SAME spelling. Plain releases
 # pass through unchanged (fdk_packver in common.sh).

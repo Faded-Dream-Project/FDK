@@ -37,7 +37,7 @@
 void fdk__log_level_push(fdk_log_level level);
 void fdk__log_level_pop(void);
 
-/* ---- startup trace (1.1.0-rc1, X1) --------------------------------------
+/* ---- startup trace (1.0.0-rc1, X1) --------------------------------------
  *
  * FDK_STARTUP_TRACE=1 logs one INFO line per startup phase with the
  * milliseconds elapsed since the first traced call — the field

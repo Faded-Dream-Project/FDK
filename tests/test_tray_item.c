@@ -1,5 +1,5 @@
 /* test_tray_item.c — the app-facing tray item + menu server against a
- * REAL bus and an in-test mock watcher/host (1.1.0)
+ * REAL bus and an in-test mock watcher/host (1.0.0)
  *
  * Runs under `make test-dbus` beside test_dbus_live.c and
  * test_notify_client.c (one dbus-run-session wrapper). The mock is a

@@ -245,7 +245,7 @@ toolkit's spine; see docs/threading.md).
 |---|---|---|
 | 1 | fdk-shell-overlay (shell surfaces) | **CLOSED** — the package (formerly `fdk-shell/`, renamed this round); X11 suite green in-sandbox, live re-anchoring + auto-hide + outputs + popups verified on Xvfb |
 | 2 | Clipboard: image + URI-list formats | **CLOSED** — image since 1.4.9 + INCR 1.4.12; text/uri-list set/get added this round (§23/B2a-close), both backends, two-process verified |
-| 3 | Gestures + multi-touch | **CLOSED** — touch slots + PINCH/SWIPE events since 1.1.0; the RECOGNIZER layer (click/long-press/drag/pan/swipe/zoom/rotate) added this round (§23/B2b) |
+| 3 | Gestures + multi-touch | **CLOSED** — touch slots + PINCH/SWIPE events since 1.0.0; the RECOGNIZER layer (click/long-press/drag/pan/swipe/zoom/rotate) added this round (§23/B2b) |
 | 4 | Text on extension surfaces | OPEN (the next extension-API version: hosting widgets on fdk_ext_surface) |
 | 5 | Pango-grade run attributes in markup | **CLOSED** this round (§23/B2c) — the named set; the deeper tail (gravity, features, stretch) stated above |
 | 6 | Grid container | **CLOSED** (shipped 1.4.x; this document's earlier revision wrongly listed it — corrected this round) |

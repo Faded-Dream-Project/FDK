@@ -687,7 +687,7 @@ void fdk__colorbutton_apply_result(fdk_widget *button,
 
 #endif /* FDK_WIDGETS_INTERNAL_H */
 
-/* ---- IME context queries (1.1.0, M-1) ----------------------------------
+/* ---- IME context queries (1.0.0, M-1) ----------------------------------
  *
  * The window layer's surrounding-text hook needs the FOCUSED text
  * widget's (text, caret) without the backend knowing widget types.
@@ -705,7 +705,7 @@ int fdk__textview_ime_context(fdk_widget *w, const char **out_text,
 int fdk__widget_ime_context(fdk_widget *focused, const char **out_text,
                             int *out_cursor);
 
-/* ---- Hover cursor (1.1.0-rc2, S-5) ---------------------------------
+/* ---- Hover cursor (1.0.0-rc2, S-5) ---------------------------------
  *
  * The class identity of the text-entry widgets (the pointer-equality
  * twins of the IME seams above): widget.c's hover-cursor derivation
@@ -722,7 +722,7 @@ extern const fdk_widget_class fdk_spin_class_def;
  * the resize compass (fdk__cursor_resolve, window_internal.h). */
 int fdk__widget_tree_hover_cursor(fdk_widget *root);
 
-/* ---- The AT-SPI text-extents seam (C-2, 1.1.0) ------------------------
+/* ---- The AT-SPI text-extents seam (C-2, 1.0.0) ------------------------
  *
  * Per-character geometry for the text-interface widgets, in the same
  * root-absolute space fdk_a11y_describe's bounds use — the bridge

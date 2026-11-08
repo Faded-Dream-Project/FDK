@@ -847,7 +847,7 @@ static void test_surfaces(void) {
           info.width == 24,
           "SVG rasters per requested size (24 is its own surface)");
 
-    /* ---- the PUBLIC wrapper: fdk_icon_theme_surface (1.1.0) ------
+    /* ---- the PUBLIC wrapper: fdk_icon_theme_surface (1.0.0) ------
      * The add-on surface (notifyd's icon path, the future tray
      * host's): an OWNED clone, never the cache's own pointer, with
      * the pixels arriving verbatim (identity by color on the solid

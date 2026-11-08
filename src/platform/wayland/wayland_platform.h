@@ -71,7 +71,7 @@ struct fdk_platform_connection {
      * wayland_window.c blocks on it with a bounded poll. */
     struct wl_event_queue *release_queue;
 
-    /* cursor-shape-v1 (1.1.0-rc1, the W2 report): the OPTIONAL
+    /* cursor-shape-v1 (1.0.0-rc1, the W2 report): the OPTIONAL
      * manager global and the per-pointer device derived from it.
      * When the compositor offers the protocol, cursor shaping goes
      * through set_shape(serial, enum) — no client-side cursor
@@ -83,7 +83,7 @@ struct fdk_platform_connection {
     struct wp_cursor_shape_manager_v1 *cursor_shape_manager;
     struct wp_cursor_shape_device_v1 *cursor_shape_device;
 
-    /* xdg-toplevel-icon-v1 (1.1.0, M-4): the OPTIONAL manager for
+    /* xdg-toplevel-icon-v1 (1.0.0, M-4): the OPTIONAL manager for
      * window icons. Present on KDE Plasma 6.3+ and any compositor
      * that adopted the staging protocol; absent everywhere else at
      * the time of writing (wlroots < 0.19, GNOME) — set_icon then
@@ -94,12 +94,12 @@ struct fdk_platform_connection {
      * lets the compositor scale, so they are not listened to. */
     struct xdg_toplevel_icon_manager_v1 *toplevel_icon_manager;
 
-    /* idle-inhibit (1.1.0, S-3): the OPTIONAL manager — absent means
+    /* idle-inhibit (1.0.0, S-3): the OPTIONAL manager — absent means
      * the compositor has no idle-inhibit protocol and the window op
      * answers FDK_ERR_UNSUPPORTED (the D-Bus fallback engages). */
     struct zwp_idle_inhibit_manager_v1 *idle_inhibit_manager;
 
-    /* xdg-activation (1.1.0, S-6): the OPTIONAL manager. Absent
+    /* xdg-activation (1.0.0, S-6): the OPTIONAL manager. Absent
      * (rare — sway, KDE and GNOME all implement it) means activate
      * and token minting answer FDK_ERR_UNSUPPORTED. The launch_token
      * is the string captured from XDG_ACTIVATION_TOKEN at connect
@@ -111,7 +111,7 @@ struct fdk_platform_connection {
     struct xdg_activation_v1 *activation;
     char *launch_token;
 
-    /* text-input-v3 (1.1.0, M-1): the OPTIONAL IME manager + the
+    /* text-input-v3 (1.0.0, M-1): the OPTIONAL IME manager + the
      * per-seat text input object (wayland_ime.c). enter/leave are
      * the focus gates; the latched pending strings + the showing
      * flag are the v3 batch state the `done` event applies;
@@ -156,7 +156,7 @@ struct fdk_platform_connection {
     struct wl_seat *seat;
     struct xdg_wm_base *wm_base;
 
-    /* OPTIONAL global (1.1.0, D-2): wl_subcompositor — the factory
+    /* OPTIONAL global (1.0.0, D-2): wl_subcompositor — the factory
      * for wl_subsurface roles (CORE protocol, but a compositor
      * still has to advertise the global). Mandatory in practice
      * (every compositor that offers wl_compositor offers this too);
@@ -164,7 +164,7 @@ struct fdk_platform_connection {
      * FDK_ERR_UNSUPPORTED — the honest refusal, never a fake. */
     struct wl_subcompositor *subcompositor;
 
-    /* OPTIONAL (1.1.0, D-4): wlr-foreign-toplevel-management — the
+    /* OPTIONAL (1.0.0, D-4): wlr-foreign-toplevel-management — the
      * taskbar substrate (wayland_toplevel.c). The global's NAME is
      * recorded at registry time; the MANAGER is bound lazily at
      * fdk_toplevel_list_open — the protocol sends the initial
@@ -178,7 +178,7 @@ struct fdk_platform_connection {
     struct zwlr_foreign_toplevel_manager_v1 *foreign_toplevel_manager;
     int foreign_toplevels_live;
 
-    /* OPTIONAL (1.1.0, D-5): xdg-session-management-v1 — the
+    /* OPTIONAL (1.0.0, D-5): xdg-session-management-v1 — the
      * save/restore object lane (wayland_session.c). NAME-only at
      * registry time; the manager is bound lazily at
      * fdk_session_open (get_session is client-initiated, so the
@@ -337,7 +337,7 @@ struct fdk_platform_connection {
     char *drag_text;           /* owned; TEXT payload for ::send     */
     char *drag_uri_payload;    /* owned; uri-list payload for ::send */
     int drag_drop_performed;
-    /* Same-connection drags (1.1.0, S-9): the payload read inside
+    /* Same-connection drags (1.0.0, S-9): the payload read inside
      * fdk_wayland_dnd_device_drop DISPATCHES the queue to serve our
      * own data_source's ::send — which can also deliver the
      * compositor's post-drop ::leave / ::cancelled. Those handlers
@@ -351,7 +351,7 @@ struct fdk_platform_connection {
     int drag_deferred_status;  /* ... with this fdk_drag_status      */
     void (*drag_on_done)(int status, void *user);
     void *drag_on_done_user;
-    /* Drag icon (1.1.0, S-9): the wl_surface handed to start_drag as
+    /* Drag icon (1.0.0, S-9): the wl_surface handed to start_drag as
      * the icon — compositor-owned position/blend for the drag's
      * life. Destroyed at drag end (the wl_data_source destroyed /
      * cancelled / finished path): surface first, one roundtrip (the
@@ -369,7 +369,7 @@ struct fdk_platform_connection {
     struct wl_pointer *pointer;
     struct wl_touch *touch; /* M-3: wl_touch, direct contact slots */
 
-    /* --- Tablets / stylus (1.1.0, D-3, wayland_tablet.c) -----------
+    /* --- Tablets / stylus (1.0.0, D-3, wayland_tablet.c) -----------
      *
      * The zwp_tablet_v2 family: the manager (optional global), the
      * per-seat tablet seat, and the tool records. Tools are tracked
@@ -394,7 +394,7 @@ struct fdk_platform_connection {
         fdk_platform_window *win;
     } touch_ids[FDK_WL_TOUCH_IDS];
 
-    /* --- Tablet tool table (1.1.0, D-3) -----------------------------
+    /* --- Tablet tool table (1.0.0, D-3) -----------------------------
      *
      * Bounded like the touch id table; the FDK `tool` id handed to
      * applications is the slot index + 1. proxy == NULL && id != 0
@@ -494,7 +494,7 @@ struct fdk_platform_connection {
  * X11. */
 #define FDK_WL_GL_MIN_PIXELS 131072
 
-/* Bounded release wait (1.1.6; reworked 1.1.0-rc1): when every render
+/* Bounded release wait (1.1.6; reworked 1.0.0-rc1): when every render
  * slot is in flight and the application still wants a framebuffer,
  * FDK waits this long — READING the display socket (queue-scoped
  * prepare_read, see get_framebuffer) — for the compositor to release
@@ -542,7 +542,7 @@ struct fdk_platform_window {
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *xdg_toplevel;
 
-    /* Toplevel icon (1.1.0, M-4): the xdg-toplevel-icon-v1 pair a
+    /* Toplevel icon (1.0.0, M-4): the xdg-toplevel-icon-v1 pair a
      * set_icon call leaves on this toplevel. The PROTOCOL lets the
      * icon object die right after manager.set_icon ("can be
      * destroyed without the toplevel losing its icon") — but the
@@ -560,12 +560,12 @@ struct fdk_platform_window {
      * no-op itself is permanent per compositor, the LOG is once
      * per window so a per-frame set_icon caller cannot spam. */
     int icon_absent_logged;
-    /* Idle inhibitor (1.1.0, S-3): the per-surface
+    /* Idle inhibitor (1.0.0, S-3): the per-surface
      * zwp_idle_inhibitor_v1 while engaged (NULL otherwise); dies
      * with the window (the destroy path) or at the idle module's
      * release — whichever comes first. */
     struct zwp_idle_inhibitor_v1 *idle_inhibitor;
-    /* Extension surface (1.1.0, fdk_extend.h): nonzero when this
+    /* Extension surface (1.0.0, fdk_extend.h): nonzero when this
      * wrapper ADOPTED an add-on's wl_surface (wayland_ext.c) — the
      * surface's ROLE belongs to the add-on (a layer surface, an
      * add-on protocol FDK does not know), so xdg_surface and
@@ -577,7 +577,7 @@ struct fdk_platform_window {
     int ext;
     int popup;                    /* Phase 9: xdg_popup window      */
     struct xdg_popup *xdg_popup;  /* set when popup                */
-    /* Subsurface role (1.1.0, D-2 / B-16): set when this wrapper
+    /* Subsurface role (1.0.0, D-2 / B-16): set when this wrapper
      * carries an FDK-CREATED child surface (wayland_ext.c's
      * subsurface_create) — the wl_subsurface proxy that owns the
      * parent/child relationship. The role must die BEFORE the
@@ -589,7 +589,7 @@ struct fdk_platform_window {
      * wrapper — the ancestor walk that applies tree state. */
     struct wl_subsurface *subsurface;
     struct fdk_platform_window *sub_parent;
-    int is_subsurface;            /* 1.1.0 D-2: FDK-owned child    */
+    int is_subsurface;            /* 1.0.0 D-2: FDK-owned child    */
     /* Input-transparent popup (1.3.2, tooltips): set at CREATE from
      * fdk_window_options.input_transparent — empty input region on
      * the surface before the first commit, and NO xdg_popup.grab:
@@ -744,7 +744,7 @@ struct fdk_platform_window {
                                  has been acked — required before the first
                                  wl_surface.commit per xdg-shell protocol */
 
-    /* --- Session participation (1.1.0, D-5, wayland_session.c) ---------
+    /* --- Session participation (1.0.0, D-5, wayland_session.c) ---------
      *
      * The per-toplevel join record: session_proxy is the
      * xdg_toplevel_session_v1 wrapper minted by
@@ -797,7 +797,7 @@ struct fdk_platform_window {
     int minimized;
     int fullscreen;
 
-    /* Last cursor shape APPLIED through window_set_cursor (1.1.0-rc1,
+    /* Last cursor shape APPLIED through window_set_cursor (1.0.0-rc1,
      * W2): the seat's pointer_enter re-applies exactly this shape on
      * every entry (with the enter serial) — Wayland cursor state does
      * not survive leaving a surface, and a client that answers no
@@ -906,7 +906,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
                                       const fdk_window_options *options,
                                       fdk_platform_window *parent,
                                       fdk_platform_window **out_pwindow);
-/* Extension-surface adoption (1.1.0) — wayland_ext.c. Wraps an
+/* Extension-surface adoption (1.0.0) — wayland_ext.c. Wraps an
  * add-on's role-carrying wl_surface (committed NEVER yet — the
  * add-on's role handshake owns the first commit) in a registered
  * pwindow with the render-slot machinery. See
@@ -942,7 +942,7 @@ int fdk__wayland_commit_deferred_first_frame(
 int fdk__wayland_connection_dead(fdk_platform_connection *conn,
                                  const char *what, int err);
 
-/* Subsurfaces (1.1.0, D-2 / B-16) — wayland_ext.c. The FDK-owned
+/* Subsurfaces (1.0.0, D-2 / B-16) — wayland_ext.c. The FDK-owned
  * wl_subsurface child behind fdk_ext_subsurface_create: a fresh
  * wl_surface given the subsurface role against the parent's surface,
  * DESYNC by default (independent commits — the feature's point),
@@ -964,7 +964,7 @@ fdk_result fdk_wayland_subsurface_place(fdk_platform_window *pwindow,
                                         int above);
 
 /* Shared wl_surface/fractional-scale listeners (defined in
- * wayland_window.c, non-static since 1.1.0): the adoption path
+ * wayland_window.c, non-static since 1.0.0): the adoption path
  * attaches the same output-enter/leave and preferred-scale tracking
  * to extension surfaces that created windows get. */
 extern const struct wl_surface_listener g_wl_surface_listener;
@@ -975,27 +975,27 @@ void fdk_wayland_window_show(fdk_platform_window *pwindow);
 void fdk_wayland_window_hide(fdk_platform_window *pwindow);
 void fdk_wayland_window_set_title(fdk_platform_window *pwindow, const char *title);
 
-/* Toplevel icon (1.1.0, M-4): xdg-toplevel-icon-v1 where bound, the
+/* Toplevel icon (1.0.0, M-4): xdg-toplevel-icon-v1 where bound, the
  * documented honest no-op where the compositor offers nothing. */
 void fdk_wayland_window_set_icon(fdk_platform_window *pwindow,
                                  const fdk_u32 *pixels,
                                  int width, int height);
 
-/* Touch test seam (1.1.0, M-3), the test_key discipline: drives the
+/* Touch test seam (1.0.0, M-3), the test_key discipline: drives the
  * REAL wl_touch listener bodies (sway headless exposes no touch
  * capability, so the rig cannot reach them through the protocol).
  * phase 0=down 1=motion 2=up 3=cancel; (x,y) logical surface-local,
  * ignored for up/cancel; `win` = the target surface's platform
  * window for the down phase. Returns 1 when a down was deliverable
  * (0 = dropped: unknown surface). */
-/* Tablets / stylus (1.1.0, D-3) — wayland_tablet.c. Manager bind +
+/* Tablets / stylus (1.0.0, D-3) — wayland_tablet.c. Manager bind +
  * the seat-ready tablet seat attach + the shutdown sweep + the test
  * seam (the touch discipline: the listener bodies driven directly —
  * wlroots has no virtual-tablet protocol, so the rig cannot mint a
  * real tool). */
 void fdk_wayland_tablet_seat_ready(fdk_platform_connection *conn);
 void fdk_wayland_tablet_shutdown(fdk_platform_connection *conn);
-/* Foreign toplevels (1.1.0, D-4) — wayland_toplevel.c. */
+/* Foreign toplevels (1.0.0, D-4) — wayland_toplevel.c. */
 fdk_result fdk_wayland_toplevels_open(
     fdk_platform_connection *conn,
     fdk_platform_toplevels_changed_fn on_change, void *user,
@@ -1008,7 +1008,7 @@ fdk_result fdk_wayland_toplevels_activate(
     struct fdk_platform_toplevels *t, fdk_u32 index);
 fdk_result fdk_wayland_toplevels_close_window(
     struct fdk_platform_toplevels *t, fdk_u32 index);
-/* Session participation (1.1.0, D-5) — wayland_session.c: the
+/* Session participation (1.0.0, D-5) — wayland_session.c: the
  * xdg-session-management-v1 object lane (open/destroy/remove/id/
  * state) + the window join/leave ops. fdk__wayland_session_window_
  * destroyed is the window-destroy unregistration (the tracker's
@@ -1048,7 +1048,7 @@ int fdk_wayland_test_touch(fdk_platform_connection *conn,
                            fdk_platform_window *win, int phase,
                            uint32_t id, double x, double y);
 
-/* Cursor apply test seam (1.1.0-rc2, S-5; wayland_cursor.c): drives
+/* Cursor apply test seam (1.0.0-rc2, S-5; wayland_cursor.c): drives
  * fdk_wayland_cursor_apply for any op shape with the newest input
  * serial (1 when none arrived) and returns the cursor-shape-v1 enum
  * the set_shape request cited — the suite's per-shape mapping pin.
@@ -1057,13 +1057,13 @@ int fdk_wayland_test_cursor_apply(fdk_platform_connection *conn,
                                   fdk_platform_window *pwindow,
                                   int op_shape);
 
-/* Input region (1.1.0-rc2, S-4 / A-06; wayland_window.c): the
+/* Input region (1.0.0-rc2, S-4 / A-06; wayland_window.c): the
  * wl_surface.set_input_region translation of the op. */
 void fdk_wayland_window_set_input_region(fdk_platform_window *pwindow,
                                          const fdk_rect *rects,
                                          int count);
 
-/* text-input-v3 (1.1.0, M-1; wayland_ime.c): called when BOTH the
+/* text-input-v3 (1.0.0, M-1; wayland_ime.c): called when BOTH the
  * manager and the seat exist (either binding order), and from the
  * surrounding push. teardown is part of disconnect;
  * window_destroyed is the destroy-path guard (a dying window's
@@ -1075,12 +1075,12 @@ void fdk_wayland_ime_window_destroyed(fdk_platform_connection *conn,
 void fdk_wayland_ime_update_surrounding(fdk_platform_window *pwindow,
                                         const char *text, int cursor);
 
-/* Idle inhibition (1.1.0, S-3; wayland_window.c): the platform op —
+/* Idle inhibition (1.0.0, S-3; wayland_window.c): the platform op —
  * create/destroy the per-surface zwp_idle_inhibitor_v1. */
 fdk_result fdk_wayland_window_set_idle_inhibit(
     fdk_platform_window *pwindow, int inhibit);
 
-/* xdg-activation (1.1.0, S-6; wayland_window.c): activate this
+/* xdg-activation (1.0.0, S-6; wayland_window.c): activate this
  * window through a compositor token, and mint a token for a
  * launcher to hand a child process. */
 fdk_result fdk_wayland_window_activate(fdk_platform_window *pwindow);

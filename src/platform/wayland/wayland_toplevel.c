@@ -1,5 +1,5 @@
 /*
- * wayland_toplevel.c — the wlr-foreign-toplevel half of D-4 (1.1.0)
+ * wayland_toplevel.c — the wlr-foreign-toplevel half of D-4 (1.0.0)
  *
  * The Wayland side of include/fdk/fdk_toplevel.h:
  * zwlr_foreign_toplevel_manager_v1 (the sway/labwc/wlroots taskbar

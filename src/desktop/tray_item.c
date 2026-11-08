@@ -1,5 +1,5 @@
 /*
- * tray_item.c — the StatusNotifierItem export (1.1.0)
+ * tray_item.c — the StatusNotifierItem export (1.0.0)
  *
  * The item half of the app-facing tray API: owns the bus
  * connection, exports /StatusNotifierItem (both the org.kde and

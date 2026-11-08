@@ -1,5 +1,5 @@
 /*
- * hermetic_env.h — the suite's desktop-independence pin (1.1.0)
+ * hermetic_env.h — the suite's desktop-independence pin (1.0.0)
  *
  * WHY THIS EXISTS: the lazy resolvers (UI metrics, the theme boot,
  * the color-scheme read) answer from the ENVIRONMENT the first time

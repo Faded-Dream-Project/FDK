@@ -1,6 +1,6 @@
 #include "platform/x11/x11_platform.h"
 
-/* The pump's platform-deadline source (1.1.0-rc1): the GL lane's
+/* The pump's platform-deadline source (1.0.0-rc1): the GL lane's
  * pending self-check retry. X11's other timing (key repeat) is
  * server-side, so this is the only self-timed state the backend
  * holds — and it exists only while a probe verdict is pending. */

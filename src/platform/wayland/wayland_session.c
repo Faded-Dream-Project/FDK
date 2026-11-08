@@ -1,5 +1,5 @@
 /*
- * wayland_session.c — the xdg-session-management-v1 half of D-5 (1.1.0)
+ * wayland_session.c — the xdg-session-management-v1 half of D-5 (1.0.0)
  *
  * The Wayland side of include/fdk/fdk_session.h: the compositor's
  * save/restore object lane. xdg_session_manager_v1 (staging,

@@ -1,6 +1,6 @@
 #define FDK_LOG_TAG "x11"
 
-/* x11_cursor.c — the named cursor set on X11 (1.1.0-rc2, S-5 / B-12).
+/* x11_cursor.c — the named cursor set on X11 (1.0.0-rc2, S-5 / B-12).
  *
  * The public fdk_cursor_shape set beyond the arrow and the hand needs
  * shapes the core cursor font never had ("copy", "zoom-in",

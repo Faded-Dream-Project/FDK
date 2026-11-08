@@ -15,7 +15,7 @@ set -eu
 
 VERSION="$(fdk_expected_version)"
 # The .deb FILENAMES carry the package-metadata version (fdk_packver in
-# common.sh: 1.1.0-rc1 -> 1.1.0~rc1); the pkg-config check and the smoke
+# common.sh: 1.0.0-rc1 -> 1.0.0~rc1); the pkg-config check and the smoke
 # test below keep the RAW version — fdk.pc and the library report it.
 PKGVER="$(fdk_packver deb "$VERSION")-1"
 ARCH="$(dpkg --print-architecture)"

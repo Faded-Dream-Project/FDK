@@ -1,6 +1,6 @@
 /*
  * dbus_message.c — message construction, framing, and the
- * untrusted-input parser (1.1.0)
+ * untrusted-input parser (1.0.0)
  *
  * Two halves:
  *

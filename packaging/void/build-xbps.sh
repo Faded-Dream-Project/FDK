@@ -21,9 +21,9 @@ VERSION="$(fdk_expected_version)"
 # Package metadata version: xbps forbids dashes, underscores AND
 # special chars in versions (void-packages Manual), and a '-' makes
 # the pkgname-version split ambiguous — exactly how CI failed on
-# 1.1.0-rc1: the packages indexed as fdk-libs-1.1.0-rc1_1 but
+# 1.0.0-rc1: the packages indexed as fdk-libs-1.0.0-rc1_1 but
 # "xbps-install fdk-libs" could not find them. The hyphenless
-# 1.1.0rc1 splits cleanly (name before the last '-', version_revision
+# 1.0.0rc1 splits cleanly (name before the last '-', version_revision
 # after). Plain releases pass through unchanged (fdk_packver in
 # common.sh).
 PACKVER="$(fdk_packver xbps "$VERSION")"

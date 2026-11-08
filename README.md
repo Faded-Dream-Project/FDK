@@ -112,7 +112,7 @@ suite (`docs/testing.md`).
   widget-level drop targets), keyboard shortcuts, menu accelerators
   and mnemonics, tooltips, undo/redo, and an atomically saved
   application preferences store.
-- **Desktop integration (1.1.0)** — the services a desktop
+- **Desktop integration (1.0.0)** — the services a desktop
   application actually needs, all on FDK's own zero-dependency
   implementations: a native D-Bus client (raw C from the wire
   spec, no libdbus) riding a StatusNotifier **tray host** and a

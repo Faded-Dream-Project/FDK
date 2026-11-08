@@ -1,4 +1,4 @@
-/* test_color_scheme.c — the desktop color-scheme module (1.1.0)
+/* test_color_scheme.c — the desktop color-scheme module (1.0.0)
  *
  * Headless, hermetic: the env override, the GTK string parse (via
  * the public getter under $FDK_COLOR_SCHEME), the scheme→variant

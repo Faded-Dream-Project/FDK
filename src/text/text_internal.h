@@ -92,7 +92,7 @@ bool fdk__cff_glyph_box(fdk_cff_font *f, int gid, int *x0, int *y0,
 #define FDK_TEXT_KEY_STRIDE \
     (FDK_TEXT_SUBPIXEL_PHASES * FDK_TEXT_STYLE_VARIANTS)
 
-/* ---- Color glyphs (src/text/emoji.c — C-3, 1.1.0) --------------------
+/* ---- Color glyphs (src/text/emoji.c — C-3, 1.0.0) --------------------
  *
  * COLRv0/v1 + CPAL, CBDT/CBLC, and sbix, parsed natively from the
  * public specifications. A glyph the FACE marks as color rasterizes

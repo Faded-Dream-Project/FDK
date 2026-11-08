@@ -1,5 +1,5 @@
 /*
- * test_idle.c — the idle-inhibition module's headless battery (1.1.0, S-3)
+ * test_idle.c — the idle-inhibition module's headless battery (1.0.0, S-3)
  *
  * What plain `make test` can pin without a display or a bus: the
  * argument-safety contracts and the NULL-handle reads. The real

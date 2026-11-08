@@ -123,7 +123,7 @@ typedef enum fdk_event_type {
     FDK_EVENT_DRAG_LEAVE = 32,
     FDK_EVENT_DRAG_DROP  = 33,
 
-    /* ---- Touch (1.1.0, M-3) ----
+    /* ---- Touch (1.0.0, M-3) ----
      *
      * Direct-touch contact tracking (touchscreens; trackpads report
      * two-finger scrolling as ordinary FDK_EVENT_POINTER_SCROLL via
@@ -163,7 +163,7 @@ typedef enum fdk_event_type {
                                     * gesture: all slots die, nothing
                                     * is synthesized afterwards */
 
-    /* ---- Gestures (1.1.0, C-6 / B-17) ----
+    /* ---- Gestures (1.0.0, C-6 / B-17) ----
      *
      * The two-finger PINCH and the N-finger SWIPE, recognized by
      * the same core touch engine that owns the tap/scroll policy
@@ -188,7 +188,7 @@ typedef enum fdk_event_type {
     FDK_EVENT_GESTURE_PINCH  = 44,
     FDK_EVENT_GESTURE_SWIPE  = 45,
 
-    /* ---- IME (1.1.0, M-1) ----
+    /* ---- IME (1.0.0, M-1) ----
      *
      * Input-method events: the composition (preedit) text an IME
      * builds before committing, and the committed text it finally
@@ -221,7 +221,7 @@ typedef enum fdk_event_type {
     FDK_EVENT_IME_COMMIT   = 50, /* the IME delivered final text   */
     FDK_EVENT_IME_PREEDIT  = 51, /* composition text changed       */
 
-    /* ---- Tablets / stylus (1.1.0, D-3 / B-17) ----
+    /* ---- Tablets / stylus (1.0.0, D-3 / B-17) ----
      *
      * Drawing-tablet input as a first-class event family, the touch
      * model's sibling: PROXIMITY_IN/OUT announce a tool entering or
@@ -253,7 +253,7 @@ typedef enum fdk_event_type {
                                             * high bit (0x8000_0000u)
                                             * marks the release */
 
-    /* ---- Session participation (1.1.0, D-5 / B-19) ----
+    /* ---- Session participation (1.0.0, D-5 / B-19) ----
      *
      * FDK_EVENT_SESSION_SAVE — the desktop wants this application's
      * state on disk NOW. X11: the session manager's WM_SAVE_YOURSELF
@@ -439,7 +439,7 @@ typedef struct fdk_scroll_event {
     fdk_f32 delta_y;
 } fdk_scroll_event;
 
-/* ---- Touch slots (1.1.0, M-3) ---------------------------------------- */
+/* ---- Touch slots (1.0.0, M-3) ---------------------------------------- */
 
 /* Tap-recognition constants (the documented policy; logical px and
  * monotonic ms — see FDK_EVENT_TOUCH_DOWN above): within these
@@ -453,7 +453,7 @@ typedef struct fdk_touch_event {
     fdk_pointf position;   /* window-local, logical coordinates */
 } fdk_touch_event;
 
-/* ---- Tablet payloads (1.1.0, D-3 / B-17) ------------------------------ */
+/* ---- Tablet payloads (1.0.0, D-3 / B-17) ------------------------------ */
 
 /* What kind of tip is in range. The values are FDK's own (stable
  * ABI); the backends map their platform enumerations onto them —
@@ -498,7 +498,7 @@ typedef struct fdk_tablet_event {
     fdk_u32 button;
 } fdk_tablet_event;
 
-/* ---- Gesture payloads (1.1.0, C-6 / B-17) ----------------------------- */
+/* ---- Gesture payloads (1.0.0, C-6 / B-17) ----------------------------- */
 
 /* Tap-recognition constants' gesture siblings: the swipe's time and
  * distance budgets (monotonic ms, logical px). */
@@ -532,7 +532,7 @@ enum {
     FDK_SWIPE_DOWN  = 4,
 };
 
-/* ---- IME payloads (1.1.0, M-1) ---------------------------------------- */
+/* ---- IME payloads (1.0.0, M-1) ---------------------------------------- */
 
 typedef struct fdk_ime_event {
     /* NUL-terminated UTF-8, owned by FDK for the callback duration

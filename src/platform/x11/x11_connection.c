@@ -140,7 +140,7 @@ int fdk__x11_detect_scale(Display *display) {
     return scale;
 }
 
-/* The LAZY input-method bring-up (1.1.0-rc1, X1 — see the comment at
+/* The LAZY input-method bring-up (1.0.0-rc1, X1 — see the comment at
  * the old eager call site above). Invoked from the event translator
  * when a window first sees FocusIn or a KeyPress: the locale dance +
  * XOpenIM run exactly once per process, only for keyboard users. */
@@ -206,7 +206,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
      * integer-only rule. */
     conn->scale = fdk__x11_detect_scale(display);
 
-    /* The RandR output model (1.1.0 M-6/B-05): per-CRTC geometry at
+    /* The RandR output model (1.0.0 M-6/B-05): per-CRTC geometry at
      * connect, RRNotify-masked on the root for the dispatch-side
      * refresh. Absent extension = the whole-screen fallback. */
     fdk__x11_randr_init(conn);
@@ -221,7 +221,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->detectable_repeat = 0;
     memset(conn->key_down, 0, sizeof conn->key_down);
 
-    /* Activation + startup notification (1.1.0, S-6): the id a
+    /* Activation + startup notification (1.0.0, S-6): the id a
      * LAUNCHER handed us through the environment (the X11 form of
      * the activation voucher). Read once, unset immediately — the
      * startup-notification spec's own hygiene rule: a child must
@@ -269,7 +269,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
         }
     }
 
-    /* X Input Method (1.3.1; LAZY since 1.1.0-rc1, the X1 report):
+    /* X Input Method (1.3.1; LAZY since 1.0.0-rc1, the X1 report):
      * XOpenIM used to run right here for every application — and on a
      * desktop with an input-method daemon configured but slow or gone
      * (the classic XSetLocaleModifiers + XOpenIM stall), it cost
@@ -337,7 +337,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->gl = NULL;
     conn->gl_tried = 0;
 
-    /* XI2 touch (1.1.0, M-3): loaded EAGERLY — windows select their
+    /* XI2 touch (1.0.0, M-3): loaded EAGERLY — windows select their
      * touch masks at CREATE time, so the capability must be known
      * before the first window exists (contrast the lazy GL lane
      * above). NULL is sticky and harmless: no touch selection, no
@@ -387,7 +387,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
      * manager reads). */
     conn->net_wm_window_opacity =
         XInternAtom(display, "_NET_WM_WINDOW_OPACITY", False);
-    /* Activation + startup notification (1.1.0, S-6): the EWMH
+    /* Activation + startup notification (1.0.0, S-6): the EWMH
      * activation request type, the window property a launched app
      * tags itself with, and the root-message pair carrying the
      * startup-notification state protocol (openbox/metacity-family
@@ -424,7 +424,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->net_wm_moveresize = XInternAtom(display, "_NET_WM_MOVERESIZE", False);
     conn->wm_state = XInternAtom(display, "WM_STATE", False);
     conn->wm_change_state = XInternAtom(display, "WM_CHANGE_STATE", False);
-    /* Desktop switching (1.1.0-rc1, the Openbox report): watching the
+    /* Desktop switching (1.0.0-rc1, the Openbox report): watching the
      * root's _NET_CURRENT_DESKTOP is how a popup hears that the world
      * under it changed — an open dropdown belongs to the desktop it
      * opened on, and its grab outliving the switch is exactly the
@@ -487,7 +487,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->xdnd.hover = NULL;
     conn->xdnd.offered = 0;
 
-    /* Root PropertyChangeMask (1.1.0-rc1): _NET_CURRENT_DESKTOP
+    /* Root PropertyChangeMask (1.0.0-rc1): _NET_CURRENT_DESKTOP
      * switches arrive as root PropertyNotify events — the popup
      * watchdog's desktop-change input. Selected AFTER the EWMH probe
      * above (order on the wire is irrelevant, but this documents
@@ -498,7 +498,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->popup_watchdog_ms = 0;
     conn->desktop_changed = 0;
 
-    /* XSETTINGS live follow (1.1.0): arm on whatever settings
+    /* XSETTINGS live follow (1.0.0): arm on whatever settings
      * daemon is running at connect; the dispatch's throttled
      * re-arm catches later appearances/restarts. */
     conn->xsettings_settings =

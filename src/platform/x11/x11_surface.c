@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The GPU present lane's small-window floor (1.1.0-rc1, the X2
+/* The GPU present lane's small-window floor (1.0.0-rc1, the X2
  * report): surfaces at or below this many pixels present on the CPU
  * path — 131072 px is 256x512, comfortably above every panel/popup
  * geometry (a 4K-wide 32px bar is 122880 px) and below the window
@@ -345,7 +345,7 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
      * damage model, and the stride is exactly w (matching the classic
      * path's depth-24 XImage layout).
      *
-     * SMALL-WINDOW POLICY (1.1.0-rc1, the X2 report): a window at or
+     * SMALL-WINDOW POLICY (1.0.0-rc1, the X2 report): a window at or
      * below FDK_GL_MIN_PIXELS stays on the CPU path — no GLX context,
      * no texture upload, no swap. That is the whole panel/popup class
      * (the demo bar 1024x32, its dropdown 180x92, choosers, tooltips):
@@ -488,7 +488,7 @@ static void put_region(fdk_platform_window *pwindow, XImage *img,
     }
 }
 
-/* THE lane downgrade (1.4.18, shared since 1.1.0-rc1): a lane
+/* THE lane downgrade (1.4.18, shared since 1.0.0-rc1): a lane
  * verdict against this window — a failed present OR the self-check
  * tick's REAL-failure decision (which lands between presents) —
  * salvages the current frame and re-presents it through the classic
@@ -575,7 +575,7 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
 
     fdk_platform_connection *conn = pwindow->conn;
 
-    /* First-present startup trace (1.1.0-rc1, X1): once per process. */
+    /* First-present startup trace (1.0.0-rc1, X1): once per process. */
     {
         static int presented_once = 0;
         if (!presented_once) {

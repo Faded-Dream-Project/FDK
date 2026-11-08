@@ -809,7 +809,7 @@ int main(int argc, char **argv) {
         spinner, "A busy indicator — the arc rotates while work is "
                  "happening with no known fraction");
 
-    /* --- the 1.1.0 pickers row (S-10) --- */
+    /* --- the 1.0.0 pickers row (S-10) --- */
     fdk_widget *prow = NULL;
     (void)fdk_box_create(content, FDK_HORIZONTAL, &prow);
     fdk_box_set_spacing(prow, 10);

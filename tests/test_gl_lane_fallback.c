@@ -1,5 +1,5 @@
 /* test_gl_lane_fallback.c — the §19 upload-contract fallback shapes,
- * verified WITHOUT any GL driver (1.1.0-rc2, the re-land of the lost
+ * verified WITHOUT any GL driver (1.0.0-rc2, the re-land of the lost
  * 1.0.0-era NVIDIA fix).
  *
  * The Wayland GPU lane's upload contract has four shapes, decided per

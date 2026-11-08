@@ -11,7 +11,7 @@ set -eu
 
 VERSION="$(fdk_expected_version)"
 # The .xbps FILENAMES carry the package-metadata version (fdk_packver in
-# common.sh: 1.1.0-rc1 -> 1.1.0rc1 — xbps forbids dashes/underscores/special
+# common.sh: 1.0.0-rc1 -> 1.0.0rc1 — xbps forbids dashes/underscores/special
 # chars, and a '-' makes the pkgname-version split ambiguous, which is
 # exactly how CI failed on the raw rc string); the pkg-config check and
 # the smoke test keep the RAW version.

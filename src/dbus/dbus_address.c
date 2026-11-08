@@ -1,5 +1,5 @@
 /*
- * dbus_address.c — bus address resolution and socket setup (1.1.0)
+ * dbus_address.c — bus address resolution and socket setup (1.0.0)
  *
  * The specification's address grammar, resolved to concrete
  * endpoints:

@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "widgets"
 
 /*
- * calendar.c — the calendar grid + the date/time pickers (1.1.0 / S-10)
+ * calendar.c — the calendar grid + the date/time pickers (1.0.0 / S-10)
  *
  * Three widgets, one posture: NO clock reads, NO environment
  * consultation (the i18n module's rule — "FDK formats the calendar

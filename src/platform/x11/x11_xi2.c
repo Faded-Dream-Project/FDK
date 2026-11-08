@@ -1,5 +1,5 @@
 /*
- * x11_xi2.c — XI2 touch through dlopen'd libXi (1.1.0, M-3)
+ * x11_xi2.c — XI2 touch through dlopen'd libXi (1.0.0, M-3)
  *
  * The X11 side of the touch model: XI_TouchBegin / XI_TouchUpdate /
  * XI_TouchEnd (X Input Extension >= 2.2) translated into FDK's
@@ -37,7 +37,7 @@
  * PHYSICAL pixels — divided by the connection's integer scale, the
  * same conversion every core pointer event gets (x11_events.c).
  *
- * 1.1.0-rc2 — THE D-3 CRASH (found on the owner's desktop, Arch/
+ * 1.0.0-rc2 — THE D-3 CRASH (found on the owner's desktop, Arch/
  * Openbox/NVIDIA): the tablet translation read the cookie's
  * valuator tail through a mirror that was missing XIDeviceEvent's
  * `flags` field (the int between event_y and buttons), so every
@@ -55,7 +55,7 @@
  * slave pointer with >=3 valuator axes as a "tablet" — mice,
  * XTEST pointers, touchpads — so a desktop with no stylus at all
  * reported "4 tablet device(s) detected" and fed ordinary mouse
- * traffic into the broken reader. The 1.1.0-rc2 posture, layered:
+ * traffic into the broken reader. The 1.0.0-rc2 posture, layered:
  * correct constants; the mirror verified against XInput2.h at
  * build time wherever the header exists (__has_include static
  * asserts — the check this file always promised and never had);
@@ -79,7 +79,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- mirror verification (1.1.0-rc2) ----------------------------------------
+/* ---- mirror verification (1.0.0-rc2) ----------------------------------------
  *
  * Where the real XInput2.h exists at build time, include it and let
  * the compiler prove the mirrors below against it — layout AND
@@ -110,7 +110,7 @@ enum {
     /* mask bytes: XISetMask uses (type >> 3) byte, (type & 7) bit —
      * TouchEnd (20) needs byte 2, so three bytes cover 18..20. */
     XI2_TOUCH_MASK_LEN = 3,
-    /* Tablet traffic (1.1.0, D-3; constants CORRECTED 1.1.0-rc2 — the
+    /* Tablet traffic (1.0.0, D-3; constants CORRECTED 1.0.0-rc2 — the
      * protocol's real numbering, XI2.h: DeviceChanged=1, KeyPress=2,
      * KeyRelease=3, ButtonPress=4, ButtonRelease=5, Motion=6 — the
      * file's old 3/4/5 selected KeyRelease and mislabeled every
@@ -133,7 +133,7 @@ enum {
     /* XIValuatorClassInfo.mode values (XInput2.h): */
     XI2_MODE_RELATIVE = 0,
     XI2_MODE_ABSOLUTE = 1,
-    /* The valuator-mask sanity bound (1.1.0-rc2): the library-level
+    /* The valuator-mask sanity bound (1.0.0-rc2): the library-level
      * mask_len is BYTES; anything beyond this is not a mask any
      * real server would marshal (64 axes need 8 bytes; the bound
      * allows 1024 axes' worth, generously). */
@@ -160,7 +160,7 @@ struct fdk_xi2_event_mask {
  * the stability argument). Only the fields the touch translation
  * reads are spelled out positionally up to the ones we need; the
  * tail (buttons/valuators/mods/group) is opaque to us. The `flags`
- * field (1.1.0-rc2) is REAL — XIDeviceEvent carries it between
+ * field (1.0.0-rc2) is REAL — XIDeviceEvent carries it between
  * event_y and buttons, and omitting it shifted every tail read
  * eight bytes early (the D-3 crash; see the header block). */
 #pragma pack(push, 8) /* match the natural x86_64/ABI alignment XInput2.h
@@ -186,14 +186,14 @@ struct fdk_xi2_device_event {
     double root_y;
     double event_x;          /* window-local, PHYSICAL px */
     double event_y;
-    int flags;               /* XIDeviceEvent.flags (1.1.0-rc2: was missing
+    int flags;               /* XIDeviceEvent.flags (1.0.0-rc2: was missing
                               * — the D-3 crash's byte shift) */
     /* The tail as Xlib UNMARSHALLED it (pointers point into the
      * cookie blob): XIButtonState {int mask_len; pad; uchar *mask;}
      * then XIValuatorState {int mask_len; pad; uchar *mask;
      * double *valuators;} then mods/group (opaque to us). Spelled
      * structurally (D-3) because the tablet translation reads the
-     * valuator state. NOTE (1.1.0-rc2): the library-level mask_len is
+     * valuator state. NOTE (1.0.0-rc2): the library-level mask_len is
      * in BYTES — libXi converts the wire's 4-byte units on the way
      * out (verified empirically against libXi 1.8.2 cookies: a
      * 2-axis motion event carries mask_len == 8). The old *4 here
@@ -334,7 +334,7 @@ struct fdk_x11_xi2 *fdk_x11_xi2_try_load(fdk_platform_connection *conn) {
     if (xi2 == NULL) {
         return NULL; /* the lib stays pinned; no dlclose */
     }
-    /* 1.1.0-rc2: no field of this record may ride malloc's fill pattern
+    /* 1.0.0-rc2: no field of this record may ride malloc's fill pattern
      * — zero everything, then give the axis fields their "absent"
      * sentinels (0 would read as "axis 0"). The scan fills the rest. */
     memset(xi2, 0, sizeof(*xi2));
@@ -416,7 +416,7 @@ void fdk_x11_xi2_select_window(fdk_platform_connection *conn,
     memset(mask, 0, sizeof(mask));
     /* XISetMask, mirrored: byte (type >> 3), bit (type & 7). Bits
      * 4/5/6 are the REAL protocol's ButtonPress/ButtonRelease/
-     * Motion (1.1.0-rc2 — the old 3/4/5 selected KeyRelease). */
+     * Motion (1.0.0-rc2 — the old 3/4/5 selected KeyRelease). */
     mask[XI2_TOUCH_BEGIN >> 3] |= (unsigned char)(1 << (XI2_TOUCH_BEGIN & 7));
     mask[XI2_TOUCH_UPDATE >> 3] |= (unsigned char)(1 << (XI2_TOUCH_UPDATE & 7));
     mask[XI2_TOUCH_END >> 3] |= (unsigned char)(1 << (XI2_TOUCH_END & 7));
@@ -524,14 +524,14 @@ int fdk_x11_xi2_test_touch(fdk_platform_connection *conn,
     return xi2_dispatch_touch(conn, pwindow, phase, id, x, y);
 }
 
-/* ---- Tablets / stylus (1.1.0, D-3 / B-17) --------------------------------
+/* ---- Tablets / stylus (1.0.0, D-3 / B-17) --------------------------------
  *
  * The X11 half: stylus input arrives as ordinary XI2 motion/button
  * events from the master pointer, CARRYING the tablet slave's
  * valuator state (pressure, tilt) — X Input's model, not a separate
  * tablet protocol. FDK's translation:
  *
- *   - DETECTION (1.1.0-rc2 — the stylus-evidence rule): at XI2 load,
+ *   - DETECTION (1.0.0-rc2 — the stylus-evidence rule): at XI2 load,
  *     XIQueryDevice(XIAllDevices) scans the slave pointers for
  *     STYLUS EVIDENCE — an absolute axis labeled "Abs Pressure"
  *     (labeled path), or the unlabeled-tablet shape (no relative
@@ -543,7 +543,7 @@ int fdk_x11_xi2_test_touch(fdk_platform_connection *conn,
  *     mouse traffic into the valuator reader (the D-3 crash).
  *     Every verdict logs its evidence at INFO, once.
  *   - SELECTION: windows select XI_Motion + XI_ButtonPress/Release
- *     (the REAL evtypes 6/4/5 — 1.1.0-rc2 corrected the off-by-one that
+ *     (the REAL evtypes 6/4/5 — 1.0.0-rc2 corrected the off-by-one that
  *     selected KeyRelease) on the master alongside the touch masks.
  *     Core MotionNotify is NOT suppressed by this (only XI 2.2
  *     touch suppresses its core twin) — the ordinary pointer path
@@ -555,7 +555,7 @@ int fdk_x11_xi2_test_touch(fdk_platform_connection *conn,
  *     state, button 1 (the driver-mapped TIP) as DOWN/UP, buttons
  *     2+ as BUTTON. Every valuator read is bounded by the device's
  *     real axis count, the mask's byte length, and the packed
- *     values indexing (xi2_valuator, 1.1.0-rc2 — the function the
+ *     values indexing (xi2_valuator, 1.0.0-rc2 — the function the
  *     crash died in). Pressure normalization: raw driver units
  *     normalize through the 65535 scale, [0,1] clamps, NaN to 0.
  *     Tilt passes through in degrees (NaN/absurd to 0).
@@ -567,7 +567,7 @@ int fdk_x11_xi2_test_touch(fdk_platform_connection *conn,
  *     ended when the events stopped".
  *
  * The rig cannot mint XI2 tablet valuators (XTEST fakes no axes),
- * so the translation layer is proven three ways (1.1.0-rc2): the test
+ * so the translation layer is proven three ways (1.0.0-rc2): the test
  * seam (fdk_x11_xi2_test_tablet) for the dispatch shapes; a
  * hostile-cookie rig that drives the REAL cookie handler with
  * synthetic garbage (the crash's regression pin); and REAL XTEST
@@ -625,7 +625,7 @@ static int xi2_dispatch_tablet(fdk_platform_connection *conn,
 
 /* XIDeviceInfo / XIValuatorClassInfo mirrors (the cookie-mirror
  * discipline: XInput2.h layout, stable since XI 2.0; only the fields
- * the scan reads are spelled — including `mode` (1.1.0-rc2): relative vs
+ * the scan reads are spelled — including `mode` (1.0.0-rc2): relative vs
  * absolute is the classification's core stylus evidence). */
 #pragma pack(push, 8)
 struct fdk_xi2_any_class {
@@ -680,7 +680,7 @@ FDK_XI2_ASSERT(offsetof(struct fdk_xi2_device_info, classes) ==
 #undef FDK_XI2_ASSERT
 #endif /* FDK_XI2_HEADER_VERIFY */
 
-/* ---- classification (1.1.0-rc2) ----------------------------------------------
+/* ---- classification (1.0.0-rc2) ----------------------------------------------
  *
  * A device is a tablet ONLY on stylus evidence — never on axis count
  * alone (the old rule: any slave pointer with >= 3 axes, which is a
@@ -893,7 +893,7 @@ static void xi2_scan_tablets(fdk_platform_connection *conn,
     }
 }
 
-/* Valuator extraction (1.1.0-rc2 hardening — this is the function the
+/* Valuator extraction (1.0.0-rc2 hardening — this is the function the
  * D-3 crash died in). The mask's set bits, in order, index the values
  * array. EVERY input is untrusted: the axis is bounded by the
  * device's real axis count (from the scan) before any arithmetic;
@@ -965,7 +965,7 @@ static int xi2_handle_tablet_cookie(fdk_platform_connection *conn,
     }
     if (tablet == NULL) {
         return 0; /* a device we never classified: ordinary pointer
-                   * traffic — ignored, never indexed (1.1.0-rc2) */
+                   * traffic — ignored, never indexed (1.0.0-rc2) */
     }
     fdk_platform_window *pwindow = fdk_x11_find_window(conn, dev->event);
     if (pwindow == NULL) {
@@ -1017,7 +1017,7 @@ static int xi2_handle_tablet_cookie(fdk_platform_connection *conn,
         int release = (evtype == XI2_BUTTON_RELEASE);
         if (dev->detail <= 0 || dev->detail > 255) {
             return 1; /* not a button number any driver maps —
-                       * consumed untranslated (1.1.0-rc2) */
+                       * consumed untranslated (1.0.0-rc2) */
         }
         if (dev->detail == 1) {
             /* The tip: drivers map tip contact to button 1. */
@@ -1066,7 +1066,7 @@ int fdk_x11_xi2_test_tablet(fdk_platform_connection *conn,
                                button_release);
 }
 
-/* ---- 1.1.0-rc2 test seams: tablet injection + classification driver ------- */
+/* ---- 1.0.0-rc2 test seams: tablet injection + classification driver ------- */
 
 void fdk_x11_xi2_test_inject_tablet(fdk_platform_connection *conn,
                                     int deviceid, int n_axes,

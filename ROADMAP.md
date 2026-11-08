@@ -5,10 +5,10 @@
 > kept per item; milestone IDs (M-9 …) are preserved so existing
 > references keep working. Nothing that is still open was dropped.
 
-## Part 1 — the 1.1.0 register (current, from the old ROADMAP-1.1.0.md)
+## Part 1 — the 1.0.0 register (current, from the old ROADMAP-1.1.0.md)
 
 **Status:** IN IMPLEMENTATION (Phase 2, owner-approved). The tree
-carries a `1.1.0-rcN` development version — **the project is in
+carries a `1.0.0-rcN` development version — **the project is in
 development, no stable release yet, no tags, nothing published**.
 Per-item status is marked inline as work lands; the
 owner's Phase 2 directive: implement every tier (MUST, SHOULD,
@@ -567,9 +567,9 @@ and CI matrix; security posture (bounded reads, validated fonts,
 
 ---
 
-## The proposed 1.1.0 scope
+## The proposed 1.0.0 scope
 
-### MUST — blocks calling 1.1.0 complete
+### MUST — blocks calling 1.0.0 complete
 
 | # | item | gaps closed | effort |
 |---|------|-------------|--------|
@@ -685,12 +685,12 @@ should be told text metrics can shift by a pixel.
 
 ## The release bar, restated
 
-1.1.0 gets called complete when the MUST tier is green in CI and on
+1.0.0 gets called complete when the MUST tier is green in CI and on
 the owner's two real desktops (labwc/Wayland, Openbox+NVIDIA/X11),
 the SHOULD tier is either green or explicitly cut by the owner, and
 the CHANGELOG reads like the audit above never had to say "missing"
 about anything a real application hits in daily use. Until then the
-version stays `1.1.0-rc2` (rcN bumps with the candidate's own
+version stays `1.0.0-rc2` (rcN bumps with the candidate's own
 history - docs/versioning.md), no tags, no releases.
 
 ## Part 2 — the GTK/Qt parity gap list
@@ -738,4 +738,4 @@ lives in `PROGRESS.md` (the ledger) and in git history.
 - 1.5.4 — the picker's crash fix: CSS-class SVGs
 - 1.6.0 — the public 1.0.0 decision (the real release)
 - 1.6.1 — the one-face alignment (the 1.0.0 re-cut)
-- 1.7.0 — the extension API + fdk-shell-overlay (the 1.1.0-rc1 candidate, 2026-10-25)
+- 1.7.0 — the extension API + fdk-shell-overlay (the 1.0.0-rc1 candidate, 2026-10-25)

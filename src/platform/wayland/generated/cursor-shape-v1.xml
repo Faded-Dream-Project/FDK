@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <protocol name="cursor_shape_v1">
-  <!-- Vendored TRIMMED to interface version 1 (FDK 1.1.0-rc1): the
+  <!-- Vendored TRIMMED to interface version 1 (FDK 1.0.0-rc1): the
        v2-only get_tablet_tool_v2 request references the tablet-v2
        protocol's interface struct, which FDK does not vendor; the
        manager.get_pointer + device.set_shape + destroy surface FDK

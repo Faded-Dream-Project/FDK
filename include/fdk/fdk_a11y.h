@@ -108,7 +108,7 @@ typedef enum fdk_a11y_role {
     /* 1.4.9 append — the image display. */
     FDK_A11Y_ROLE_IMAGE = 51,   /* a picture widget (GtkPicture)   */
 
-    /* 1.1.0 append (S-10) — the calendar family. Same append-only
+    /* 1.0.0 append (S-10) — the calendar family. Same append-only
      * policy as ever. */
     FDK_A11Y_ROLE_CALENDAR = 52, /* the month grid (GtkCalendar); the
                                     * 42 day cells enumerate as virtual
@@ -209,7 +209,7 @@ typedef enum fdk_a11y_event_kind {
     FDK_A11Y_RELATIONS_CHANGED = 7, /* a relation edge was added or
                                        removed (see the relations
                                        section below)                */
-    /* 1.1.0 append (C-2, the AT-SPI text level): fired by editors at
+    /* 1.0.0 append (C-2, the AT-SPI text level): fired by editors at
      * every caret/selection move (the Entry/TextView selection
      * chokepoints — one event whatever moved the caret: keys, mouse,
      * IME, programmatic). Subscribers read the new offsets through
@@ -497,7 +497,7 @@ bool fdk_a11y_has_relation(const fdk_widget *from,
                            fdk_a11y_relation_type type,
                            const fdk_widget *to);
 
-/* ---- The narrator: FDK's embedded screen reader core (1.1.0) --------
+/* ---- The narrator: FDK's embedded screen reader core (1.0.0) --------
  *
  * GTK and Qt reach screen readers through AT-SPI2 over D-Bus: a
  * registry daemon, a session bus, a bridge process. FDK's no-bus

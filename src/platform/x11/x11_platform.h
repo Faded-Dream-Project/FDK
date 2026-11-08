@@ -39,7 +39,7 @@ typedef XID Picture;
  * (x11_window.c, registered in the ops table). */
 int fdk__x11_detect_scale(Display *display);
 
-/* 1.1.0 M-6/B-05: the RandR output model (x11_randr.c) — per-CRTC
+/* 1.0.0 M-6/B-05: the RandR output model (x11_randr.c) — per-CRTC
  * geometry probed at connect, refreshed on RRNotify. Internal only
  * (the Wayland core tracks outputs without an app-facing output
  * API too; fdk-shell-overlay drives its OWN X connection for output
@@ -116,7 +116,7 @@ struct fdk_platform_connection {
 
     Atom wm_delete_window;
     Atom wm_protocols;
-    /* WM_SAVE_YOURSELF (1.1.0, D-5): the ICCCM appendix-C save
+    /* WM_SAVE_YOURSELF (1.0.0, D-5): the ICCCM appendix-C save
      * request — every FDK window lists it in WM_PROTOCOLS alongside
      * WM_DELETE_WINDOW, and the ClientMessage dispatches
      * FDK_EVENT_SESSION_SAVE then rewrites WM_COMMAND (the
@@ -127,7 +127,7 @@ struct fdk_platform_connection {
     Atom utf8_string;
     Atom motif_wm_hints; /* _MOTIF_WM_HINTS, Phase 8 decorations */
 
-    /* Window identity atoms (1.1.0, M-4): _NET_WM_ICON (the EWMH
+    /* Window identity atoms (1.0.0, M-4): _NET_WM_ICON (the EWMH
      * ARGB icon list a taskbar/dock/switcher reads), _NET_WM_PID +
      * WM_CLIENT_MACHINE (the process identity session managers and
      * EWMH pagers correlate — set once per window at create), and
@@ -140,7 +140,7 @@ struct fdk_platform_connection {
     Atom wm_client_machine;
     Atom wm_window_role;
 
-    /* Activation + startup notification atoms (1.1.0, S-6):
+    /* Activation + startup notification atoms (1.0.0, S-6):
      * _NET_ACTIVE_WINDOW (the EWMH focus request — data.l[1] is
      * the last USER event timestamp, the number a WM weighs for
      * focus-stealing prevention), _NET_STARTUP_ID (the UTF8
@@ -180,9 +180,9 @@ struct fdk_platform_connection {
     Atom net_wm_state_maximized_vert;
     Atom net_wm_state_maximized_horiz;
     Atom net_wm_state_fullscreen; /* 1.4.10 */
-    Atom net_wm_state_hidden; /* 1.1.0 D-4: minimized (iconic)     */
-    Atom net_client_list;     /* 1.1.0 D-4: the taskbar roster     */
-    Atom net_close_window;    /* 1.1.0 D-4: the polite close       */
+    Atom net_wm_state_hidden; /* 1.0.0 D-4: minimized (iconic)     */
+    Atom net_client_list;     /* 1.0.0 D-4: the taskbar roster     */
+    Atom net_close_window;    /* 1.0.0 D-4: the polite close       */
     Atom net_wm_window_opacity; /* the terminal round: EWMH whole-
                                  * window alpha, honored by every
                                  * compositing manager             */
@@ -190,10 +190,10 @@ struct fdk_platform_connection {
     Atom wm_state;         /* ICCCM WM_STATE (iconic/normal tracking) */
     Atom wm_change_state;  /* ICCCM iconify request message type      */
     Atom net_current_desktop; /* root PropertyNotify watched by the
-                               * popup watchdog (1.1.0-rc1) — desktop
+                               * popup watchdog (1.0.0-rc1) — desktop
                                * switches dismiss open popups + their
                                * grabs                              */
-    /* XSETTINGS live follow (1.1.0): the settings daemon's manager
+    /* XSETTINGS live follow (1.0.0): the settings daemon's manager
      * window (owner of _XSETTINGS_S<screen>) and the property atom.
      * PropertyNotify on owner/xsettings_settings routes to the theme
      * recheck (color-scheme + icon-theme liveness — the GTK
@@ -205,13 +205,13 @@ struct fdk_platform_connection {
     uint64_t xsettings_rearm_ms;
     int ewmh_wm;           /* nonzero: an EWMH WM is running          */
     int ewmh_state_ok;     /* nonzero: it advertises _NET_WM_STATE    */
-    /* Popup-grab watchdog pacing (1.1.0-rc1): the last watchdog
+    /* Popup-grab watchdog pacing (1.0.0-rc1): the last watchdog
      * tick (monotonic ms) — the check runs at most every 500 ms
      * while any popup holds a grab, and only then (the common case,
      * no popup open, pays nothing). Set at connect; read/written by
      * x11_dispatch.c's tail. */
     uint64_t popup_watchdog_ms;
-    /* Desktop-switch latch (1.1.0-rc1): set by the root
+    /* Desktop-switch latch (1.0.0-rc1): set by the root
      * PropertyNotify handler in dispatch_pending when
      * _NET_CURRENT_DESKTOP changes; consumed by the watchdog tick,
      * which dismisses every grabbed popup (they belong to the world
@@ -248,7 +248,7 @@ struct fdk_platform_connection {
      * running (the v1 behavior, for servers/locales without IM
      * support). */
     XIM xim;
-    int xim_tried; /* lazy bring-up guard (1.1.0-rc1, X1): one attempt */
+    int xim_tried; /* lazy bring-up guard (1.0.0-rc1, X1): one attempt */
 
     /* XSHAPE (1.3.2): probed at connect; the empty-input-region
      * primitive tooltips need (click-through popups). 0 = extension
@@ -281,7 +281,7 @@ struct fdk_platform_connection {
     struct fdk_x11_gl *gl;
     int gl_tried;
 
-    /* XI2 touch (1.1.0, M-3): dlopen'd libXi + the X Input
+    /* XI2 touch (1.0.0, M-3): dlopen'd libXi + the X Input
      * extension's opcode and 2.2-touch verdict. Loaded EAGERLY at
      * connect (unlike the lazy GL lane: selecting XI_TouchBegin on
      * windows must happen at CREATE time, so the capability must be
@@ -291,7 +291,7 @@ struct fdk_platform_connection {
      * degradation; core input is unaffected). */
     struct fdk_x11_xi2 *xi2;
 
-    /* Foreign toplevels (1.1.0, D-4): the single tracker the root
+    /* Foreign toplevels (1.0.0, D-4): the single tracker the root
      * PropertyNotify hook notifies (x11_toplevel.c). */
     struct fdk_platform_toplevels *x11_toplevels;
 
@@ -308,7 +308,7 @@ struct fdk_platform_connection {
      * lives in the X server per window and dies with the window. */
     Cursor resize_cursors[10];   /* 0..8 compass + 9 hand (W2) */
 
-    /* --- The named cursor set (1.1.0-rc2, S-5 / B-12) ---
+    /* --- The named cursor set (1.0.0-rc2, S-5 / B-12) ---
      *
      * The public fdk_cursor_shape set beyond the hand: TEXT ..
      * VERTICAL_TEXT, indexed by (op - FDK_PLATFORM_CURSOR_NAMED_BASE).
@@ -435,7 +435,7 @@ struct fdk_platform_connection {
         uint64_t drop_sent_ms;
         void (*on_done)(int status, void *user);
         void *on_done_user;
-        /* Drag icon (1.1.0, S-9): the override-redirect window that
+        /* Drag icon (1.0.0, S-9): the override-redirect window that
          * tracks the pointer for the drag's life — X11 has no XDND
          * icon protocol, so the source paints its own feedback
          * window (the GTK convention). None when the drag carries no
@@ -463,7 +463,7 @@ struct fdk_platform_window {
     fdk_platform_connection *conn;
     Window xwindow;
     fdk_size last_size; /* most recent ConfigureNotify size */
-    /* Extension surface (1.1.0, fdk_extend.h): nonzero when this
+    /* Extension surface (1.0.0, fdk_extend.h): nonzero when this
      * wrapper ADOPTED an add-on-created window (x11_ext.c) instead
      * of creating it. Everything downstream treats it identically —
      * the marker exists for the few create-time contracts that
@@ -472,7 +472,7 @@ struct fdk_platform_window {
      * (WM_DELETE_WINDOW, XDndAware, WM_CLASS, titles) were left to
      * the add-on's own X calls. */
     int ext;
-    /* Subsurface marker (1.1.0, D-2): nonzero when this wrapper is
+    /* Subsurface marker (1.0.0, D-2): nonzero when this wrapper is
      * an FDK-created CHILD window of another FDK window (x11_ext.c's
      * subsurface_create) — the video-in-UI/offscreen-overlay
      * primitive behind fdk_ext_subsurface_create. Carries `ext`'s
@@ -486,7 +486,7 @@ struct fdk_platform_window {
      * (and focus-unset) with the window. */
     XIC xic;
 
-    /* XIM IME composition state (1.1.0, M-1; x11_ime.c): the per-IC
+    /* XIM IME composition state (1.0.0, M-1; x11_ime.c): the per-IC
      * preedit buffer (UTF-8, lazily allocated at the first draw
      * callback), its capacity, the showing flag, and the per-window
      * XIMCallback array (client_data = this pwindow — XIM callbacks
@@ -509,7 +509,7 @@ struct fdk_platform_window {
      * steals keyboard focus from the app that owns it. */
     int input_transparent;
 
-    /* Startup-notification state (1.1.0, S-6): a copy of the
+    /* Startup-notification state (1.0.0, S-6): a copy of the
      * connection's captured DESKTOP_STARTUP_ID for windows created
      * while the voucher is held — the window's _NET_STARTUP_ID
      * property value AND the id whose "remove:" state ends the
@@ -520,13 +520,13 @@ struct fdk_platform_window {
     char *startup_id;
     int startup_remove_sent;
 
-    /* Popup trace stamp (1.1.0-rc1, X3): the last IN-BOUNDS button
+    /* Popup trace stamp (1.0.0-rc1, X3): the last IN-BOUNDS button
      * press time on this popup — the destroy-site fallback uses it to
      * tell "an item was selected" (app destroy right after a click)
      * from a bare programmatic destroy. Milliseconds, monotonic. */
     long long popup_last_button_ms;
 
-    /* Last cursor shape applied via XDefineCursor (1.1.0-rc1, W2):
+    /* Last cursor shape applied via XDefineCursor (1.0.0-rc1, W2):
      * mirrors the Wayland pwindow's field so fdk_window_set_cursor
      * behaves identically across backends — X11 re-applies a window
      * cursor automatically on entry (the cursor is window state, not
@@ -535,7 +535,7 @@ struct fdk_platform_window {
     int cursor_shape;
     int grabbed;
 
-    /* --- Popup grab accounting (1.1.0-rc1, the Openbox report) ---
+    /* --- Popup grab accounting (1.0.0-rc1, the Openbox report) ---
      *
      * The grab is POINTER-ONLY now (an active XGrabKeyboard
      * deactivates the WM's passive grabs — Super+number workspace
@@ -625,7 +625,7 @@ struct fdk_platform_window {
     struct fdk_x11_gl_window *gl_win;
     int gl_downgraded;
 
-    /* WM_COMMAND (1.1.0, D-5): the ICCCM restart command, argv form,
+    /* WM_COMMAND (1.0.0, D-5): the ICCCM restart command, argv form,
      * fdk_alloc'd (one flat block: the string bytes + the pointer
      * array — see x11_window.c's set_command). NULL/argc 0 = none
      * set. STORED (unlike the role, which only ever rides the
@@ -673,7 +673,7 @@ fdk_platform_window *fdk_x11_find_window(fdk_platform_connection *conn,
  * vtable in x11_ops.c. Exposed at file scope (not static) purely for
  * that cross-file wiring — none of these are called from outside
  * src/platform/x11/. */
-/* Lazy input-method bring-up (1.1.0-rc1, X1): opens the XIM exactly
+/* Lazy input-method bring-up (1.0.0-rc1, X1): opens the XIM exactly
  * once, when a window first sees FocusIn/KeyPress — pointer-only apps
  * never pay for it. */
 void fdk__x11_ensure_xim(fdk_platform_connection *conn);
@@ -693,7 +693,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
                                   const fdk_window_options *options,
                                   fdk_platform_window *parent,
                                   fdk_platform_window **out_pwindow);
-/* Extension-surface adoption (1.1.0) — x11_ext.c. Wraps an add-on's
+/* Extension-surface adoption (1.0.0) — x11_ext.c. Wraps an add-on's
  * unmapped X window (built against the Display* fdk_extend.h hands
  * out) in a registered pwindow: FDK's event mask, XIC when an XIM
  * exists, real geometry via XGetGeometry. See platform_internal.h's
@@ -710,7 +710,7 @@ fdk_result fdk_x11_ext_surface_native(fdk_platform_window *pwindow,
 void fdk_x11_ext_surface_resized(fdk_platform_window *pwindow,
                                  fdk_i32 width, fdk_i32 height);
 
-/* Subsurfaces (1.1.0, D-2) — x11_ext.c. The FDK-owned child-window
+/* Subsurfaces (1.0.0, D-2) — x11_ext.c. The FDK-owned child-window
  * primitive behind fdk_ext_subsurface_create: a real X child of the
  * parent's window (clipped to it, stacked within it), created
  * unmapped with FDK's standard event mask, positioned in parent
@@ -741,7 +741,7 @@ void fdk_x11_window_show(fdk_platform_window *pwindow);
 void fdk_x11_window_hide(fdk_platform_window *pwindow);
 void fdk_x11_window_set_title(fdk_platform_window *pwindow, const char *title);
 
-/* Window identity (1.1.0, M-4): the icon + ICCCM role ops behind the
+/* Window identity (1.0.0, M-4): the icon + ICCCM role ops behind the
  * same-named platform_internal.h entries. set_icon builds/replaces
  * _NET_WM_ICON (multi-image: repeated calls before the flush append
  * images); pixels==NULL/non-positive dims delete the property.
@@ -760,7 +760,7 @@ fdk_result fdk_x11_window_set_opacity(fdk_platform_window *pwindow,
 fdk_result fdk_x11_window_bell(fdk_platform_window *pwindow,
                                int percent);
 
-/* The session lane (1.1.0, D-5): set_command is the public
+/* The session lane (1.0.0, D-5): set_command is the public
  * window_set_command op (WM_COMMAND, argv form, stored for the
  * ack); write_command is the ack primitive itself — it rewrites
  * the CURRENT WM_COMMAND (zero-length when none) and flushes, the
@@ -805,7 +805,7 @@ int fdk_x11_window_query_pointer(fdk_platform_window *pwindow,
 void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge);
 void fdk_x11_cursor_shutdown(fdk_platform_connection *conn);
 
-/* The named cursor set (1.1.0-rc2, S-5; src/platform/x11/x11_cursor.c):
+/* The named cursor set (1.0.0-rc2, S-5; src/platform/x11/x11_cursor.c):
  * fdk__x11_named_cursor returns the (cached) Cursor for a NAMED op
  * value — tier 1 the XCursor theme through the dlopen'd RENDER lane,
  * tier 2 the nearest core cursor-font glyph, None only when both
@@ -816,12 +816,12 @@ Cursor fdk__x11_named_cursor(fdk_platform_connection *conn, int op_shape);
 void fdk__x11_named_cursors_shutdown(fdk_platform_connection *conn,
                                      int display_dead);
 
-/* Input region (1.1.0-rc2, S-4 / A-06; x11_window.c): the XShape
+/* Input region (1.0.0-rc2, S-4 / A-06; x11_window.c): the XShape
  * translation of the window_set_input_region op. */
 void fdk_x11_window_set_input_region(fdk_platform_window *pwindow,
                                      const fdk_rect *rects, int count);
 
-/* Activation + startup notification (1.1.0, S-6; x11_window.c):
+/* Activation + startup notification (1.0.0, S-6; x11_window.c):
  * _NET_ACTIVE_WINDOW (EWMH) / raise+focus (bare X), the SN-token
  * mint with its "new:" root message, and the chunked
  * startup-notification state emitter ("new:" from the mint,
@@ -876,7 +876,7 @@ struct fdk_x11_cursor_render {
  * client-side; the non-None assert passed on garbage pictures). */
 #define FDK_X11_PICT_STANDARD_ARGB32 0
 
-/* XI2 touch (1.1.0, M-3; src/platform/x11/x11_xi2.c): dlopen'd
+/* XI2 touch (1.0.0, M-3; src/platform/x11/x11_xi2.c): dlopen'd
  * libXi behind the touch event model. try_load pins the library
  * and probes XI >= 2.2 (NULL = unavailable, sticky); select_window
  * (from window create) selects XI_TouchBegin/Update/End;
@@ -893,7 +893,7 @@ int fdk_x11_xi2_handle_cookie(fdk_platform_connection *conn,
 int fdk_x11_xi2_test_touch(fdk_platform_connection *conn,
                           fdk_platform_window *pwindow, int phase,
                           uint32_t id, double x, double y);
-/* Tablet seam (1.1.0, D-3 — x11_xi2.c): drives the REAL stylus
+/* Tablet seam (1.0.0, D-3 — x11_xi2.c): drives the REAL stylus
  * translation body. phase: 0=proximity_in 1=down 2=motion 3=up
  * 4=button (button_release for phase 4 only); x/y PHYSICAL
  * window-local pixels; pressure > 1 normalizes through the 65535
@@ -905,7 +905,7 @@ int fdk_x11_xi2_test_tablet(fdk_platform_connection *conn,
                             double tilt_y, uint32_t button,
                             int button_release);
 
-/* Foreign toplevels (1.1.0, D-4) — x11_toplevel.c. */
+/* Foreign toplevels (1.0.0, D-4) — x11_toplevel.c. */
 fdk_result fdk_x11_toplevels_open(
     fdk_platform_connection *conn,
     fdk_platform_toplevels_changed_fn on_change, void *user,
@@ -922,7 +922,7 @@ fdk_result fdk_x11_toplevels_close_window(
 int fdk__x11_toplevels_root_notify(fdk_platform_connection *conn,
                                    const XPropertyEvent *ev);
 
-/* XIM IME (1.1.0, M-1; src/platform/x11/x11_ime.c): the preedit
+/* XIM IME (1.0.0, M-1; src/platform/x11/x11_ime.c): the preedit
  * callback machinery behind FDK_EVENT_IME_PREEDIT. attach_cbs builds
  * the per-window XIMCallback array + returns the XNPreeditAttributes
  * nested list for XCreateIC (caller XFree's the LIST — the callback
@@ -946,7 +946,7 @@ size_t fdk__x11_preedit_apply(char *buf, size_t cap, long chg_first,
  * the 2.2-touch verdict, and the libXi function table). Only the
  * opcode is read outside the module (the dispatch loop's cookie
  * match). */
-/* One detected tablet device (1.1.0, D-3): a slave pointer (or
+/* One detected tablet device (1.0.0, D-3): a slave pointer (or
  * floating slave) whose valuator classes include a pressure axis.
  * The axis indices interpret the XIValuatorState that rides events
  * from this device's sourceid; labels are matched against the
@@ -956,7 +956,7 @@ size_t fdk__x11_preedit_apply(char *buf, size_t cap, long chg_first,
 #define FDK_X11_TABLETS 8
 struct fdk_x11_tablet {
     int deviceid; /* the slave's id (events carry it as sourceid) */
-    int n_axes;   /* the device's REAL valuator count (1.1.0-rc2: the
+    int n_axes;   /* the device's REAL valuator count (1.0.0-rc2: the
                    * valuator read's hard upper bound — an axis index
                    * at or above this is rejected before any mask or
                    * values arithmetic runs) */
@@ -972,7 +972,7 @@ struct fdk_x11_xi2 {
     int opcode; /* the X Input extension's major opcode on this server */
     int touch_ok; /* server speaks XI >= 2.2 (touch events exist) */
     int warned_once; /* one INFO line per connection, not per window */
-    /* Tablets (1.1.0, D-3; classification hardened 1.1.0-rc2): the
+    /* Tablets (1.0.0, D-3; classification hardened 1.0.0-rc2): the
      * detected device table + the axis-label atoms resolved once per
      * connection (None = the server labels nothing: the positional
      * fallback carries the scan). */
@@ -981,7 +981,7 @@ struct fdk_x11_xi2 {
     unsigned long atom_pressure; /* None = match by position       */
     unsigned long atom_tilt_x;
     unsigned long atom_tilt_y;
-    unsigned long atom_abs_x; /* 1.1.0-rc2: stylus evidence           */
+    unsigned long atom_abs_x; /* 1.0.0-rc2: stylus evidence           */
     unsigned long atom_abs_y;
     Status (*query_version)(Display *, int *, int *);
     Status (*select_events)(Display *, Window, void *, int);
@@ -991,7 +991,7 @@ struct fdk_x11_xi2 {
     void (*free_device_info)(void *);
 };
 
-/* Tablet test seams (1.1.0-rc2 — the D-3 crash's regression rigs):
+/* Tablet test seams (1.0.0-rc2 — the D-3 crash's regression rigs):
  * inject/clear a synthetic tablet record so REAL cookies (XTEST
  * through the dispatch loop) and hostile synthetic cookies can
  * drive the cookie handler, and drive the pure classification with
@@ -1060,7 +1060,7 @@ void fdk_x11_surface_cleanup(fdk_platform_window *pwindow);
 void fdk_x11_surface_shm_completion(fdk_platform_window *pwindow,
                                     unsigned long shmseg);
 
-/* THE lane downgrade (x11_surface.c, shared 1.1.0-rc1): salvages the
+/* THE lane downgrade (x11_surface.c, shared 1.0.0-rc1): salvages the
  * current staging frame into fresh classic slots and re-presents it
  * full-damage through the SHM/copy path, permanently marking the
  * window CPU. Used by the present path's own -1 verdict AND by the
@@ -1072,7 +1072,7 @@ fdk_result fdk__x11_surface_downgrade_from_lane(
 /* Popup grabs (x11_window.c): called from window_show/hide when the
  * window is a popup. Idempotent; failures log and continue (the
  * popup still works, it just doesn't grab). POINTER-ONLY since
- * 1.1.0-rc1 (the Openbox passive-grab finding) — keys route through
+ * 1.0.0-rc1 (the Openbox passive-grab finding) — keys route through
  * focus, saved + restored here. */
 void fdk_x11_window_popup_grab(fdk_platform_window *pwindow);
 void fdk_x11_window_popup_ungrab(fdk_platform_window *pwindow);
@@ -1178,7 +1178,7 @@ int fdk_x11_dnd_source_handle_helper_message(
     fdk_platform_connection *conn, const XEvent *xevent);
 void fdk_x11_dnd_source_tick(fdk_platform_connection *conn);
 
-/* The popup-grab watchdog + desktop-switch release (1.1.0-rc1,
+/* The popup-grab watchdog + desktop-switch release (1.0.0-rc1,
  * x11_dispatch.c): called at the end of every dispatch_pending —
  * releases any popup grab whose window is no longer viewable, and
  * dismisses grabbed popups latched by a _NET_CURRENT_DESKTOP change.

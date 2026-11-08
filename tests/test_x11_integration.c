@@ -417,7 +417,7 @@ static unsigned long fdk_window_xid(fdk_window *win) {
     return (unsigned long)win->pwindow->xwindow;
 }
 
-/* ---- Window identity (1.1.0, M-4) ---------------------------------------
+/* ---- Window identity (1.0.0, M-4) ---------------------------------------
  *
  * Reads the identity properties BACK from the X server with a second
  * raw-Xlib connection — the same rig posture as motif_hints_present:
@@ -465,7 +465,7 @@ static void test_window_identity(void) {
         assert(n == 1);
         long pid_read = (long)((unsigned long *)data)[0];
         /* Xlib sign-extends 32-bit cardinals on readback (the live
-         * lesson pinned in the 1.1.0-rc1 battery) — mask first. */
+         * lesson pinned in the 1.0.0-rc1 battery) — mask first. */
         pid_read &= 0xFFFFFFFFL;
         assert(pid_read == (long)getpid());
         XFree(data);
@@ -628,7 +628,7 @@ static void test_window_identity(void) {
            "+ opacity CARDINAL + bell\n");
 }
 
-/* ---- Touch (1.1.0, M-3) -------------------------------------------------
+/* ---- Touch (1.0.0, M-3) -------------------------------------------------
  *
  * The XI2 module is loaded eagerly at connect (dlopen'd libXi + the
  * XI 2.2 probe). This leg drives the REAL translate+dispatch path
@@ -3696,7 +3696,7 @@ static void test_resize_cursor_affordance(void) {
            "restore the default\n");
 }
 
-/* The full named cursor set (1.1.0-rc2, S-5 / B-12): every public
+/* The full named cursor set (1.0.0-rc2, S-5 / B-12): every public
  * shape maps, applies, and resolves to a REAL server Cursor. The
  * five shapes the core cursor font has no glyph for (copy, alias,
  * zoom_in, zoom_out, context_menu) MUST build through the dlopen'd
@@ -3909,7 +3909,7 @@ static void region_click_cb(fdk_window *w, const fdk_event_data *event,
     }
 }
 
-/* The input region (1.1.0-rc2, S-4 / A-06): the region API sets
+/* The input region (1.0.0-rc2, S-4 / A-06): the region API sets
  * XShape input rects that a second connection READS BACK through
  * the protocol, and the click-through behavior is proven with REAL
  * XTEST pointer events — a click on the window but outside its
@@ -4077,7 +4077,7 @@ static void test_input_region(void) {
            "click-through both ways\n");
 }
 
-/* ---- Activation + startup notification (1.1.0, S-6), bare X ---------------
+/* ---- Activation + startup notification (1.0.0, S-6), bare X ---------------
  *
  * No WM is running (this leg runs before the fake WM installs), so
  * this is the full BARE-X contract, verified against real server
@@ -9061,7 +9061,7 @@ static void xs_publish(Display *d, Window w, Atom prop, const char *theme,
     XSync(d, False);
 }
 
-/* ---- the color-scheme live follow (1.1.0) ------------------------------------
+/* ---- the color-scheme live follow (1.0.0) ------------------------------------
  *
  * The full XSETTINGS dark-mode pipeline against a fake settings
  * daemon speaking the byte format decoded from real xsettingsd: a
@@ -9858,7 +9858,7 @@ static void dnd_tx_done(fdk_drag_status status, void *user) {
     dnd_tx.reported = true;
 }
 
-/* ---- 1.1.0 S-9: the drag icon + widget-level drop targets --------------- */
+/* ---- 1.0.0 S-9: the drag icon + widget-level drop targets --------------- */
 
 /* A 48x32 ARGB icon with a DISC of opacity (radius 15 centered at
  * (24,16)) and transparent corners: distinctive geometry for the
@@ -12231,7 +12231,7 @@ static void test_textview_gui(void) {
 /* Policy matrix: FDK_NO_GL=1 is a STRICT CPU answer; FDK_GL_FORCE=1
  * engages the lane wherever the GLX machinery exists (this rig: Xvfb
  * with Mesa llvmpipe — exactly what FORCE was designed to exercise).
- * The default policy is SIZE + renderer driven (1.1.0-rc1): surfaces
+ * The default policy is SIZE + renderer driven (1.0.0-rc1): surfaces
  * at or below FDK_GL_MIN_PIXELS are deterministically CPU (pinned
  * below), larger ones follow the renderer (software = CPU path) and
  * are therefore environment-dependent — OBSERVED here, not asserted —
@@ -12273,7 +12273,7 @@ static void test_gl_lane_policy_gui(void) {
     /* Default policy (no knobs): SIZE-driven for small windows —
      * deterministic on every machine (the gate needs no GL at all):
      * 96x72 is far below FDK_GL_MIN_PIXELS, so the CPU path is the
-     * answer even on a hardware-GPU display. This is the 1.1.0-rc1
+     * answer even on a hardware-GPU display. This is the 1.0.0-rc1
      * X2 fix's own leg: the panel/popup class never builds a lane. */
     {
         fdk_context *ctx = NULL;
@@ -12515,7 +12515,7 @@ static void test_gl_lane_downgrade_gui(void) {
            "the CPU path, permanent, pixels exact\n");
 }
 
-/* 1.1.0: the self-check's INCONCLUSIVE verdict — a window that
+/* 1.0.0: the self-check's INCONCLUSIVE verdict — a window that
  * presents BEFORE it is viewable (map_state != IsViewable; the live
  * case was an override-redirect popup whose first present raced its
  * own map on an NVIDIA desktop) must NOT be treated as a GPU
@@ -12592,7 +12592,7 @@ static void test_gl_lane_selfcheck_inconclusive_gui(void) {
            "viewable\n");
 }
 
-/* 1.1.0: the self-check's REAL-failure verdict — a persistent
+/* 1.0.0: the self-check's REAL-failure verdict — a persistent
  * mismatch (after the retry budget) refuses the lane for the whole
  * process, is logged exactly ONCE, and costs no per-window probing
  * afterwards. FDK_GL_SELFCHECK_POISON forces every comparison to
@@ -12785,7 +12785,7 @@ static void test_gl_lane_resize_gui(void) {
            "path stays GL, pixels exact\n");
 }
 
-/* ---- 1.1.0: the extension API (fdk_extend.h) ----------------------------
+/* ---- 1.0.0: the extension API (fdk_extend.h) ----------------------------
  *
  * The full surface machinery of include/fdk/fdk_extend.h against a
  * live X server, driven the way a REAL add-on would drive it: a
@@ -13496,7 +13496,7 @@ static void test_ext_fd_sources(void) {
            "defers to the next pump, validation\n");
 }
 
-/* ---- Subsurfaces (1.1.0, D-2 / B-16) -------------------------------------
+/* ---- Subsurfaces (1.0.0, D-2 / B-16) -------------------------------------
  *
  * The X11 half's proof posture is the SERVER's window tree, read
  * back through a second raw-Xlib connection (the M-4/S-9 rig
@@ -13946,7 +13946,7 @@ static void test_ext_subsurface_x11(void) {
            "sweep, parent sweep with the error fence\n");
 }
 
-/* ---- Tablets / stylus (1.1.0, D-3 / B-17) -------------------------------
+/* ---- Tablets / stylus (1.0.0, D-3 / B-17) -------------------------------
  *
  * The X11 tablet translation is seam-driven (the M-3 discipline:
  * Xvfb carries no tablet device and XTEST cannot mint valuator
@@ -14087,7 +14087,7 @@ static void test_xi2_tablet(void) {
            "normalization, tool types), seam refusals\n");
 }
 
-/* ---- xi2 tablet, 1.1.0-rc2: the classification, the hostile cookies, the
+/* ---- xi2 tablet, 1.0.0-rc2: the classification, the hostile cookies, the
  * real-cookie path -------------------------------------------------------
  *
  * The D-3 crash (owner's desktop, Arch/Openbox/NVIDIA): the tablet
@@ -14197,7 +14197,7 @@ static void test_xi2_tablet_hostile_cookies(void) {
     /* --- 1. THE CRASH VALUES, verbatim: mask_len = -708600696 (the
      * report's garbage, whose *4 overflowed int and wrapped to a
      * huge positive, defeating the old bounds check) and the wild
-     * mask pointer 0xbebebebe00000008 (the report's r12). Pre-1.1.0-rc2
+     * mask pointer 0xbebebebe00000008 (the report's r12). Pre-1.0.0-rc2
      * this was a SEGV; now: rejected, event still delivered with
      * default pressure, no sanitizer report. --- */
     g_tablet_events = 0;
@@ -14660,7 +14660,7 @@ static void test_xi2_tablet_xtest_e2e(void) {
            "died in, now sanitizer-clean\n");
 }
 
-/* ---- D-Bus startup notice, 1.1.0-rc2: once per process ----------------------
+/* ---- D-Bus startup notice, 1.0.0-rc2: once per process ----------------------
  *
  * The owner's desktop report: the "D-Bus unavailable (no endpoint
  * accepted a connection for 'unix:path=/run/user/1000/bus')" line
@@ -14730,7 +14730,7 @@ static void test_dbus_unavailable_logged_once(void) {
            "ONE log line (the verdict belongs to the machine)\n");
 }
 
-/* ---- Foreign toplevels (1.1.0, D-4) --------------------------------------
+/* ---- Foreign toplevels (1.0.0, D-4) --------------------------------------
  *
  * The fake-WM posture (the EWMH rig's own discipline): a second
  * Xlib connection IS the window manager — it mints client windows,
@@ -14900,7 +14900,7 @@ static void test_foreign_toplevels(void) {
            "posture\n");
 }
 
-/* Idle inhibition (1.1.0, S-3): X11 has no platform op — the D-Bus
+/* Idle inhibition (1.0.0, S-3): X11 has no platform op — the D-Bus
  * fallback engages. This rig runs under Xvfb WITHOUT a session bus,
  * so the inhibitor degrades to UNSUPPORTED (a connect failure or
  * no-daemon error); the lifecycle shapes that matter here are: the
@@ -14948,7 +14948,7 @@ static void test_idle_fallback_gui(void) {
            "early release is clean (ASan-clean)\n");
 }
 
-/* ---- Session participation (1.1.0, D-5) ---------------------------------
+/* ---- Session participation (1.0.0, D-5) ---------------------------------
  *
  * The X11 session lane end-to-end, the way a session manager sees
  * it: a PROBE connection plays the manager's two duties —

@@ -1,5 +1,5 @@
 /*
- * fdk_idle.h — idle/screensaver inhibition (1.1.0, S-3 / B-11)
+ * fdk_idle.h — idle/screensaver inhibition (1.0.0, S-3 / B-11)
  *
  * "The display must stay awake while I am playing / presenting /
  *  dragging a long operation." One inhibitor handle, whatever the

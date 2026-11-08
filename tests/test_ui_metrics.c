@@ -1,4 +1,4 @@
-/* test_ui_metrics.c — the UI font size / scale resolution (1.1.0)
+/* test_ui_metrics.c — the UI font size / scale resolution (1.0.0)
  *
  * The unit leg of TASK C's core half: the env-override channel, the
  * scale arithmetic, the clamps, and the invalid-input posture — all

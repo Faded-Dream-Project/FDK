@@ -1,4 +1,4 @@
-/* x11_randr.c — the X11 RandR output model (M-6 / B-05, 1.1.0)
+/* x11_randr.c — the X11 RandR output model (M-6 / B-05, 1.0.0)
  *
  * The multi-monitor substrate: per-CRTC geometry probed at connect
  * (XRRGetScreenResourcesCurrent — the cached, non-reprobing form)

@@ -1,5 +1,5 @@
 /*
- * extend.c — the extension API's window layer (1.1.0)
+ * extend.c — the extension API's window layer (1.0.0)
  *
  * Implementation of include/fdk/fdk_extend.h's surface half: kind
  * registration, extension-surface creation (the add-on's create
@@ -561,7 +561,7 @@ fdk_result fdk_ext_popup_create(fdk_ext_surface *parent, fdk_i32 x,
     return FDK_OK;
 }
 
-/* ---- subsurfaces (extension API v2, 1.1.0 D-2) ---------------------------
+/* ---- subsurfaces (extension API v2, 1.0.0 D-2) ---------------------------
  *
  * The FDK-owned child-surface primitive (fdk_extend.h's Subsurfaces
  * section). The create flow mirrors fdk_ext_popup_create's wrapper

@@ -107,7 +107,7 @@ static void window_revalidate_pointer(fdk_window *window);
 #define DECO_MIN_W 60
 #define DECO_MIN_H 32
 
-/* ---- popup lifecycle trace (1.1.0-rc1, X2/X3) -------------------------- */
+/* ---- popup lifecycle trace (1.0.0-rc1, X2/X3) -------------------------- */
 
 /* Monotonic milliseconds; shared with surface.c's present tail
  * (the popup latency line). */
@@ -823,7 +823,7 @@ fdk_result fdk__window_create_popup_ex(fdk_context *ctx, fdk_window *parent,
     return window_create_full(ctx, &options, parent, out_window);
 }
 
-/* Shared field initialization (1.1.0: also used by the extension-
+/* Shared field initialization (1.0.0: also used by the extension-
  * surface wrapper in extend.c, which builds an fdk_window around an
  * ADOPTED platform window instead of a created one). Zeroes nothing
  * — every field of the struct is assigned, mirroring the original
@@ -849,7 +849,7 @@ void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
     window->popup_anchor_x = 0;
     window->popup_anchor_y = 0;
     window->popup_anchored = false;
-    window->sub_parent = NULL; /* 1.1.0 D-2: linked by extend.c at   */
+    window->sub_parent = NULL; /* 1.0.0 D-2: linked by extend.c at   */
     window->sub_first = NULL;  /* subsurface create; swept at destroy */
     window->sub_prev = NULL;
     window->sub_next = NULL;
@@ -895,7 +895,7 @@ void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
     window->popup_button_ms = 0;
     window->popup_close_reason = FDK_POPUP_CLOSE_NONE;
     window->is_popup = (options != NULL && options->popup != 0);
-    window->is_subsurface = false; /* 1.1.0 D-2: set by extend.c's
+    window->is_subsurface = false; /* 1.0.0 D-2: set by extend.c's
                                       subsurface create (options never
                                       carry it — the public options
                                       struct is ABI-frozen) */
@@ -1005,7 +1005,7 @@ void fdk_window_destroy(fdk_window *window) {
     if (window == NULL) {
         return;
     }
-    /* Popup end-of-life trace (1.1.0-rc1, X3 — "(destroy)" was all the
+    /* Popup end-of-life trace (1.0.0-rc1, X3 — "(destroy)" was all the
      * old log said): name the best-known reason. A close-request
      * reason was already logged at its dispatch; the interesting
      * cases here are the APPLICATION destroy — where a recent
@@ -1034,7 +1034,7 @@ void fdk_window_destroy(fdk_window *window) {
     if (window->destroy_notify != NULL) {
         window->destroy_notify(window, window->destroy_notify_user);
     }
-    /* Subsurface children FIRST (1.1.0, D-2), then popups — both
+    /* Subsurface children FIRST (1.0.0, D-2), then popups — both
      * "must not outlive their parent", both swept deepest-first via
      * recursion (each child's own sweep runs inside its destroy).
      * Subs before popups: on Wayland a live wl_subsurface must die
@@ -1146,7 +1146,7 @@ void fdk_window_destroy(fdk_window *window) {
     fdk_free(window);
 }
 
-/* ---- Cursor resolution (1.1.0-rc2, S-5) --------------------------
+/* ---- Cursor resolution (1.0.0-rc2, S-5) --------------------------
  *
  * The op shape space is 0 (default), 1..8 (the resize compass),
  * 9 (the hand), 32..51 (the named set). The mapping from the public
@@ -1278,7 +1278,7 @@ void fdk_window_set_icon(fdk_window *window, const fdk_u32 *pixels,
         height = 512;
     }
     if (window->ops->window_set_icon == NULL) {
-        /* Backend without the op (Wayland build before 1.1.0): the
+        /* Backend without the op (Wayland build before 1.0.0): the
          * documented honest no-op. */
         return;
     }
@@ -1544,7 +1544,7 @@ static void window_apply_resize(fdk_window *window, fdk_i32 x, fdk_i32 y) {
 }
 
 /* ---- Cursor shaping + hover revalidation (1.1.4; the resolution
- * order + the named set 1.1.0-rc2) ----
+ * order + the named set 1.0.0-rc2) ----
  *
  * Two affordances a WM frame gives for free that FDK's chrome must
  * provide itself when it owns the window: the cursor that says
@@ -1609,7 +1609,7 @@ static void window_update_cursor(fdk_window *window, fdk_i32 x,
      * decides whether the compass value is even VISIBLE — an
      * application-set shape owns the window (a panel or kiosk asked
      * for exactly the arrow or the hand; border-hover resize cursors
-     * would fight it, 1.1.0-rc1). The bookkeeping above stays exact
+     * would fight it, 1.0.0-rc1). The bookkeeping above stays exact
      * either way, so the moment the owner releases, the right shape
      * appears without a re-request. */
     window_apply_cursor(window);
@@ -2041,7 +2041,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
     bool state_flipped = false;
     bool first_expose = false;
 
-    /* Popup lifecycle trace (1.1.0-rc1, X2/X3): close requests carry
+    /* Popup lifecycle trace (1.0.0-rc1, X2/X3): close requests carry
      * their reason (the single-slot channel the generators note);
      * pointer motion/button stamps feed the latency measurement. */
     if (window->is_popup && popup_trace_enabled()) {
@@ -2278,7 +2278,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
         return; /* destroyed by a widget handler: nothing left to do */
     }
 
-    /* ---- Widget-level drag routing (1.1.0, S-9) ----
+    /* ---- Widget-level drag routing (1.0.0, S-9) ----
      *
      * Drag events are never consumed by the normal widget handlers
      * (that contract is unchanged); the scoped delivery to drop
@@ -2309,7 +2309,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
         return; /* destroyed by the event callback */
     }
 
-    /* ---- Widget hover cursor (1.1.0-rc2, S-5) ----
+    /* ---- Widget hover cursor (1.0.0-rc2, S-5) ----
      *
      * After the tree routed a pointer event the hovered widget is
      * fresh (root->hovered); re-derive the widget's wanted shape and
@@ -2327,7 +2327,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
         window_apply_cursor(window);
     }
 
-    /* ---- Touch-slot engine (1.1.0, M-3) ----
+    /* ---- Touch-slot engine (1.0.0, M-3) ----
      *
      * The raw TOUCH_* event has now been fully routed (tree, then
      * the application callback). Feed the gesture engine LAST: its
@@ -2359,7 +2359,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
         }
     }
 
-    /* ---- IME surrounding-text push (1.1.0, M-1) ----
+    /* ---- IME surrounding-text push (1.0.0, M-1) ----
      *
      * The honest cadence: on focus GAIN (the tree focus follows the
      * window focus event) and after every IME event's routing (the
@@ -2427,7 +2427,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
      * application's own windows never take this path — their loop,
      * their pacing.
      *
-     * 1.1.0-rc1 (the W1 report): the tail now consults
+     * 1.0.0-rc1 (the W1 report): the tail now consults
      * fdk_surface_frame_ready — frame-callback pacing plus the
      * backend's own capacity gate — so hover motion can no longer
      * repaint faster than the compositor consumes frames. Un-paced,
@@ -2707,7 +2707,7 @@ void fdk__window_theme_settings_notify(void) {
 void fdk__window_theme_scheme_tick(fdk_context *ctx) {
     fdk__color_scheme_portal_tick(ctx);
     fdk__ui_metrics_portal_tick(ctx);
-    /* 1.1.0, S-8: the AT-SPI bridge's attach point — the same pump
+    /* 1.0.0, S-8: the AT-SPI bridge's attach point — the same pump
      * tick shape (throttled internally to one attempt; degrades
      * silently on desktops with no a11y bus). */
     fdk__atspi_tick(ctx);

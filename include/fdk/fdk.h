@@ -53,7 +53,7 @@
  * fdk_theme.h (themes: the built-in default, .fdk parsing, runtime
  * switching); Phase 9 adds fdk_clipboard.h (text clipboard over the
  * ICCCM CLIPBOARD selection / wl_data_device). Further layout
- * containers follow. 1.1.0 adds fdk_extend.h — the extension API
+ * containers follow. 1.0.0 adds fdk_extend.h — the extension API
  * add-on packages build on (docs/EXTENDING.md). */
 
 #endif /* FDK_H */

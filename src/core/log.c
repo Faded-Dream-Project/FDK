@@ -12,7 +12,7 @@ static fdk_log_sink_fn g_sink = NULL;
 static void *g_sink_user_data = NULL;
 static fdk_log_level initial_level(void);
 
-/* FDK_LOG_LEVEL (1.1.0-rc1): the environment knob for field debugging
+/* FDK_LOG_LEVEL (1.0.0-rc1): the environment knob for field debugging
  * — the level a live-desktop report wants before asking the user to
  * recompile anything. Read ONCE at first use (a mid-session change
  * would race the push/pop stack's saved levels); the explicit
@@ -105,7 +105,7 @@ void fdk_log_set_level(fdk_log_level level) {
     g_min_level = level;
 }
 
-/* ---- startup trace (1.1.0-rc1, X1) --------------------------------------- */
+/* ---- startup trace (1.0.0-rc1, X1) --------------------------------------- */
 
 static long long startup_t0_ms(void) {
     struct timespec ts;

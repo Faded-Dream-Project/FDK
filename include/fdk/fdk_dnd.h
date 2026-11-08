@@ -27,7 +27,7 @@
  *   CANCELLED = released over nothing that accepts, or the source
  *   action was cancelled; FAILED = the backend could not start).
  *
- *   DRAG ICON (1.1.0, S-9): fdk_drag_begin_ex attaches an image to
+ *   DRAG ICON (1.0.0, S-9): fdk_drag_begin_ex attaches an image to
  *   the drag itself — the picture under the cursor while it flies
  *   (a file's thumbnail, a text snippet's preview). Wayland: the
  *   protocol's own icon surface in wl_data_device.start_drag. X11,
@@ -36,7 +36,7 @@
  *   classic GTK approach), shaped per the icon's alpha so
  *   transparent icons are not black boxes.
  *
- *   WIDGET-LEVEL DROP TARGETS (1.1.0, S-9): fdk_widget_set_drop_target
+ *   WIDGET-LEVEL DROP TARGETS (1.0.0, S-9): fdk_widget_set_drop_target
  *   registers a widget (or a container standing in for its subtree)
  *   as the thing a drop lands on, and fdk_widget_set_drag_callback
  *   receives the drag events scoped to it — ENTER when the drag
@@ -99,7 +99,7 @@ fdk_result fdk_window_set_drop_formats(fdk_window *window, int formats);
 /* The registered format mask (0 for NULL). */
 int fdk_window_get_drop_formats(const fdk_window *window);
 
-/* ---- Widget-level drop targets (1.1.0, S-9 / B-13) ----------------------
+/* ---- Widget-level drop targets (1.0.0, S-9 / B-13) ----------------------
  *
  * Registration: a widget with a nonzero mask is a drop target. The
  * window's drag routing hit-tests the tree at the drag's position
@@ -107,7 +107,7 @@ int fdk_window_get_drop_formats(const fdk_window *window);
  * that chain owns the position (a registered CONTAINER receives
  * drops anywhere in its subtree, exactly as an app would expect a
  * drop zone to behave). Over a position with no target on the
- * chain, the window's own mask governs — the pre-1.1.0 behavior
+ * chain, the window's own mask governs — the pre-1.0.0 behavior
  * where nothing registered.
  *
  * Acceptance is therefore per-position on BOTH backends: the XDND
@@ -270,7 +270,7 @@ fdk_result fdk_drag_begin(fdk_window *origin, int formats,
                           const char *const *uris, size_t uri_count,
                           fdk_drag_done_fn on_done, void *user_data);
 
-/* fdk_drag_begin with a DRAG ICON (1.1.0, S-9): `icon` is width x
+/* fdk_drag_begin with a DRAG ICON (1.0.0, S-9): `icon` is width x
  * height ARGB8888 pixels (fdk_u32 packing A<<24|R<<16|G<<8|B — the
  * same layout fdk_window_set_icon and _NET_WM_ICON carry), row-major,
  * no padding, COPIED at call time. NULL icon or non-positive dims =

@@ -113,7 +113,7 @@ void fdk_window_destroy(fdk_window *window);
  * string passed in. NULL is treated as an empty title. */
 void fdk_window_set_title(fdk_window *window, const char *title);
 
-/* ---- Window identity (1.1.0, M-4) ----------------------------------------
+/* ---- Window identity (1.0.0, M-4) ----------------------------------------
  *
  * The properties a desktop uses to recognize, group, and represent
  * this window: its ICON (taskbars, docks, window switchers, mission
@@ -227,7 +227,7 @@ fdk_result fdk_window_bell(fdk_window *window, int percent);
 
 /* Sets the ICCCM WM_COMMAND — the command a session manager
  * re-executes to restart this application in its current state
- * (1.1.0, D-5; the X11 session lane, see fdk_session.h). `argv` is
+ * (1.0.0, D-5; the X11 session lane, see fdk_session.h). `argv` is
  * an argv-style array of NUL-terminated strings (argv[0] the
  * program, then its arguments); all strings are copied, the array
  * need only live for the call. X11 writes the WM_COMMAND property
@@ -251,7 +251,7 @@ fdk_result fdk_window_bell(fdk_window *window, int percent);
 void fdk_window_set_command(fdk_window *window,
                             const char *const *argv, int argc);
 
-/* ---- Cursor shape (1.1.0-rc1; the full named set 1.1.0-rc2, S-5) --------
+/* ---- Cursor shape (1.0.0-rc1; the full named set 1.0.0-rc2, S-5) --------
  *
  * The shape the pointer takes while hovering this window. FDK's own
  * resize-edge affordances (directional cursors over a resizable
@@ -269,7 +269,7 @@ void fdk_window_set_command(fdk_window *window,
  *      Combo's entry) shows the I-beam automatically;
  *   3. FDK's resize-edge compass.
  *
- * The 1.1.0-rc2 set (S-5 / B-12) mirrors the cursor-shape-v1
+ * The 1.0.0-rc2 set (S-5 / B-12) mirrors the cursor-shape-v1
  * protocol's semantic space — the same names CSS, GTK4 and Qt6 use.
  * Values 0 and 1 predate the set and are unchanged; everything after
  * is appended (ABI note: enum append is the safe-add policy, and no
@@ -317,7 +317,7 @@ typedef enum fdk_cursor_shape {
  * every subsequent entry. No-op on an unknown shape value. */
 void fdk_window_set_cursor(fdk_window *window, fdk_cursor_shape shape);
 
-/* ---- Input region (1.1.0-rc2, S-4 / A-06) -----------------------------
+/* ---- Input region (1.0.0-rc2, S-4 / A-06) -----------------------------
  *
  * The window's INPUT region: the set of rectangles (window-LOCAL,
  * LOGICAL coordinates — the same space pointer events deliver)
@@ -353,7 +353,7 @@ fdk_result fdk_window_set_input_region(fdk_window *window,
                                        const fdk_rect *rects,
                                        fdk_i32 count);
 
-/* ---- Activation + startup notification (1.1.0, S-6 / B-04) -------------
+/* ---- Activation + startup notification (1.0.0, S-6 / B-04) -------------
  *
  * "Activation" is the desktop's focus-stealing-prevention machinery:
  * the difference between a window DEMANDING attention and a window

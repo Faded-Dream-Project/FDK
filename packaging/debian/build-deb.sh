@@ -24,9 +24,9 @@ fdk_require_release_posture
 
 VERSION="$(fdk_expected_version)"
 # Package metadata version: while a release candidate is in the tree the
-# raw "1.1.0-rc1" is legal for dpkg but orders ABOVE the future 1.1.0
+# raw "1.0.0-rc1" is legal for dpkg but orders ABOVE the future 1.0.0
 # final (the hyphen starts the debian_revision) — the tilde form
-# (1.1.0~rc1) is dpkg's native pre-release spelling and sorts before
+# (1.0.0~rc1) is dpkg's native pre-release spelling and sorts before
 # it. Plain releases pass through unchanged (fdk_packver in common.sh).
 PKGVER="$(fdk_packver deb "$VERSION")-1"
 ARCH="$(dpkg --print-architecture 2>/dev/null || \

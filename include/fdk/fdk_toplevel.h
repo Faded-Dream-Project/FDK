@@ -1,5 +1,5 @@
 /*
- * fdk_toplevel.h — the foreign toplevel list (1.1.0, D-4)
+ * fdk_toplevel.h — the foreign toplevel list (1.0.0, D-4)
  *
  * The taskbar/dock substrate: the OTHER applications' top-level
  * windows, enumerated and live, with the two actions a panel takes.

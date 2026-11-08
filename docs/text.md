@@ -27,7 +27,7 @@ needs no platform font services.
 - **`fdk_font_get_cache_stats()`** — cached/hit/miss/eviction
   counters for the glyph cache (useful for demos and profiling).
 
-Shaping (M-2 level 1, 1.1.0) is single-line with the full
+Shaping (M-2 level 1, 1.0.0) is single-line with the full
 complex-script pipeline when HarfBuzz and FriBidi are loadable at
 run time — the Unicode bidi algorithm (Arabic, Hebrew, Persian, Urdu
 render in visual order, not backwards), GSUB/GPOS shaping
@@ -193,7 +193,7 @@ trust. For `OTTO` faces the CFF table itself is additionally parsed
 by FDK's own bounds-checked Type 2 module BEFORE stb ever touches
 the face — see below for why that order is load-bearing.
 
-## Complex-script shaping (M-2 level 1, 1.1.0)
+## Complex-script shaping (M-2 level 1, 1.0.0)
 
 The full pipeline — `src/text/shaping.c` — is the GLX/fontconfig
 posture applied to text: **HarfBuzz and FriBidi are dlopen'd at run
@@ -279,7 +279,7 @@ sorted by `lo`, a probe-time self-check ERRORs if a future edit
 breaks that, and the six-script matrix pins it from the request
 side.
 
-## CFF outlines — OpenType 'OTTO' faces (1.1.0)
+## CFF outlines — OpenType 'OTTO' faces (1.0.0)
 
 CFF-flavored OpenType (`OTTO` sfnt carrying a `CFF `/`CFF2` table —
 Noto Sans CJK, URW base35, most .otf fonts) renders through FDK's
@@ -393,7 +393,7 @@ Recorded on the roadmap, in rough dependency order:
   below; SDF rendering, hinting, and variable-font instances beyond
   the default stay roadmap material).
 
-## Color glyphs — emoji (C-3, 1.1.0)
+## Color glyphs — emoji (C-3, 1.0.0)
 
 `src/text/emoji.c` parses the three color-glyph families the Linux
 desktop actually meets — all natively from the public OpenType

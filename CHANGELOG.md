@@ -1,3 +1,13 @@
+## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+
+The project owner set the first release to **1.0.0**
+(docs/versioning.md, 2026-11-08): the 1.0.0-rcN candidate numbering
+is retired, the pre-release suffix is dropped, and the cycle labels
+across the tree (code comments, docs, packaging, this changelog's
+candidate entries) read 1.0.0. No code changes ride this entry
+beyond the version identity itself — the tree's state at the time
+of the decision ships as-is.
+
 
 ### Fixed (round 22)
 - **Damage-rect overlap merging** (the owner's present-trace report:
@@ -1152,7 +1162,7 @@ no force-pushes — fast-forward only, divergences get reconciled.
 - **Root cause 3 — the scan classified any slave pointer with >= 3
   valuator axes as a "tablet"**: wheel mice, XTEST pointers,
   touchpads — hence "4 tablet device(s)" on a stylus-less desktop,
-  feeding ordinary mouse clicks into the broken reader. The 1.1.0-rc2
+  feeding ordinary mouse clicks into the broken reader. The 1.0.0-rc2
   rule requires STYLUS EVIDENCE: an absolute axis labeled "Abs
   Pressure", or the unlabeled-tablet shape (no relative axes, >= 3
   absolute, "Abs X"/"Abs Y" present). Every verdict now logs its
@@ -1735,7 +1745,7 @@ no force-pushes — fast-forward only, divergences get reconciled.
   fdk-shell-overlay packaging family in full (its own X11 source includes
   the same header). docs/build.md and docs/packaging.md carry the
   requirement; docs/dependencies.md gained the missing libXext/
-  libXrandr rows and the 1.1.0 dlopen-lane table, and its stale
+  libXrandr rows and the 1.0.0 dlopen-lane table, and its stale
   no-bus section is reconciled to the shipped native-client posture
   (never any D-Bus client library — the wire protocol is spoken
   in-house).
@@ -2575,7 +2585,7 @@ routing, and error-name discipline sections in the headless battery.
   the project returned to in-development status (2026-10-31) with
   one branch, `main`, zero tags, and no published releases.
 
-## [1.1.0-rc2] — 2026-10-26 (development candidate — no tag, no release)
+## [1.0.0-rc2] — 2026-10-26 (development candidate — no tag, no release)
 
 ### Added — the native D-Bus client (`include/fdk/fdk_dbus.h`)
 
@@ -2632,7 +2642,7 @@ byte from the socket is treated as untrusted input.
   additive function, no ops-table growth, old add-on binaries keep
   working.
 
-## [1.1.0-rc1] — 2026-10-25 (development candidate — no tag, no release)
+## [1.0.0-rc1] — 2026-10-25 (development candidate — no tag, no release)
 
 ### Added — the extension API (`include/fdk/fdk_extend.h`)
 
@@ -2732,23 +2742,23 @@ docs/EXTENDING.md.
 Two distinct rc-version defects, both found live by CI on the
 candidate's first pushes:
 
-1. **Package metadata**: the raw `1.1.0-rc1` string is illegal or
+1. **Package metadata**: the raw `1.0.0-rc1` string is illegal or
    wrong in four of the five package version grammars (rpm rejects
    the hyphen outright; apk reserves it for pkgrel; arch's `pkgver`
    forbids it; xbps forbids it AND the ambiguity broke repository
    lookups; deb accepted it but ordered the rc ABOVE the future
    final). The pipeline now translates the suffix once, at the
    metadata layer (`fdk_packver` in `packaging/ci/common.sh`):
-   `1.1.0~rc1` for deb/rpm, `1.1.0_rc1` for apk, `1.1.0rc1` for
+   `1.0.0~rc1` for deb/rpm, `1.0.0_rc1` for apk, `1.0.0rc1` for
    arch/xbps. Plain releases pass through unchanged.
 
 2. **The .so file name**: the real file was installed as
-   `libfdk.so.1.1.0-rc1`, and Alpine's abuild derives the apk
+   `libfdk.so.1.0.0-rc1`, and Alpine's abuild derives the apk
    `so:`provides version from the .so FILENAME tail
    (`sover=${file##*.so.}`) — producing
-   `provides = so:libfdk.so.1=1.1.0-rc1`, which `apk index`
+   `provides = so:libfdk.so.1=1.0.0-rc1`, which `apk index`
    rejects with "package file format error" (reproduced locally
-   with apk-tools 2.14.12; even a hyphenless `1.1.0rc1` tail is
+   with apk-tools 2.14.12; even a hyphenless `1.0.0rc1` tail is
    rejected — only numeric tails are valid). The Makefile now names
    the real file with the numeric `FDK_SO_VERSION`
    (`libfdk.so.1.1.0`) — the GNU convention; pre-release suffixes
@@ -2767,7 +2777,7 @@ over the TCP fallback, and the scale assertion aborted the debian
 job (1-in-400 per run, PID-gated). The private display now lives
 below every harness range, is checked free before spawning, and is
 verified OURS by its 800x600 geometry — a foreign server is never
-touched (docs/testing.md's 1.1.0-rc1 lesson).
+touched (docs/testing.md's 1.0.0-rc1 lesson).
 Documented in `docs/packaging.md`. Also corrected three stale "ten
 shipped theme faces" package descriptions the one-face alignment
 had missed (deb control, rpm spec, xbps descriptions now say the

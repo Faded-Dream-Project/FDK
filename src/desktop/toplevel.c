@@ -1,5 +1,5 @@
 /*
- * toplevel.c — the foreign toplevel list's public half (1.1.0, D-4)
+ * toplevel.c — the foreign toplevel list's public half (1.0.0, D-4)
  *
  * The thin wrapper over the backend's toplevels_* ops (see
  * platform_internal.h's D-4 block for the seam's contract):

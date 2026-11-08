@@ -1,5 +1,5 @@
 /*
- * x11_ext.c — X11 extension-surface adoption (1.1.0)
+ * x11_ext.c — X11 extension-surface adoption (1.0.0)
  *
  * The X11 half of include/fdk/fdk_extend.h's ext_surface_adopt
  * platform op: an add-on built its own X window through the Display*
@@ -164,7 +164,7 @@ fdk_result fdk_x11_ext_surface_adopt(fdk_platform_connection *conn,
 }
 
 /* The documented native-display accessor behind
- * fdk_ext_get_native_display() (1.1.0): the connection's Display*,
+ * fdk_ext_get_native_display() (1.0.0): the connection's Display*,
  * borrowed for the connection's lifetime. */
 void *fdk_x11_native_display(fdk_platform_connection *conn) {
     return (conn != NULL) ? (void *)conn->display : NULL;
@@ -197,7 +197,7 @@ fdk_result fdk_x11_ext_surface_native(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
-/* ---- Subsurfaces (1.1.0, D-2 / B-16) -------------------------------------
+/* ---- Subsurfaces (1.0.0, D-2 / B-16) -------------------------------------
  *
  * The X11 half of fdk_ext_subsurface_create: a REAL CHILD WINDOW of
  * the parent's X window — the "X11 child-window compositing" the

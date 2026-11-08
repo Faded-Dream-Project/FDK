@@ -1,5 +1,5 @@
 /*
- * fdk_dbus.h — Faded Dream ToolKit native D-Bus client (1.1.0)
+ * fdk_dbus.h — Faded Dream ToolKit native D-Bus client (1.0.0)
  *
  * A D-Bus client implemented FROM THE PUBLIC SPECIFICATION in raw C:
  * unix-socket (and TCP / nonce-TCP) transport, the SASL EXTERNAL

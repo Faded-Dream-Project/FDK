@@ -26,7 +26,7 @@
  * longjmp produces. Callers pass the failing syscall's errno for the
  * one-time log.
  *
- * 1.1.0-rc1 (the labwc report, 2026-10-26): the one-time line now
+ * 1.0.0-rc1 (the labwc report, 2026-10-26): the one-time line now
  * carries the PROTOCOL error when libwayland has one — interface,
  * object id, and code from wl_display_get_protocol_error(), the two
  * facts a compositor's own log correlates ("zwlr_layer_surface_v1#

@@ -1,5 +1,5 @@
 /*
- * extfd.c — extension fd sources for the event loop (1.1.0)
+ * extfd.c — extension fd sources for the event loop (1.0.0)
  *
  * The core half of include/fdk/fdk_extend.h's "hook into the event
  * loop" section: fd sources an add-on registers with

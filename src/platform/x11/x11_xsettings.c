@@ -236,7 +236,7 @@ bool fdk__x11_xsettings_string(const char *setting_name, char *out,
     return found;
 }
 
-/* ---- the live follow (1.1.0) --------------------------------------------
+/* ---- the live follow (1.0.0) --------------------------------------------
  *
  * The short-lived-display reader above answers queries; this half
  * keeps the answer FRESH: the settings daemon rewrites its

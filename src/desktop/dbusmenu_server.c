@@ -1,5 +1,5 @@
 /*
- * dbusmenu_server.c — the com.canonical.dbusmenu server model (1.1.0)
+ * dbusmenu_server.c — the com.canonical.dbusmenu server model (1.0.0)
  *
  * The menu half of the app-facing tray API: the tree model the app
  * builds (fdk_tray.h) plus the server that answers the host's five

@@ -303,7 +303,7 @@ fdk_result fdk_dialog_save_file(fdk_context *ctx,
                                 void *user_data,
                                 fdk_window **out_window);
 
-/* ---- The xdg-desktop-portal FileChooser fallback (1.1.0, C-1 / B-09) -
+/* ---- The xdg-desktop-portal FileChooser fallback (1.0.0, C-1 / B-09) -
  *
  * On a desktop that runs xdg-desktop-portal (Flatpak-style sandboxes
  * and most modern sessions), the DESKTOP'S OWN file picker is

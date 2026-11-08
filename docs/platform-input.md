@@ -56,7 +56,7 @@ Resolution paths differ per backend:
   (xkb_compose_table_new_from_locale fails) degrades to the plain
   per-press resolution.
 
-## Input methods — IME composition (1.1.0, M-1)
+## Input methods — IME composition (1.0.0, M-1)
 
 One event model covers both backends: `FDK_EVENT_IME_PREEDIT`
 (the composition string an input method is building — empty clears
@@ -94,7 +94,7 @@ Backend machinery:
   `delete_surrounding_text` (autocorrect-style context edits) is
   consumed and logged, not applied — level-2 material; most CJK
   engines never send it.
-- **X11 (1.1.0)**: the per-window XIC now asks for
+- **X11 (1.0.0)**: the per-window XIC now asks for
   `XIMPreeditCallbacks | XIMStatusNothing` FIRST (falling back to
   the 1.3.1 PreeditNothing posture when the input method refuses
   the callback style): the IM hands composition to FDK through the
@@ -195,7 +195,7 @@ model expects, and the resize-edge cursor shaping runs in the
 window layer (see fdk_window.h's resize section) — the backends
 only translate cursor-shape requests.
 
-## Cursor shaping — the full named set (1.1.0-rc2, S-5 / B-12)
+## Cursor shaping — the full named set (1.0.0-rc2, S-5 / B-12)
 
 `fdk_window_set_cursor` accepts the complete named set — 22 shapes
 mirroring cursor-shape-v1's semantic space (the names CSS, GTK4 and
@@ -249,7 +249,7 @@ lies about what the press does is worse than the plain arrow).
 fdk-layer-shell mirrors the set (`fdk_layer_shell_cursor`, 0.4.0) — its values
 are FDK's own, passed through unchanged.
 
-## Input regions — partial click-through (1.1.0-rc2, S-4 / A-06)
+## Input regions — partial click-through (1.0.0-rc2, S-4 / A-06)
 
 `fdk_window_set_input_region` (and `fdk_ext_surface_set_input_region`
 on extension surfaces) restricts pointer input to a set of
@@ -272,7 +272,7 @@ are built on. Rules:
   the window stays fully interactive — never a silently wrong
   region.
 
-## Touch input (1.1.0, M-3)
+## Touch input (1.0.0, M-3)
 
 Direct-touch contact tracking is a first-class event family:
 `FDK_EVENT_TOUCH_DOWN/UP/MOTION/CANCEL`, one slot per contact
@@ -338,7 +338,7 @@ timeout, drag, natural deltas, re-arm, phantom-tap latch, cancel,
 protocol noise). Real touch HARDWARE remains the owner's desktop
 check (TESTING-ON-DESKTOP.md).
 
-## Tablet / stylus input (1.1.0, D-3 / B-17)
+## Tablet / stylus input (1.0.0, D-3 / B-17)
 
 Drawing-tablet input is a first-class event family, the touch
 model's sibling: `FDK_EVENT_TABLET_PROXIMITY_IN/OUT` announce a

@@ -1,5 +1,5 @@
 /*
- * touch.c — the core touch-slot engine (1.1.0, M-3)
+ * touch.c — the core touch-slot engine (1.0.0, M-3)
  *
  * Backends translate raw touch contacts (wl_touch on Wayland, XI2
  * touch through dlopen'd libXi on X11) into FDK_EVENT_TOUCH_*

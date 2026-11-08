@@ -1,7 +1,7 @@
 /*
  * fdk_extend.h — Faded Dream ToolKit extension API
  *
- * The surface add-on packages build on (1.1.0). FDK stays small and
+ * The surface add-on packages build on (1.0.0). FDK stays small and
  * stays the ROOT: the core and the fdk tools ship together as one
  * package, and everything else — panel layers, notification shells,
  * custom surface roles, input methods — is a SEPARATE package that
@@ -71,14 +71,14 @@ extern "C" {
  * and run-time pair:
  *
  *     #if !defined(FDK_EXT_API_VERSION) || FDK_EXT_API_VERSION < 2
- *     #error "this add-on needs FDK's extension API v2 (FDK 1.1.0)"
+ *     #error "this add-on needs FDK's extension API v2 (FDK 1.0.0)"
  *     #endif
  *     ...
  *     if (fdk_ext_api_version() < 2) { ...refuse to run... }
  *
  * A newer FDK keeps old add-ons working: the runtime number only
- * grows. Version history: v1 (FDK 1.1.0-rc1) — kinds, surfaces,
- * popups, fd sources; v2 (FDK 1.1.0, D-2) — subsurfaces: the
+ * grows. Version history: v1 (FDK 1.0.0-rc1) — kinds, surfaces,
+ * popups, fd sources; v2 (FDK 1.0.0, D-2) — subsurfaces: the
  * FDK-owned child-surface primitive and its position/stacking/mode
  * operations (see the Subsurfaces section below).
  */
@@ -354,7 +354,7 @@ fdk_result fdk_ext_surface_native(fdk_ext_surface *surface,
 fdk_result fdk_ext_surface_get_surface(fdk_ext_surface *surface,
                                        fdk_surface **out);
 
-/* Sets the surface's hover cursor shape (1.1.0-rc1). The shape is
+/* Sets the surface's hover cursor shape (1.0.0-rc1). The shape is
  * re-applied automatically on every pointer entry (Wayland's cursor
  * state does not survive leaving a surface); the fdk_cursor_shape
  * enum lives in fdk_window.h. Add-ons rendering panels typically set
@@ -364,7 +364,7 @@ fdk_result fdk_ext_surface_get_surface(fdk_ext_surface *surface,
 void fdk_ext_surface_set_cursor(fdk_ext_surface *surface,
                                 int shape);
 
-/* Sets the surface's INPUT region (1.1.0-rc2, S-4): `count`
+/* Sets the surface's INPUT region (1.0.0-rc2, S-4): `count`
  * window-local logical rectangles inside which the surface receives
  * pointer input; input outside them falls through to whatever is
  * beneath. rects may be NULL only when count is 0, which clears the
@@ -405,7 +405,7 @@ fdk_result fdk_ext_surface_get_size(const fdk_ext_surface *surface,
  * present carries the new size. X11 add-ons never call this (the
  * server's ConfigureNotify arrives on its own).
  *
- * THE PRESENT GATE (1.1.0-rc1): on Wayland, presents before this
+ * THE PRESENT GATE (1.0.0-rc1): on Wayland, presents before this
  * call are DEFERRED, not committed — no wl_surface.attach reaches
  * the wire until the role's configure has been reported (and, by
  * the documented contract above, acked). The first notified
@@ -456,7 +456,7 @@ fdk_result fdk_ext_popup_create(fdk_ext_surface *parent, fdk_i32 x,
                                 fdk_i32 y, fdk_i32 width, fdk_i32 height,
                                 fdk_ext_surface **out_surface);
 
-/* ---- Subsurfaces (extension API v2, FDK 1.1.0 D-2) -----------------------
+/* ---- Subsurfaces (extension API v2, FDK 1.0.0 D-2) -----------------------
  *
  * An FDK-OWNED CHILD SURFACE of an existing window or extension
  * surface: a rectangular region of the parent that renders, moves,

@@ -12,7 +12,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* ---- the popup-grab watchdog + desktop-switch release (1.1.0-rc1) ---
+/* ---- the popup-grab watchdog + desktop-switch release (1.0.0-rc1) ---
  *
  * The Openbox report's safety nets: a popup's POINTER grab must never
  * outlive the popup's own relevance.
@@ -157,7 +157,7 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
         XEvent xevent;
         XNextEvent(conn->display, &xevent);
 
-        /* Motion coalescing (1.1.0-rc1, X2 — the lagging dropdown
+        /* Motion coalescing (1.0.0-rc1, X2 — the lagging dropdown
          * highlight): X11 queues EVERY MotionNotify the pointer
          * hardware produced (hundreds per second in motion), and the
          * old loop translated and dispatched them one at a time — a
@@ -188,7 +188,7 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             }
         }
 
-        /* Activation timestamps (1.1.0, S-6): every USER input event
+        /* Activation timestamps (1.0.0, S-6): every USER input event
          * refreshes the connection's last-event time — the number
          * _NET_ACTIVE_WINDOW's data.l[1] carries (the WM's
          * focus-stealing-prevention input; 0/CurrentTime when no
@@ -233,7 +233,7 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
-        /* XI2 touch (1.1.0, M-3): GenericEvents (type 35) carry the
+        /* XI2 touch (1.0.0, M-3): GenericEvents (type 35) carry the
          * X Input protocol; the cookie payload needs XGetEventData
          * (libX11 itself). Matched by the extension opcode and fully
          * handled by the dlopen'd-libXi module (x11_xi2.c), which
@@ -255,13 +255,13 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
-        /* Root PropertyNotify (1.1.0-rc1): the popup watchdog's
+        /* Root PropertyNotify (1.0.0-rc1): the popup watchdog's
          * desktop-change input. _NET_CURRENT_DESKTOP changes arrive
          * on the ROOT window (PropertyChangeMask selected at
          * connect); handled BEFORE the window-table lookup — the
          * root is deliberately not a registered window. Other root
          * property churn (the WM's own bookkeeping) is ignored. */
-        /* RandR (1.1.0 M-6): screen changes and output/CRTC
+        /* RandR (1.0.0 M-6): screen changes and output/CRTC
          * notifications refresh the internal output table (the
          * maximize/placement substrate). Consumed here — no public
          * event rides it (the Wayland-core parity posture; the
@@ -277,13 +277,13 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             conn->desktop_changed = 1;
             continue;
         }
-        /* Foreign toplevels (1.1.0, D-4): membership/focus churn on
+        /* Foreign toplevels (1.0.0, D-4): membership/focus churn on
          * the root re-snapshots the taskbar roster. */
         if (fdk__x11_toplevels_root_notify(conn, &xevent.xproperty)) {
             continue;
         }
 
-        /* XSETTINGS live follow (1.1.0): a settings-daemon property
+        /* XSETTINGS live follow (1.0.0): a settings-daemon property
          * rewrite — color-scheme, icon theme, whatever the daemon
          * publishes. Routed BEFORE the window lookup (the manager
          * window is not an FDK window); the theme recheck re-reads
@@ -422,7 +422,7 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
-        /* WM_SAVE_YOURSELF (1.1.0, D-5): the ICCCM appendix-C save
+        /* WM_SAVE_YOURSELF (1.0.0, D-5): the ICCCM appendix-C save
          * request — same ClientMessage shape as WM_DELETE_WINDOW,
          * the atom in data.l[0] instead. Dispatch
          * FDK_EVENT_SESSION_SAVE (the application saves state and
@@ -463,18 +463,18 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
      * died mid-handshake after the drop was sent). */
     fdk_x11_dnd_source_tick(conn);
 
-    /* The XSETTINGS owner re-arm (1.1.0): throttled to one cheap
+    /* The XSETTINGS owner re-arm (1.0.0): throttled to one cheap
      * selection-owner round trip per 2 s — catches settings daemons
      * that appear or restart after connect. */
     fdk_x11_xsettings_rearm_tick(conn);
 
-    /* The popup-grab watchdog + desktop-switch release (1.1.0-rc1):
+    /* The popup-grab watchdog + desktop-switch release (1.0.0-rc1):
      * the last thing this dispatch does — everything above may have
      * opened or closed popups, and the tick's job is exactly to
      * observe the state the batch left behind. */
     fdk_x11_popup_watchdog_tick(conn);
 
-    /* The GL lane's timer-based self-check retry (1.1.0-rc1, B.2):
+    /* The GL lane's timer-based self-check retry (1.0.0-rc1, B.2):
      * fires the scheduled probe attempt here instead of the OLD
      * inline XSync+nanosleep budget, so a present never blocks the
      * loop (a popup may be holding its grab). The pump wakes for the

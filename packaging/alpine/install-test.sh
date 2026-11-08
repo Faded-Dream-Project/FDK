@@ -14,7 +14,7 @@ set -eu
 
 VERSION="$(fdk_expected_version)"
 # The .apk FILENAMES carry the package-metadata version (fdk_packver in
-# common.sh: 1.1.0-rc1 -> 1.1.0_rc1, apk's native pre-release spelling);
+# common.sh: 1.0.0-rc1 -> 1.0.0_rc1, apk's native pre-release spelling);
 # the pkg-config check and the smoke test below keep the RAW version —
 # fdk.pc and the library report it.
 PACKVER="$(fdk_packver apk "$VERSION")"

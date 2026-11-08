@@ -1,4 +1,4 @@
-/* test_calendar.c — headless tests for the 1.1.0 calendar family
+/* test_calendar.c — headless tests for the 1.0.0 calendar family
  * (S-10): the month grid, the date picker field, and the time
  * picker stepper.
  *

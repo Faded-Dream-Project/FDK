@@ -121,7 +121,7 @@ Internal-only structs (anything under `src/`, e.g.
 `context_internal.h`) have no such constraint and may change freely —
 that's the whole point of keeping them out of `include/`.
 
-## The extension API carries the same discipline (1.1.0)
+## The extension API carries the same discipline (1.0.0)
 
 `include/fdk/fdk_extend.h` is public API and therefore governed by
 this document's rules, with one addition of its own: the extension
@@ -133,7 +133,7 @@ that ride the same pattern carry `struct_size` so callers compiled
 against an older header keep working as fields are APPENDED — the
 input-struct rule, made executable.
 
-The 1.1.0 additions are append-only against 1.0.0: new functions
+The 1.0.0 additions are append-only against 1.0.0: new functions
 (620 -> 641 exported symbols at rc1, 855 at the D-2 landing), new
 opaque types, no layout change to any existing public struct — the
 SONAME stays `libfdk.so.1`, only the file name moves (the numeric

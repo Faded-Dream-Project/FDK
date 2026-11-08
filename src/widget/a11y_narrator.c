@@ -1,4 +1,4 @@
-/* a11y_narrator.c — the embedded screen reader core (1.1.0).
+/* a11y_narrator.c — the embedded screen reader core (1.0.0).
  *
  * THE NO-BUS POLICY, IMPLEMENTED. GTK and Qt reach screen readers
  * through AT-SPI2 over D-Bus: a registry daemon, a session bus, a

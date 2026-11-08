@@ -24,9 +24,9 @@ fdk_expected_version() {
 # [raw-version]. The raw version defaults to fdk_expected_version; callers
 # that only have an explicit version string pass it directly.
 #
-# WHY THIS EXISTS (found live by CI on 1.1.0-rc1, 2026-10-25): while a
+# WHY THIS EXISTS (found live by CI on 1.0.0-rc1, 2026-10-25): while a
 # release candidate is in the tree the raw version carries a hyphenated
-# pre-release suffix ("1.1.0-rc1"), and the five package grammars
+# pre-release suffix ("1.0.0-rc1"), and the five package grammars
 # disagree about that suffix — four of them reject it outright:
 #   rpm   reserves '-' for the Version-Release separator -> "Illegal char"
 #   apk   reserves '-' for the -rN pkgrel                 -> "not a valid version"
@@ -35,14 +35,14 @@ fdk_expected_version() {
 #         Manual: "Must not contain dashes or underscores"), and a '-'
 #         makes the pkgname-version split ambiguous so repository
 #         lookups fail
-#   deb   accepts "1.1.0-rc1" syntactically but ORDERS it above the
-#         eventual 1.1.0 final (the hyphen starts the debian_revision,
+#   deb   accepts "1.0.0-rc1" syntactically but ORDERS it above the
+#         eventual 1.0.0 final (the hyphen starts the debian_revision,
 #         and "rc1" > "1") — the opposite of what a candidate means.
 # Each family therefore gets its native pre-release spelling:
-#   deb, rpm       1.1.0-rc1 -> 1.1.0~rc1   (tilde sorts before the final)
-#   apk            1.1.0-rc1 -> 1.1.0_rc1   (apk's _rc suffix family)
-#   arch, xbps     1.1.0-rc1 -> 1.1.0rc1    (drop the hyphen)
-# A plain numeric version (1.1.0) passes through EVERY grammar unchanged,
+#   deb, rpm       1.0.0-rc1 -> 1.0.0~rc1   (tilde sorts before the final)
+#   apk            1.0.0-rc1 -> 1.0.0_rc1   (apk's _rc suffix family)
+#   arch, xbps     1.0.0-rc1 -> 1.0.0rc1    (drop the hyphen)
+# A plain numeric version (1.0.0) passes through EVERY grammar unchanged,
 # so at final releases all five spell the same thing and this mapping is
 # inert — the 1.0.0 release artifacts are byte-identical under it.
 #
@@ -70,10 +70,10 @@ fdk_packver() {
 # must reference the same name when they split the install tree.
 # WHY numeric-only: Alpine's abuild derives the apk so:provides version
 # from the .so FILENAME tail (sover=${file##*.so.}); a suffixed tail
-# (libfdk.so.1.1.0-rc1) produced 'provides = so:libfdk.so.1=1.1.0-rc1'
+# (libfdk.so.1.0.0-rc1) produced 'provides = so:libfdk.so.1=1.0.0-rc1'
 # and apk index rejected the whole package ("package file format
 # error", proven live on CI 2026-10-25 and reproduced locally with
-# apk-tools 2.14.12 — even a hyphenless '1.1.0rc1' tail is rejected;
+# apk-tools 2.14.12 — even a hyphenless '1.0.0rc1' tail is rejected;
 # only numeric tails are valid). The suffix lives in the version
 # string, pkg-config, and package metadata — never in the .so name.
 fdk_sover() {

@@ -763,7 +763,7 @@ void fdk__a11y_relations_destroyed(fdk_widget *widget) {
     widget->a11y_relation_cap = 0;
 }
 
-/* ---- The AT-SPI text-extents seam dispatch (C-2, 1.1.0) -----------------
+/* ---- The AT-SPI text-extents seam dispatch (C-2, 1.0.0) -----------------
  *
  * Exact geometry where the toolkit owns the drawing (Entry: the
  * caret-width arithmetic; TextView: the line cache + page origin);

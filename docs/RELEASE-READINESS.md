@@ -1,4 +1,4 @@
-# RELEASE-READINESS — what stands between this tree and 1.1.0
+# RELEASE-READINESS — what stands between this tree and 1.0.0
 
 **Written:** 2026-11-05, after round 26 (`7f83a00`) and the CI repair
 that follows it. This is the answer to the owner's question — "what's
@@ -65,11 +65,11 @@ What actually remains:
    process rule this incident taught: never push without reading the
    run; a green local battery on an incremental tree proves nothing
    about a clean checkout).
-2. **The tag decision** — the tree versions itself `1.1.0-rc2`
+2. **The tag decision** — the tree versions itself `1.0.0-rc2`
    (development posture, no tags exist, by the owner's recorded
    decision). When §2's checklist comes back green, the release act
-   is: bump `fdk_version.h` to `1.1.0`, CHANGELOG final pass, tag
-   `v1.1.0`, publish the five packages. That is the owner's call
+   is: bump `fdk_version.h` to `1.0.0`, CHANGELOG final pass, tag
+   `v1.0.0`, publish the five packages. That is the owner's call
    alone (docs/versioning.md, M-9).
 3. Optional polish, not blocking: generated API reference (the
    headers are the documented API; a doxygen pass would be nice,

@@ -1,5 +1,5 @@
 /*
- * x11_toplevel.c — the EWMH half of D-4 (1.1.0)
+ * x11_toplevel.c — the EWMH half of D-4 (1.0.0)
  *
  * The X11 side of include/fdk/fdk_toplevel.h: the taskbar substrate
  * as EWMH spells it — _NET_CLIENT_LIST on the root (the WM's

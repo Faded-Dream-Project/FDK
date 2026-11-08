@@ -9,12 +9,15 @@
 #define FDK_VERSION_H
 
 /*
- * THE PUBLIC VERSION IS 1.1.0-rc2 — THE RECORDED DECISION OF
- * 2026-10-25 (docs/versioning.md). A release CANDIDATE for the
- * extension-API minor release (include/fdk/fdk_extend.h): the owner
- * set the number ("not 1.0.1, since this adds public API"), set the
- * candidate posture, and kept the final-tag decision. No git tag
- * exists for this version; the v1.0.0 release is untouched.
+ * THE PUBLIC VERSION IS 1.0.0 — THE OWNER'S DECISION OF 2026-11-08
+ * (docs/versioning.md): the FIRST RELEASE. The 1.1.0-rcN candidate
+ * numbering is retired (its rc1/rc2 candidates never shipped; the
+ * cycle labels across the tree now read 1.0.0), the pre-release
+ * suffix is dropped (the release is final), and MINOR goes to 0 —
+ * the first release is the clean 1.0.0, not a minor bump. The
+ * earlier history (the 2026-10-25 candidate decision and the
+ * re-published repository with zero tags) is recorded in
+ * docs/versioning.md.
  *
  * History, recorded in full in docs/versioning.md: the number was
  * a deliberate joke (0.0.1, "this absurdly capable toolkit is still
@@ -35,14 +38,15 @@
  * accidental bumps fail the build instead of shipping quietly.
  */
 #define FDK_VERSION_MAJOR 1
-#define FDK_VERSION_MINOR 1
+#define FDK_VERSION_MINOR 0
 #define FDK_VERSION_PATCH 0
 
-/* "1.1.0-rc2" style string, generated from the numeric components
- * plus the pre-release suffix (empty when the release is final).
- * The suffix lives here, next to the numeric triple it decorates. */
-#define FDK_VERSION_SUFFIX "rc2"
-#define FDK_VERSION_STRING "1.1.0-rc2"
+/* "1.0.0" style string, generated from the numeric components
+ * plus the pre-release suffix (empty when the release is final —
+ * and 1.0.0 IS the final first release). The suffix lives here,
+ * next to the numeric triple it decorates. */
+#define FDK_VERSION_SUFFIX ""
+#define FDK_VERSION_STRING "1.0.0"
 
 /* Encode major/minor/patch into a single comparable integer:
  * (major * 1000000) + (minor * 1000) + patch */

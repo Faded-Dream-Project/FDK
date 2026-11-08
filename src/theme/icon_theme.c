@@ -1949,7 +1949,7 @@ const char *const *fdk__icon_chain_place(fdk_icon_place_kind kind) {
     }
 }
 
-/* ---- the public wrapper (1.1.0) --------------------------------------------
+/* ---- the public wrapper (1.0.0) --------------------------------------------
  *
  * fdk_icon_theme_surface(): the engine's cached decode, handed out as
  * a FRESH owned clone (see include/fdk/fdk_theme.h). The clone is a

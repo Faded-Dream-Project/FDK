@@ -1,5 +1,5 @@
 /*
- * fdk_session.h — session participation: save, restore (1.1.0, D-5)
+ * fdk_session.h — session participation: save, restore (1.0.0, D-5)
  *
  * The B-19 session half: the protocols by which a desktop remembers
  * an application's windows and restarts it in the same state. Two

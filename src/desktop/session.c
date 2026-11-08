@@ -1,5 +1,5 @@
 /*
- * session.c — the session participation public half (1.1.0, D-5)
+ * session.c — the session participation public half (1.0.0, D-5)
  *
  * The thin wrapper over the backend's session_* ops (see
  * platform_internal.h's D-5 block for the seam's contract):

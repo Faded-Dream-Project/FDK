@@ -32,7 +32,7 @@
 #include "fdk/fdk_text.h" /* 1.4.11: fdk_span (tooltip/label/button markup) */
 #include "fdk/fdk_theme.h" /* 1.4.16: background_token (token-following bg) */
 #include "fdk/fdk_animation.h" /* round 14: fdk__animation_set_self_damage */
-#include "fdk/fdk_dnd.h"  /* 1.1.0, S-9: drag_formats/drag_fn fields */
+#include "fdk/fdk_dnd.h"  /* 1.0.0, S-9: drag_formats/drag_fn fields */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -132,7 +132,7 @@ struct fdk_widget {
     fdk_span *tooltip_spans;   /* owned; NULL when the tip is plain */
     size_t tooltip_span_count;
 
-    /* Widget-level drop target (1.1.0, S-9 / B-13): the accepted
+    /* Widget-level drop target (1.0.0, S-9 / B-13): the accepted
      * fdk_drag_format mask (0 = not a target) and the scoped drag
      * callback. The window layer's drag routing hit-tests the tree,
      * walks up from the deepest hit to the first registered target,

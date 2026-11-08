@@ -1,5 +1,5 @@
 /*
- * test_touch.c — the touch-slot engine's policy battery (1.1.0, M-3)
+ * test_touch.c — the touch-slot engine's policy battery (1.0.0, M-3)
  *
  * Headless and pure: a bare engine, a recording sink, and a
  * controllable clock (fdk__touch_set_test_clock) — every rule the
@@ -319,7 +319,7 @@ static void test_engine_lifecycle(void) {
     printf("[ok] touch: engine create/reset/destroy lifecycle\n");
 }
 
-/* ---- 1.1.0, C-6: the gestures ------------------------------------------- */
+/* ---- 1.0.0, C-6: the gestures ------------------------------------------- */
 
 /* PINCH: the span arithmetic. Two contacts 60 apart spread to 120
  * apart: ONE pinch with scale 2.0 (cumulative), delta 2.0 (the

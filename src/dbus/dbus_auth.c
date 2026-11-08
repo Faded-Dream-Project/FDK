@@ -1,5 +1,5 @@
 /*
- * dbus_auth.c — the SASL client handshake (1.1.0)
+ * dbus_auth.c — the SASL client handshake (1.0.0)
  *
  * EXTERNAL first (the uid the kernel already proved to the server
  * through SO_PEERCRED on the unix socket — no secret travels),

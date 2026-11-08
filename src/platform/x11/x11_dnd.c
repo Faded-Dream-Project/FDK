@@ -336,7 +336,7 @@ int fdk_x11_dnd_handle_client_message(fdk_platform_connection *conn,
                 drag_mods = fdk__x11_translate_modifiers(state);
             }
         }
-        /* Per-position acceptance (1.1.0, S-9): the widget tree's
+        /* Per-position acceptance (1.0.0, S-9): the widget tree's
          * drop targets own the answer under the pointer — the core
          * layer's query (hit-test + ancestor walk; window mask when
          * no target owns the position, the pre-S-9 rule). Recorded
@@ -613,7 +613,7 @@ static void xdnd_fetch_and_drop(fdk_platform_connection *conn,
     conn->xdnd.source = None;
 }
 
-/* ---- the drag icon window (1.1.0, S-9) -------------------------------------
+/* ---- the drag icon window (1.0.0, S-9) -------------------------------------
  *
  * X11 has no XDND icon protocol — the dragging client paints its own
  * feedback: an override-redirect window the size of the icon that

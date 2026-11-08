@@ -1,4 +1,4 @@
-# THIRD-PARTY — components, data, and provenance (1.1.0)
+# THIRD-PARTY — components, data, and provenance (1.0.0)
 
 Everything FDK builds on, links, loads, vendors, or reads, with its
 license and source. FDK itself is proprietary (LICENSE, the FDK
@@ -28,7 +28,7 @@ FDK's own code from the public specification.
 | fontconfig | MIT | libfontconfig.so.1 | system font discovery off; bundled/shipped fonts only |
 | libGL/libGLX | MIT / SGI-B-1.1-ish (per-driver) | libGL.so.1 | X11 GPU lane off; software rendering (the default posture) |
 
-Planned (roadmap 1.1.0, same posture when they land): HarfBuzz
+Planned (roadmap 1.0.0, same posture when they land): HarfBuzz
 (Old MIT/ICU — shaping), FriBidi (LGPL-2.1 — bidi). Both will be
 dlopen'd, never linked; an absent library degrades, never fails.
 

@@ -1,6 +1,6 @@
 /*
  * test_cursor.c — the named cursor set's contract battery
- * (1.1.0-rc2, S-5 / B-12)
+ * (1.0.0-rc2, S-5 / B-12)
  *
  * Headless and pure: the cursor's DECIDING layer is three integers
  * and two tables, so the whole contract pins without a display —

@@ -2368,7 +2368,7 @@ static int lane_present_attempt(struct fdk_wayland_egl_window *ewin,
     return LANE_PRESENT_OK;
 }
 
-/* ---- §19 test seams (1.1.0-rc2): the driverless fallback-shape pins ---- */
+/* ---- §19 test seams (1.0.0-rc2): the driverless fallback-shape pins ---- */
 
 void fdk__wayland_egl_test_swizzle(fdk_u32 *dst, const fdk_u32 *src,
                                    int n) {

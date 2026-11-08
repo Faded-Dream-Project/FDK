@@ -75,10 +75,10 @@ struct fdk_window {
     fdk_context *ctx;                 /* owning context, not owned by us */
     const fdk_platform_ops *ops;      /* same as ctx's ops, cached for convenience */
     bool is_popup;                    /* Phase 9: grabbed dismissal window */
-    bool is_subsurface;               /* 1.1.0 D-2: FDK-owned child surface (ext) */
+    bool is_subsurface;               /* 1.0.0 D-2: FDK-owned child surface (ext) */
     fdk_platform_window *pwindow;     /* backend-owned handle */
 
-    /* ---- Extension surfaces (1.1.0, include/fdk/fdk_extend.h) ----
+    /* ---- Extension surfaces (1.0.0, include/fdk/fdk_extend.h) ----
      *
      * Non-NULL iff this window WRAPS an extension surface (the
      * add-on-owned kind machinery in src/window/extend.c): the
@@ -134,7 +134,7 @@ struct fdk_window {
     fdk_i32 popup_anchor_x, popup_anchor_y;
     bool popup_anchored;
 
-    /* Subsurface family (1.1.0, D-2): FDK-owned child surfaces —
+    /* Subsurface family (1.0.0, D-2): FDK-owned child surfaces —
      * the fdk_ext_subsurface_create* handles — link onto their
      * parent's list the same way popups do, and the same contract
      * applies word for word: children must not outlive the parent,
@@ -163,7 +163,7 @@ struct fdk_window {
      * window_set_drop_formats) is what drives protocol negotiation. */
     int drop_formats;
 
-    /* ---- Widget-level drag routing (1.1.0, S-9 / B-13) ----
+    /* ---- Widget-level drag routing (1.0.0, S-9 / B-13) ----
      *
      * The drop-target widget whose scope the drag is currently INSIDE
      * (the ancestor-walk winner at the last ENTER/MOTION position),
@@ -290,7 +290,7 @@ struct fdk_window {
      * reset when the edge zones disappear. */
     int cursor_edge;
     /* The application's requested hover shape (fdk_window_set_cursor,
-     * 1.1.0-rc1): -1 none requested (the compass rules), else the
+     * 1.0.0-rc1): -1 none requested (the compass rules), else the
      * fdk_cursor_shape value last set. The backend op layer carries the
      * applied shape on the pwindow (cursor_shape) for enter-time
      * re-application. */
@@ -305,7 +305,7 @@ struct fdk_window {
      * yet; the transition cache — the op only sees changes). */
     int cursor_applied;
 
-    /* Popup trace stamps (FDK_POPUP_TRACE, 1.1.0-rc1): the last
+    /* Popup trace stamps (FDK_POPUP_TRACE, 1.0.0-rc1): the last
      * pointer-motion time (for the motion-to-present latency), the
      * last in-bounds button-down time (the "likely item selected"
      * hint at destroy), and the last close-request reason. */
@@ -349,7 +349,7 @@ struct fdk_window {
     size_t shortcut_cap;
     int shortcut_next_id;
 
-    /* ---- 1.1.0, M-3: the touch-slot engine ----
+    /* ---- 1.0.0, M-3: the touch-slot engine ----
      *
      * Lazily created at the first FDK_EVENT_TOUCH_* this window
      * receives (the common desktop never pays the allocation),
@@ -357,7 +357,7 @@ struct fdk_window {
      * synthesis policy — see src/window/touch.c. */
     struct fdk_touch_engine *touch;
 
-    /* ---- 1.1.0, S-3: idle inhibition ----
+    /* ---- 1.0.0, S-3: idle inhibition ----
      *
      * The COMPOSITOR half of fdk_idle_inhibit (the platform
      * inhibitor rides the pwindow; this flag is the window's own
@@ -375,7 +375,7 @@ struct fdk_window {
  * back to the fdk_window* that owns it. Not part of the public API. */
 void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event);
 
-/* ---- Touch-slot engine (1.1.0, M-3; src/window/touch.c) ----
+/* ---- Touch-slot engine (1.0.0, M-3; src/window/touch.c) ----
  *
  * Opaque state + the pure policy functions the window layer drives.
  * The engine never touches windows or platforms itself; synthesized
@@ -392,7 +392,7 @@ fdk_touch_engine *fdk__touch_engine_create(void);
 void fdk__touch_engine_destroy(fdk_touch_engine *engine);
 void fdk__touch_engine_reset(fdk_touch_engine *engine);
 
-/* ---- Idle inhibition (1.1.0, S-3; src/desktop/idle.c) --------------------
+/* ---- Idle inhibition (1.0.0, S-3; src/desktop/idle.c) --------------------
  *
  * The inhibitor handle's sever hook: called by the window destroy
  * path AFTER it disengaged the platform inhibitor (the compositor
@@ -462,7 +462,7 @@ fdk_result fdk__window_create_popup_ex(fdk_context *ctx, fdk_window *parent,
                                        fdk_window **out_window);
 
 /* Shared field initialization for freshly-allocated fdk_windows
- * (1.1.0: factored out of window_create_full so the extension-
+ * (1.0.0: factored out of window_create_full so the extension-
  * surface wrapper in extend.c builds identical windows around
  * ADOPTED platform windows). Assigns EVERY field — fdk_alloc does
  * not zero, and the refactor that extracted this block found two
@@ -471,7 +471,7 @@ fdk_result fdk__window_create_popup_ex(fdk_context *ctx, fdk_window *parent,
 void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
                              const fdk_window_options *options);
 
-/* Extension kinds (1.1.0, src/window/extend.c): the shutdown-side
+/* Extension kinds (1.0.0, src/window/extend.c): the shutdown-side
  * detach walk — add-on-owned kinds stop pointing at the dying
  * context (their ctx goes NULL, the context's list empties). Called
  * from fdk_shutdown() AFTER the leaked-window sweep (every kind
@@ -588,7 +588,7 @@ typedef struct fdk_drag_closure {
  * frees the closure. */
 void fdk__drag_report_done(int status, void *user);
 
-/* ---- popup lifecycle trace (1.1.0-rc1, X2/X3) ---------------------------
+/* ---- popup lifecycle trace (1.0.0-rc1, X2/X3) ---------------------------
  *
  * FDK_POPUP_TRACE=1 logs popup lifecycle events at INFO: creation
  * (size + anchor), every close-request WITH ITS REASON (outside

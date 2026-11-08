@@ -18,8 +18,8 @@ fdk_require_release_posture
 
 VERSION="$(fdk_expected_version)"
 # Package metadata version: apk reserves '-' for the -rN pkgrel, so the
-# raw "1.1.0-rc1" is "not a valid version"; the underscore form
-# (1.1.0_rc1) is apk's native pre-release suffix family and sorts
+# raw "1.0.0-rc1" is "not a valid version"; the underscore form
+# (1.0.0_rc1) is apk's native pre-release suffix family and sorts
 # before the final. The tarball name and its top directory follow
 # pkgver (builddir="$srcdir/fdk-$pkgver"), so they use the SAME
 # spelling. Plain releases pass through unchanged (fdk_packver in

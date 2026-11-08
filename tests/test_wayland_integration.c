@@ -68,7 +68,7 @@
                        * SHELL's exe, so the child never ran — see the
                        * activation launcher leg) */
 
-/* IME end-to-end (1.1.0, M-1): this test ALSO plays the input
+/* IME end-to-end (1.0.0, M-1): this test ALSO plays the input
  * method — a second wl_display connection binding
  * zwp_input_method_manager_v2 (the fcitx5 role) and driving the
  * app's text-input-v3 through the REAL compositor relay. The
@@ -86,7 +86,7 @@ static int g_rep_repeats = 0;
 static long long g_rep_first_ms = 0;
 static long long g_rep_press_ms = 0;
 
-/* Touch-slot capture (1.1.0, M-3): raw slot events + the synthesis
+/* Touch-slot capture (1.0.0, M-3): raw slot events + the synthesis
  * the core engine layers on top (click pairs, scrolls). */
 typedef struct {
     int touch_downs, touch_ups, touch_cancels;
@@ -575,7 +575,7 @@ static void wl_accel_window_cb(fdk_window *window,
     }
 }
 
-/* ---- IME end-to-end section (1.1.0, M-1) ----------------------------------
+/* ---- IME end-to-end section (1.0.0, M-1) ----------------------------------
  *
  * THE RIG: this test plays BOTH sides of the IME protocol against
  * the real compositor relay (sway 1.10 / wlroots 0.18):
@@ -889,7 +889,7 @@ static int activation_child_leg(void) {
     return ok ? 0 : 1;
 }
 
-/* ---- Subsurface capture state (1.1.0, D-2) — file-scope because
+/* ---- Subsurface capture state (1.0.0, D-2) — file-scope because
  * the callbacks are file-scope (the suite's g_* discipline). ---- */
 static int g_sub_buttons = 0;
 static fdk_pointf g_sub_last_pos = {0.0f, 0.0f};
@@ -929,7 +929,7 @@ static void wl_sub_parent_cb(fdk_window *window,
     }
 }
 
-/* ---- Tablet capture state (1.1.0, D-3) --------------------------------- */
+/* ---- Tablet capture state (1.0.0, D-3) --------------------------------- */
 static int g_tablet_events = 0;
 static fdk_event_data g_tablet_last;
 static int g_tablet_prox_in = 0, g_tablet_prox_out = 0;
@@ -950,7 +950,7 @@ static void wl_tablet_evt_cb(fdk_window *window,
     }
 }
 
-/* ---- Foreign toplevel capture (1.1.0, D-4) ----------------------------- */
+/* ---- Foreign toplevel capture (1.0.0, D-4) ----------------------------- */
 static int g_wl_session_notifies = 0;
 /* The BACKEND-shaped notify (void* closure) — the seam drives the
  * tracker's own callback slot, which is the one the platform fills
@@ -1270,7 +1270,7 @@ int main(void) {
         return 0;
     }
 
-    /* ---- The deferred-first-frame regression (found live in 1.1.0:
+    /* ---- The deferred-first-frame regression (found live in 1.0.0:
      * every example painted before the first configure and never
      * mapped) ----
      *
@@ -2240,7 +2240,7 @@ int main(void) {
         }
     }
 
-    /* ---- Activation + startup notification (1.1.0, S-6) ----
+    /* ---- Activation + startup notification (1.0.0, S-6) ----
      *
      * sway speaks xdg-activation-v1 (wlroots), so this is the REAL
      * protocol round: the mint's private-queue roundtrip catches the
@@ -2650,7 +2650,7 @@ int main(void) {
         printf("[ok] wayland resize: top-edge press handed to the "
                "compositor (xdg_toplevel.resize, rig-verified)\n");
 
-        /* ---- 1.1.0-rc2, S-5: the full named cursor set ----
+        /* ---- 1.0.0-rc2, S-5: the full named cursor set ----
          *
          * Two proofs against the live compositor: (a) the window
          * layer maps every public shape onto the op space and SENDS
@@ -2733,7 +2733,7 @@ int main(void) {
                    "without the test seam\n");
         }
 
-        /* ---- 1.1.0-rc2, S-4 / A-06: the input region ----
+        /* ---- 1.0.0-rc2, S-4 / A-06: the input region ----
          *
          * The rig floats org.fdk.test windows at (100,60): a 300x200
          * window whose input region covers only its left half — the
@@ -3264,7 +3264,7 @@ int main(void) {
                "real-key e2e is the X11 suite's)\n");
     }
 
-    /* ---- Touch slots (1.1.0, M-3) ----
+    /* ---- Touch slots (1.0.0, M-3) ----
      *
      * sway headless's seat carries no touch capability (wlroots has
      * no virtual-touch protocol), so the rig drives the REAL wl_touch
@@ -3333,7 +3333,7 @@ int main(void) {
                "(the test seam; sway's seat has no touch device)\n");
     }
 
-    /* ---- Toplevel icon (1.1.0, M-4) ----
+    /* ---- Toplevel icon (1.0.0, M-4) ----
      *
      * xdg-toplevel-icon-v1 is compositor-OPTIONAL: sway 1.10/wlroots
      * 0.18 (this rig) and GNOME do not offer it; KDE Plasma 6.3+
@@ -3385,7 +3385,7 @@ int main(void) {
                "connection healthy after\n");
     }
 
-    /* ---- IME end-to-end (1.1.0, M-1) ----
+    /* ---- IME end-to-end (1.0.0, M-1) ----
      *
      * The IM side connects FIRST (before any window): sway's relay
      * binds the input method when it appears, and every later
@@ -3843,7 +3843,7 @@ int main(void) {
             }
         }
 
-        /* ---- §19 (1.1.0-rc2): the core-GLES2 upload shapes -----------
+        /* ---- §19 (1.0.0-rc2): the core-GLES2 upload shapes -----------
          * FDK_GL_CORE_ONLY=1 pins has_bgra_ext/has_rowlen_ext OFF on
          * ANY driver: the lane must present full AND partial damage
          * through the RGBA twin + tight row packing — pure core
@@ -4679,7 +4679,7 @@ int main(void) {
         (void)attach_rig_parent_leg();
     }
 
-    /* ---- Idle inhibition (1.1.0, S-3) ----
+    /* ---- Idle inhibition (1.0.0, S-3) ----
      *
      * sway/wlroots implements zwp_idle_inhibit_manager_v1, so the
      * COMPOSITOR path engages here: the inhibitor object lives on
@@ -4741,7 +4741,7 @@ int main(void) {
         (void)fdk_pump_events(ctx, 100);
     }
 
-    /* ---- Subsurfaces (1.1.0, D-2 / B-16): the wl_subsurface half ----
+    /* ---- Subsurfaces (1.0.0, D-2 / B-16): the wl_subsurface half ----
      *
      * A fresh floating window (the rig pins every org.fdk.test float
      * at 100,60 — the injector's absolute coordinates are computed
@@ -5007,7 +5007,7 @@ int main(void) {
                "sweep protocol-clean\n");
     }
 
-    /* ---- Tablets / stylus (1.1.0, D-3 / B-17): the zwp_tablet_v2 half --
+    /* ---- Tablets / stylus (1.0.0, D-3 / B-17): the zwp_tablet_v2 half --
      *
      * The live half: sway (wlroots) IMPLEMENTS zwp_tablet_v2, so the
      * manager bind + the tablet seat creation ride the real protocol
@@ -5137,7 +5137,7 @@ int main(void) {
                "simultaneous tool ids, out-of-proximity noise dropped)\n");
     }
 
-    /* ---- Foreign toplevels (1.1.0, D-4): the wlr-foreign half ----
+    /* ---- Foreign toplevels (1.0.0, D-4): the wlr-foreign half ----
      *
      * Self-contained by design (its own windows — the section runs
      * late, after every other leg has torn its windows down): sway
@@ -5277,7 +5277,7 @@ int main(void) {
         }
     }
 
-    /* ---- Session participation (1.1.0, D-5) ----------------------------
+    /* ---- Session participation (1.0.0, D-5) ----------------------------
      *
      * The Wayland object lane against the desktop that exists: the
      * protocol (xdg-session-management-v1, staging in

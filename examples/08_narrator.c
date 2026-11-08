@@ -1,4 +1,4 @@
-/* 08_narrator.c — the embedded screen reader, live (1.1.0).
+/* 08_narrator.c — the embedded screen reader, live (1.0.0).
  *
  * GTK and Qt narrate through AT-SPI2 over D-Bus: a registry daemon,
  * a session bus, a bridge process. This demo is FDK's answer: the

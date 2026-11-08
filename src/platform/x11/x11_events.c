@@ -235,7 +235,7 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
         case FocusOut:
             out->type = FDK_EVENT_WINDOW_FOCUS;
             out->focus.focused = (xevent->type == FocusIn);
-            /* Lazy IM/XIC (1.1.0-rc1, X1): focus precedes keys in any
+            /* Lazy IM/XIC (1.0.0-rc1, X1): focus precedes keys in any
              * real text-entry flow — bring the input context up HERE
              * so the first KeyPress already resolves through it. */
             if (xevent->type == FocusIn && pwindow != NULL) {
@@ -260,7 +260,7 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
 
         case KeyPress:
         case KeyRelease: {
-            /* Lazy IM/XIC (1.1.0-rc1, X1): a key arriving without any
+            /* Lazy IM/XIC (1.0.0-rc1, X1): a key arriving without any
              * prior FocusIn (bare X, no WM) still gets a context —
              * the XIC resolves this event too, since the event struct
              * is already in hand when the context is born. */
@@ -276,7 +276,7 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
                          pwindow != NULL
                              ? (unsigned long)pwindow->xwindow : 0ul);
             }
-            /* Popup dismissal reason (1.1.0-rc1): the window layer
+            /* Popup dismissal reason (1.0.0-rc1): the window layer
              * consumes Escape for popups (its scancode check lives in
              * window.c, backend-neutral); stamping the reason HERE —
              * keycode 9 is the universal ESC keycode on Linux X
@@ -392,7 +392,7 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
              * gesture: it becomes a close request, never a button
              * event inside the tree.
              *
-             * The release reason rides along (1.1.0-rc1): the
+             * The release reason rides along (1.0.0-rc1): the
              * dismissal path through window.c destroys the popup, and
              * FDK_POPUP_TRACE's ungrab line then says WHY. */
             if (pwindow->popup && xevent->type == ButtonPress &&

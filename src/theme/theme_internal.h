@@ -208,7 +208,7 @@ const char *fdk__icon_theme_current_name(void);
 bool fdk__x11_xsettings_string(const char *setting_name, char *out,
                                size_t cap);
 
-/* ---- the color-scheme module (1.1.0, color_scheme.c) --------------------
+/* ---- the color-scheme module (1.0.0, color_scheme.c) --------------------
  *
  * The desktop's light/dark preference: sourced from XSETTINGS
  * (X11) or org.freedesktop.portal.Settings (the D-Bus client),
@@ -280,7 +280,7 @@ const char *const *fdk__icon_chain_for_name(const char *name);
 const char *const *fdk__icon_chain_place(fdk_icon_place_kind kind);
 
 
-/* ---- the ui-metrics module (1.1.0, ui_metrics.c) --------------------------
+/* ---- the ui-metrics module (1.0.0, ui_metrics.c) --------------------------
  *
  * The process's UI font size and scale (see fdk_theme.h's public
  * getters). Same live channels as the color scheme: this X11 poll

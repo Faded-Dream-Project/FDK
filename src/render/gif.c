@@ -1,5 +1,5 @@
 /*
- * gif.c — the animated GIF decoder + compositor (1.1.0 / C-4)
+ * gif.c — the animated GIF decoder + compositor (1.0.0 / C-4)
  *
  * A self-contained GIF87a/89a parser written from the published
  * specification: the logical screen, the global color table, the

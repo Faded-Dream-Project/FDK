@@ -78,7 +78,7 @@ void fdk_x11_gl_libraries_release(struct fdk_x11_gl *gl);
  * when the lane never got far enough to query one. */
 const char *fdk_x11_gl_renderer(const struct fdk_x11_gl *gl);
 
-/* Timer-based self-check retries (1.1.0-rc1): the dispatch tail's
+/* Timer-based self-check retries (1.0.0-rc1): the dispatch tail's
  * probe tick — fires the scheduled attempt when its deadline passes
  * (one probe pass, never a blocking wait; see x11_gl.c). */
 void fdk_x11_gl_selfcheck_tick(struct fdk_x11_gl *gl);

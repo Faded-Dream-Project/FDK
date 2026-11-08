@@ -440,7 +440,7 @@ static void pointer_enter(void *data, struct wl_pointer *pointer, uint32_t seria
             conn->pointer_x = wl_fixed_to_double(sx);
             conn->pointer_y = wl_fixed_to_double(sy);
 
-            /* W2 (1.1.0-rc1): answer EVERY enter with the window's
+            /* W2 (1.0.0-rc1): answer EVERY enter with the window's
              * cursor shape, citing the ENTER serial. A client that
              * answers nothing keeps whatever shape the compositor
              * last showed over anything — the live report's "cursor
@@ -601,7 +601,7 @@ static const struct wl_pointer_listener g_pointer_listener = {
     .axis_discrete = pointer_axis_discrete,
 };
 
-/* ---- wl_touch: direct-contact slots (1.1.0, M-3) ----------------------
+/* ---- wl_touch: direct-contact slots (1.0.0, M-3) ----------------------
  *
  * Wayland touch coordinates are surface-local LOGICAL — the same
  * space wl_pointer delivers — so translation is a straight copy into
@@ -843,7 +843,7 @@ static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t capabil
     if ((capabilities & WL_SEAT_CAPABILITY_POINTER) && conn->pointer == NULL) {
         conn->pointer = wl_seat_get_pointer(seat);
         wl_pointer_add_listener(conn->pointer, &g_pointer_listener, conn);
-        /* cursor-shape-v1 device (1.1.0-rc1, W2): derived from the
+        /* cursor-shape-v1 device (1.0.0-rc1, W2): derived from the
          * manager + this pointer; the seat's pointer object is the
          * lifetime anchor — recreated here whenever the capability
          * (re)appears, destroyed alongside the pointer below. */
@@ -862,7 +862,7 @@ static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t capabil
         conn->pointer = NULL;
     }
 
-    /* Touch (1.1.0, M-3): bind the contact-slot stream. Direct
+    /* Touch (1.0.0, M-3): bind the contact-slot stream. Direct
      * touchscreens only — trackpad two-finger scrolling arrives as
      * wl_pointer axis events the existing handler translates. The
      * id→window map is wiped on any capability change (a seat whose
@@ -899,13 +899,13 @@ void fdk_wayland_bind_seat_listeners(fdk_platform_connection *conn) {
      * registry order is legal) — create the text input now if both
      * halves exist; the manager's own handler calls the same thing. */
     fdk_wayland_ime_seat_ready(conn);
-    /* Tablets (1.1.0, D-3): the same either-order rule — the manager
+    /* Tablets (1.0.0, D-3): the same either-order rule — the manager
      * may have bound before the seat; its handler called this too. */
     fdk_wayland_tablet_seat_ready(conn);
 }
 
 void fdk_wayland_teardown_seat(fdk_platform_connection *conn) {
-    /* Tablets (1.1.0, D-3): the tablet seat rides the seat — tear it
+    /* Tablets (1.0.0, D-3): the tablet seat rides the seat — tear it
      * down with it (wayland_tablet.c's shutdown is idempotent). */
     fdk_wayland_tablet_shutdown(conn);
     if (conn->cursor_shape_device != NULL) {

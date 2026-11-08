@@ -177,7 +177,7 @@ struct fdk_x11_gl {
                                     *       mismatch after retries —
                                     *       gl->refused is set too) */
     char renderer[80];             /* first context's GL_RENDERER string */
-    /* --- timer-based self-check retries (1.1.0-rc1) ------------------
+    /* --- timer-based self-check retries (1.0.0-rc1) ------------------
      *
      * The Openbox report (B.2): the retry budget used to run INLINE —
      * three XGetImage reads with XSync + 9 ms nanosleeps between them,
@@ -779,7 +779,7 @@ static void draw_fullscreen_quad(struct fdk_x11_gl *gl, int w, int h) {
  * glXGetProcAddress-resolved readback disagreed with the visible
  * framebuffer.)
  *
- * THE 1.1.0 REWORK — three verdicts, not one (found live on an
+ * THE 1.0.0 REWORK — three verdicts, not one (found live on an
  * NVIDIA GTX 1050 Ti desktop, 2026-10-25):
  *
  *   INCONCLUSIVE (retry later, never a failure):
@@ -872,7 +872,7 @@ static int self_check_probes(struct fdk_x11_gl *gl,
     return 0;
 }
 
-/* ONE self-check attempt (1.1.0-rc1's timer-based rework): the
+/* ONE self-check attempt (1.0.0-rc1's timer-based rework): the
  * viewability gate + one probe pass, then one of three outcomes —
  *   PASS            -> GL_CHK_PASS (the connection is verified)
  *   read failed / not viewable -> GL_CHK_INCONCLUSIVE (no attempt
@@ -1122,7 +1122,7 @@ int fdk_x11_gl_window_present(struct fdk_x11_gl_window *gwin,
      * INCONCLUSIVE (not viewable / transient read failure) defers to
      * the next completed present — the present itself SUCCEEDED, so
      * zero is returned and the window stays on the lane. A mismatch
-     * (1.1.0-rc1: timing, most likely — DRI3/Present vblank landing)
+     * (1.0.0-rc1: timing, most likely — DRI3/Present vblank landing)
      * SCHEDULES a timer-based retry (gl->selfcheck_retry_ms; the
      * dispatch-tail tick fires it) and consumes one budget slot; the
      * budget exhausted is a REAL failure: the lane is refused for

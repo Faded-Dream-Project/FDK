@@ -16,7 +16,7 @@
  * than including the widget internals from the core layer (the
  * one-way layering discipline: core never includes widget headers). */
 void fdk__tooltip_shutdown(void);
-/* D-Bus connections (1.1.0, src/dbus/): the shutdown sweep runs
+/* D-Bus connections (1.0.0, src/dbus/): the shutdown sweep runs
  * BEFORE the timer/extfd sweeps (see the call site). */
 void fdk__dbus_shutdown(fdk_context *ctx);
 #include <stdlib.h>
@@ -254,7 +254,7 @@ static void context_dispatch_event(fdk_platform_window *pwindow,
     fdk_window_dispatch_event(window, event);
 }
 
-/* ---- fatal-dispatch reporting (1.1.0-rc1, the labwc report) -----------
+/* ---- fatal-dispatch reporting (1.0.0-rc1, the labwc report) -----------
  *
  * A dispatch_pending failure means the backend connection is dead —
  * unrecoverable. Both pump call sites below route through this
@@ -650,7 +650,7 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
         }
 
         /* The poll set: backend fd, theme-settings watch (1.4.14),
-         * and the extension fd sources (1.1.0) — the fixed pair the
+         * and the extension fd sources (1.0.0) — the fixed pair the
          * pump always polled became a stack array sized for all
          * three. The backend fd stays entry 0 (its POLLERR|POLLNVAL
          * handling below is the pump's own); the theme watch entry
@@ -681,7 +681,7 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
             nfds = 2;
             has_theme = 1;
         }
-        /* The color-scheme portal attach (1.1.0): internally a set
+        /* The color-scheme portal attach (1.0.0): internally a set
          * of no-op flag checks once the state is decided; the one
          * expensive thing it can do (connect a D-Bus client) happens
          * at most once per 30 s and only when the portal is the
@@ -772,7 +772,7 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
              * the budget is spent). */
         }
 
-        /* Extension fd sources (1.1.0): dispatched AFTER the backend
+        /* Extension fd sources (1.0.0): dispatched AFTER the backend
          * and theme watch, in registration order, with the timer
          * fire discipline (a callback may remove/add sources,
          * destroy windows, quit). An APPLICATION source's firing
@@ -900,7 +900,7 @@ void fdk_shutdown(fdk_context *ctx) {
      * theme (if any) stays: theme state is process-wide. */
     fdk__window_theme_settings_shutdown();
 
-    /* D-Bus connections (1.1.0): closed BEFORE the timer/extfd
+    /* D-Bus connections (1.0.0): closed BEFORE the timer/extfd
      * sweeps below — each connection owns ext fd sources and
      * timers, and removing them after those sweeps would touch
      * freed records. Teardown, not delivery: pending replies do
@@ -918,14 +918,14 @@ void fdk_shutdown(fdk_context *ctx) {
         timer_unlink_free(ctx, t);
     }
     /* Leaked extension fd sources: same teardown-not-delivery
-     * policy (1.1.0). */
+     * policy (1.0.0). */
     if (ctx->extfd_count > 0) {
         FDK_WARN("shutdown with %zu extension fd source(s) still live "
                  "— freeing",
                  ctx->extfd_count);
     }
     fdk__extfd_shutdown(ctx);
-    /* Extension kinds (1.1.0): add-on owned, so NOT freed here — but
+    /* Extension kinds (1.0.0): add-on owned, so NOT freed here — but
      * they must stop pointing at this (about-to-be-freed) context.
      * The detach walk NULLs each kind's ctx and empties the list; a
      * kind destroyed afterwards skips the (gone) registry unlink.

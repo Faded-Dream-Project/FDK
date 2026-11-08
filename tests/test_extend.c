@@ -1,4 +1,4 @@
-/* test_extend.c — extension API (1.1.0) headless tests.
+/* test_extend.c — extension API (1.0.0) headless tests.
  *
  * Platform-independent contract checks that need no display: the
  * API-version surface, and the argument-validation / NULL-safety

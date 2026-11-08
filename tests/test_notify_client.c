@@ -1,5 +1,5 @@
 /* test_notify_client.c — the app-facing notification client against a
- * REAL bus and an in-test mock daemon (1.1.0)
+ * REAL bus and an in-test mock daemon (1.0.0)
  *
  * Runs under `make test-dbus` beside test_dbus_live.c (the same
  * dbus-run-session wrapper). The mock daemon is a second FDK

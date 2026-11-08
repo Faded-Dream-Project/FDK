@@ -56,7 +56,7 @@ leak:libgallium
 leak:libgbm
 leak:libdrm
 
-# fontconfig (added 1.1.0, the notifyd rig): the COLD-CACHE write
+# fontconfig (added 1.0.0, the notifyd rig): the COLD-CACHE write
 # path. src/text/fontscan.c brackets the first FcInit + query walk
 # with __lsan_disable (the warm-cache allocations, 1.1.5's fix), but
 # when fontconfig's on-disk cache is cold it writes new cache files

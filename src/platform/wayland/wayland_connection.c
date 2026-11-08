@@ -113,7 +113,7 @@ static void registry_global(void *data, struct wl_registry *registry,
                              &wp_fractional_scale_manager_v1_interface, fv);
     } else if (strcmp(interface,
                       wp_cursor_shape_manager_v1_interface.name) == 0) {
-        /* OPTIONAL (1.1.0-rc1, W2): cursor-shape-v1 — the compositor
+        /* OPTIONAL (1.0.0-rc1, W2): cursor-shape-v1 — the compositor
          * renders enumerated cursor shapes itself. Preferred over the
          * client-side XCursor-theme path whenever offered: no theme
          * files to hunt, and the shape follows the compositor's own
@@ -128,7 +128,7 @@ static void registry_global(void *data, struct wl_registry *registry,
                              &wp_cursor_shape_manager_v1_interface, cv);
     } else if (strcmp(interface,
                       xdg_toplevel_icon_manager_v1_interface.name) == 0) {
-        /* OPTIONAL (1.1.0, M-4): xdg-toplevel-icon-v1 — the compositor
+        /* OPTIONAL (1.0.0, M-4): xdg-toplevel-icon-v1 — the compositor
          * accepts per-toplevel window icons (taskbars, docks,
          * switchers). KDE Plasma 6.3+ and adopters of the staging
          * protocol; absent on wlroots < 0.19 / GNOME at bind time.
@@ -141,7 +141,7 @@ static void registry_global(void *data, struct wl_registry *registry,
                              &xdg_toplevel_icon_manager_v1_interface, iv);
     } else if (strcmp(interface,
                       zwp_text_input_manager_v3_interface.name) == 0) {
-        /* OPTIONAL (1.1.0, M-1): text-input-v3 — the IME composition
+        /* OPTIONAL (1.0.0, M-1): text-input-v3 — the IME composition
          * protocol. Absent (no compositor IME support) means no
          * composition on Wayland; keys keep flowing through
          * wl_keyboard. The per-seat text input object is created
@@ -154,7 +154,7 @@ static void registry_global(void *data, struct wl_registry *registry,
         fdk_wayland_ime_seat_ready(conn);
     } else if (strcmp(interface,
                       zwp_idle_inhibit_manager_v1_interface.name) == 0) {
-        /* OPTIONAL (1.1.0, S-3): idle-inhibit — absent means the
+        /* OPTIONAL (1.0.0, S-3): idle-inhibit — absent means the
          * window op answers UNSUPPORTED and the D-Bus ScreenSaver
          * fallback carries idle inhibition instead. */
         conn->idle_inhibit_manager =
@@ -162,7 +162,7 @@ static void registry_global(void *data, struct wl_registry *registry,
                              &zwp_idle_inhibit_manager_v1_interface, 1);
     } else if (strcmp(interface,
                       zwlr_foreign_toplevel_manager_v1_interface.name) == 0) {
-        /* OPTIONAL (1.1.0, D-4): wlr-foreign-toplevel-management —
+        /* OPTIONAL (1.0.0, D-4): wlr-foreign-toplevel-management —
          * the taskbar substrate's factory. Only the NAME is taken
          * here: the manager is bound at fdk_toplevel_list_open
          * (wayland_toplevel.c) so the protocol's initial toplevel
@@ -172,7 +172,7 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->foreign_toplevel_name = name;
     } else if (strcmp(interface,
                       xdg_session_manager_v1_interface.name) == 0) {
-        /* OPTIONAL (1.1.0, D-5): xdg-session-management-v1 — the
+        /* OPTIONAL (1.0.0, D-5): xdg-session-management-v1 — the
          * save/restore object lane's factory (wayland_session.c).
          * NAME-only, manager bound lazily at fdk_session_open:
          * unlike foreign-toplevel there is no bind-time burst to
@@ -186,7 +186,7 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->session_manager_name = name;
     } else if (strcmp(interface,
                       zwp_tablet_manager_v2_interface.name) == 0) {
-        /* OPTIONAL (1.1.0, D-3): the tablet family's factory — the
+        /* OPTIONAL (1.0.0, D-3): the tablet family's factory — the
          * manager is the bind point; the per-seat tablet seat (and
          * with it every tool stream) materializes once the SEAT also
          * exists (fdk_wayland_tablet_seat_ready, called from the
@@ -200,7 +200,7 @@ static void registry_global(void *data, struct wl_registry *registry,
                              &zwp_tablet_manager_v2_interface, tv);
         fdk_wayland_tablet_seat_ready(conn);
     } else if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
-        /* OPTIONAL (1.1.0, D-2): wl_subcompositor — the subsurface
+        /* OPTIONAL (1.0.0, D-2): wl_subcompositor — the subsurface
          * factory, CORE protocol (ships with libwayland itself, no
          * generated code needed) but still a per-compositor global.
          * Every compositor that offers wl_compositor offers this one
@@ -213,7 +213,7 @@ static void registry_global(void *data, struct wl_registry *registry,
                              subv);
     } else if (strcmp(interface,
                       xdg_activation_v1_interface.name) == 0) {
-        /* OPTIONAL (1.1.0, S-6): xdg-activation — the
+        /* OPTIONAL (1.0.0, S-6): xdg-activation — the
          * focus-stealing-prevention protocol. Absent (rare: sway,
          * KDE and GNOME all ship it) means activate() and token
          * minting answer UNSUPPORTED. Version 1 is the whole
@@ -532,7 +532,7 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
         xdg_activation_v1_destroy(conn->activation);
         conn->activation = NULL;
     }
-    /* Tablets (1.1.0, D-3): the tool records + the tablet seat die
+    /* Tablets (1.0.0, D-3): the tool records + the tablet seat die
      * with the connection; the manager proxy below. Idempotent. */
     fdk_wayland_tablet_shutdown(conn);
     if (conn->tablet_manager != NULL) {

@@ -105,7 +105,7 @@ typedef enum fdk_widget_event_type {
     FDK_WIDGET_FOCUS_IN      = 9,
     FDK_WIDGET_FOCUS_OUT     = 10,
 
-    /* IME composition traffic (1.1.0, M-1), delivered to the FOCUSED
+    /* IME composition traffic (1.0.0, M-1), delivered to the FOCUSED
      * widget only (same routing as KEY_*): .ime carries the UTF-8
      * text + preedit cursor. The toolkit's Entry and TextView consume
      * both (preedit renders inline at the caret, commit inserts);

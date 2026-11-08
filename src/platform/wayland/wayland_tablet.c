@@ -1,6 +1,6 @@
 /*
  * wayland_tablet.c — the zwp_tablet_v2 half of FDK's tablet model
- * (1.1.0, D-3 / B-17)
+ * (1.0.0, D-3 / B-17)
  *
  * Drawing-tablet input through the tablet protocol family: the
  * manager (bound when the compositor offers it), the per-seat

@@ -1,5 +1,5 @@
 /* test_shaping.c — M-2 level 1: the complex-script pipeline's proof
- * tests (1.1.0).
+ * tests (1.0.0).
  *
  * Two postures, both run in CI:
  *
@@ -944,10 +944,10 @@ static void test_script_matrix(void) {
            ran, N_SCRIPT_LEGS);
 }
 
-/* ---- extreme scale: the f64 shaped pen (1.1.0-rc2, the re-landed fix) -------
+/* ---- extreme scale: the f64 shaped pen (1.0.0-rc2, the re-landed fix) -------
  *
  * The pen that accumulates a line's advances ran in f32 until the
- * 1.1.0-rc2 re-land: each glyph took one f32 rounding, and at thousands
+ * 1.0.0-rc2 re-land: each glyph took one f32 rounding, and at thousands
  * of glyphs the drift moved measure, wrap and caret geometry by
  * whole pixels. The pin: a 100-glyph block repeated 30x must place
  * every repetition EXACTLY like the first one offset by whole-block

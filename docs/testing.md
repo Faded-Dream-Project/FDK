@@ -592,7 +592,7 @@ the name, and REAL key events typed through the X server arrive
 in the Entry's value interface — the exact snapshot a bridge
 would poll.
 
-## Narrator tests (1.1.0)
+## Narrator tests (1.0.0)
 
 **Headless** (`tests/test_narrator.c`, 46 checks in plain
 `make test`, ASan+UBSan): the embedded screen reader core is
@@ -2271,7 +2271,7 @@ next attempt. The lesson generalizes: synthetic input through a real
 X server is subject to scheduler noise — warm the pointer, widen the
 windows, and retry idempotently instead of trusting one 100 ms pump.
 
-## 1.1.0-rc1 — the display-number collision (a third CI flake class)
+## 1.0.0-rc1 — the display-number collision (a third CI flake class)
 
 **Two private X servers and one hard-coded display number.** The
 HiDPI GUI test forked its own 192-dpi Xvfb on a hard-coded `:98`,
@@ -2303,7 +2303,7 @@ not "MY server is serving" — verify ownership by a property only
 your server can have (here: the screen geometry), and never manage
 another process's resources by path (the socket unlink).
 
-## 1.1.0-rc1 — the fdk-shell-overlay packaging matrix's first live CI pass
+## 1.0.0-rc1 — the fdk-shell-overlay packaging matrix's first live CI pass
 
 Task 63's four commits (the fdk-shell-overlay hardening + five-family
 packaging) exposed four defect classes on their first push, every
@@ -2426,7 +2426,7 @@ the same runtime shlibs FDK's own void install-test always has
 metadata variance), plus libX11-devel for the smoke's readback and
 a tolerant Xvfb line.
 
-## Extension API tests (1.1.0)
+## Extension API tests (1.0.0)
 
 The extension surface (`include/fdk/fdk_extend.h`, docs/EXTENDING.md)
 gets the same two-tier treatment as every other subsystem:
@@ -2527,7 +2527,7 @@ the toolkit itself uses), and visual readback on Wayland would need
 the compositor's screenshot channel. The X11 leg covers both
 behaviors for the shared machinery.
 
-**The real-desktop bar rig (1.1.0-rc1, found live 2026-10-26 —
+**The real-desktop bar rig (1.0.0-rc1, found live 2026-10-26 —
 sway/labwc on Wayland, Openbox on X11)**: three findings from the
 owner's machines, each now a permanent test.
 
@@ -2616,7 +2616,7 @@ converges, so app-driven extension popups are measured exactly like
 widget-tree windows). This is the first tool to reach for when a
 popup misbehaves on a real desktop.
 
-**FDK_STARTUP_TRACE=1** (1.1.0-rc1, the X1 diagnostic) logs one INFO
+**FDK_STARTUP_TRACE=1** (1.0.0-rc1, the X1 diagnostic) logs one INFO
 line per startup phase with its own duration and the total since the
 first traced call: backend connect legs (`XOpenDisplay`, the
 Wayland roundtrip, `XOpenIM (lazy)` when it runs), EWMH detection,
@@ -2686,7 +2686,7 @@ the package copied ALONE into a scratch directory with no sibling
 FDK anywhere, built against the installed prefix: the packaging
 families' exact condition, now a permanent test.
 
-## 1.1.0 — the notifyd rig (S-2 / A-12)
+## 1.0.0 — the notifyd rig (S-2 / A-12)
 
 `make -C fdk-shell-overlay test-notifyd` — the notification daemon's full
 integration rig (fdk-shell-overlay/tests/notifyd_rig.sh), three phases:
@@ -2737,7 +2737,7 @@ cold-cache 320 B. The id parser's own trap is documented in the
 rig: gdbus prints `(uint32 N,)` — extracting "the first number"
 yields 32, from the TYPE NAME, every time.
 
-## 1.1.0 — the hermetic environment pin (the owner's-desktop red)
+## 1.0.0 — the hermetic environment pin (the owner's-desktop red)
 
 `test_progress` red on the owner's real machine while CI was
 green: `filled50 >= 96 && filled50 <= 104` failed, and the bare
@@ -2800,7 +2800,7 @@ GCC 15 flags increment-only variables GCC 14 does not) was
 removed; a scanner over the whole tree confirmed it was the only
 real case.
 
-## 1.1.0-rc2 (2026-10-31) — the tablet-crash rigs: hostile cookies, the stylus-evidence classification, and REAL XTEST cookies
+## 1.0.0-rc2 (2026-10-31) — the tablet-crash rigs: hostile cookies, the stylus-evidence classification, and REAL XTEST cookies
 
 The owner's desktop report (ASan+UBSan build dying in
 `xi2_valuator` with garbage fields and a wild pointer) was the
@@ -2861,7 +2861,7 @@ Also new: the D-Bus unavailable notice is pinned once-per-process
 (three connection attempts, one log line, through a counting sink)
 — the fix for the owner's triple startup line.
 
-## 1.1.0-rc2 (2026-10-31, second round) — the §20 attach-count rig, the permanent stress legs, and the selection-geometry pixels
+## 1.0.0-rc2 (2026-10-31, second round) — the §20 attach-count rig, the permanent stress legs, and the selection-geometry pixels
 
 Three new suites, one per concern of the round (the narratives are
 in docs/DECISIONS.md D-036/D-037/D-038):

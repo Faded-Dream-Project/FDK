@@ -1,4 +1,4 @@
-/* test_dbus.c — the native D-Bus client's headless wire tests (1.1.0)
+/* test_dbus.c — the native D-Bus client's headless wire tests (1.0.0)
  *
  * Everything that needs no bus: the value tree, the marshaler and
  * its exact reference bytes (pinned against captures of the

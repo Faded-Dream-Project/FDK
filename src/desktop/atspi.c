@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "atspi"
 
 /*
- * atspi.c — the AT-SPI2 accessibility bridge, level 1 (1.1.0, S-8 / B-10).
+ * atspi.c — the AT-SPI2 accessibility bridge, level 1 (1.0.0, S-8 / B-10).
  *
  * Exposes FDK applications to OS screen readers (Orca, NVDA+atspi,
  * Dragon accessibility stacks) over the native D-Bus client — the

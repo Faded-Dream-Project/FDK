@@ -1,4 +1,4 @@
-/* test_narrator.c — the embedded screen reader core (1.1.0),
+/* test_narrator.c — the embedded screen reader core (1.0.0),
  * headless.
  *
  * The no-bus policy's proof of work: FDK narrates focus moves,

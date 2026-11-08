@@ -45,7 +45,7 @@ typedef void (*fdk_platform_dispatch_fn)(fdk_platform_window *pwindow,
                                           const fdk_event_data *event,
                                           void *dispatch_user_data);
 
-/* ---- Foreign-toplevel management types (1.1.0, D-4) ---------------
+/* ---- Foreign-toplevel management types (1.0.0, D-4) ---------------
  *
  * The backend half of include/fdk/fdk_toplevel.h (the taskbar
  * substrate). The backend owns the LIVE SET of foreign toplevels
@@ -69,7 +69,7 @@ struct fdk_platform_toplevel {
 /* Opaque backend-owned tracker (one per open list). */
 struct fdk_platform_toplevels;
 
-/* ---- Session participation types (1.1.0, D-5) -------------------------
+/* ---- Session participation types (1.0.0, D-5) -------------------------
  *
  * The backend half of include/fdk/fdk_session.h (the save/restore
  * desktop contract). Wayland owns the object lane: the tracker is
@@ -134,7 +134,7 @@ typedef struct fdk_platform_damage {
 } fdk_platform_damage;
 
 /* The pointing-hand cursor in the window_set_cursor op's shape space
- * (1.1.0-rc1): 0 stays "default arrow", 1..8 are the resize compass
+ * (1.0.0-rc1): 0 stays "default arrow", 1..8 are the resize compass
  * (fdk_window_resize_edge), and 9 is the application-requested hand
  * over clickable content. Plain #define, not an enum, so both backends
  * and the core can use it without a shared-header dependency; the
@@ -142,7 +142,7 @@ typedef struct fdk_platform_damage {
  * inside the window layer. */
 #define FDK_PLATFORM_CURSOR_POINTER 9
 
-/* The full named set (1.1.0-rc2, S-5 / B-12): public shapes 2..21
+/* The full named set (1.0.0-rc2, S-5 / B-12): public shapes 2..21
  * (FDK_CURSOR_TEXT .. FDK_CURSOR_VERTICAL_TEXT) ride the op space at
  * FDK_PLATFORM_CURSOR_NAMED_BASE + (public - 2), i.e. 32..51 — kept
  * clear of the compass and the hand. The window layer maps; the
@@ -265,7 +265,7 @@ typedef struct fdk_platform_ops {
      * xkb_state exists afterwards (the suite's go signal). */
     int (*test_default_keymap)(fdk_platform_connection *conn);
 
-    /* OPTIONAL test seam (1.1.0, M-3): the REAL wl_touch listener
+    /* OPTIONAL test seam (1.0.0, M-3): the REAL wl_touch listener
      * bodies, driven directly — sway headless's seat carries no
      * touch capability (wlroots has no virtual-touch protocol), so
      * the rig cannot reach them through the wire. phase:
@@ -277,7 +277,7 @@ typedef struct fdk_platform_ops {
                       fdk_platform_window *pwin, int phase,
                       uint32_t id, double x, double y);
 
-    /* OPTIONAL test seam (1.1.0-rc2, S-5): drives the cursor APPLY
+    /* OPTIONAL test seam (1.0.0-rc2, S-5): drives the cursor APPLY
      * path for any op shape against the live connection — the
      * production window_set_cursor op needs a real input serial
      * (a pointer enter), which the headless compositor only mints
@@ -290,7 +290,7 @@ typedef struct fdk_platform_ops {
     int (*test_cursor_apply)(fdk_platform_connection *conn,
                              fdk_platform_window *pwin, int op_shape);
 
-    /* OPTIONAL (1.1.0, M-1 IME): push the focused text widget's
+    /* OPTIONAL (1.0.0, M-1 IME): push the focused text widget's
      * context (UTF-8 text + caret byte offset; NULL text = the focus
      * moved to a non-text widget) to the platform's input-method
      * machinery. Wayland: set_surrounding_text + commit on the
@@ -300,7 +300,7 @@ typedef struct fdk_platform_ops {
     void (*ime_update_surrounding)(fdk_platform_window *pwindow,
                                    const char *text, int cursor);
 
-    /* OPTIONAL (1.1.0, S-3 idle inhibition): engage/release the
+    /* OPTIONAL (1.0.0, S-3 idle inhibition): engage/release the
      * compositor's native idle inhibition for this window's
      * surface (Wayland: zwp_idle_inhibit_manager_v1). Returns
      * FDK_ERR_UNSUPPORTED when the backend/compositor has no
@@ -309,7 +309,7 @@ typedef struct fdk_platform_ops {
     fdk_result (*window_set_idle_inhibit)(fdk_platform_window *pwindow,
                                           int inhibit);
 
-    /* OPTIONAL (1.1.0, S-6 activation): bring this window to the
+    /* OPTIONAL (1.0.0, S-6 activation): bring this window to the
      * user (Wayland: xdg-activation-v1 — a compositor-minted token,
      * or the one captured from XDG_ACTIVATION_TOKEN at connect
      * while unconsumed; X11: the _NET_ACTIVE_WINDOW root message
@@ -318,7 +318,7 @@ typedef struct fdk_platform_ops {
      * backend has no mechanism at all. */
     fdk_result (*window_activate)(fdk_platform_window *pwindow);
 
-    /* OPTIONAL (1.1.0, S-6): mint an activation token tied to this
+    /* OPTIONAL (1.0.0, S-6): mint an activation token tied to this
      * window for a LAUNCHER to pass to a child process (Wayland:
      * xdg_activation_token_v1 done string, fetched through a PRIVATE
      * event queue + one bounded roundtrip — reentrancy-safe from
@@ -343,7 +343,7 @@ typedef struct fdk_platform_ops {
     void (*window_hide)(fdk_platform_window *pwindow);
     void (*window_set_title)(fdk_platform_window *pwindow, const char *title);
 
-    /* OPTIONAL (1.1.0, M-4 window identity): the window's icon as
+    /* OPTIONAL (1.0.0, M-4 window identity): the window's icon as
      * width x height ARGB8888 pixels (fdk_u32 packing, A<<24|R<<16|
      * G<<8|B — identical bytes to _NET_WM_ICON and the
      * xdg-toplevel-icon ARGB8888 buffer). pixels == NULL or
@@ -487,10 +487,10 @@ typedef struct fdk_platform_ops {
      * zones use it to show the directional resize cursor BEFORE any
      * button is held — the affordance users expect from a resizable
      * window — or FDK_PLATFORM_CURSOR_POINTER (9): the pointing hand
-     * an application requests over clickable regions (1.1.0-rc1,
+     * an application requests over clickable regions (1.0.0-rc1,
      * fdk_window_set_cursor / fdk_ext_surface_set_cursor — the
      * public fdk_cursor_shape enum maps onto this space; the backend
-     * owns the encoding), or a NAMED shape (1.1.0-rc2, S-5):
+     * owns the encoding), or a NAMED shape (1.0.0-rc2, S-5):
      * FDK_PLATFORM_CURSOR_NAMED_BASE + (public - 2) for the full
      * fdk_cursor_shape set (TEXT .. VERTICAL_TEXT). Called only on
      * shape transitions (the
@@ -501,7 +501,7 @@ typedef struct fdk_platform_ops {
                                 fdk_i32 *out_x, fdk_i32 *out_y);
     void (*window_set_cursor)(fdk_platform_window *pwindow, int edge);
 
-    /* OPTIONAL (1.1.0-rc2, S-4 / A-06): sets the window's INPUT
+    /* OPTIONAL (1.0.0-rc2, S-4 / A-06): sets the window's INPUT
      * region — count window-LOCAL LOGICAL rectangles (0 <= count
      * <= FDK_PLATFORM_INPUT_REGION_MAX; NULL rects with count 0 =
      * clear, full input). Input on the window outside the rects
@@ -744,7 +744,7 @@ typedef struct fdk_platform_ops {
      * event dispatch — no nested loop, no blocking; pointer events
      * while the drag is active belong to it. NULL = backend cannot
      * start drags (the frontend reports FDK_ERR_UNSUPPORTED).
-     * 1.1.0, S-9: the icon triple (icon/icon_w/icon_h — ARGB8888,
+     * 1.0.0, S-9: the icon triple (icon/icon_w/icon_h — ARGB8888,
      * fdk_u32 packing, already clamped to 256 by the frontend) rides
      * the drag; NULL icon = none. The buffer is TEMPORARY — the
      * backend must finish its own copy (XImage / SHM upload) before
@@ -758,7 +758,7 @@ typedef struct fdk_platform_ops {
                              void (*on_done)(int status, void *user),
                              void *user);
 
-    /* ---- OPTIONAL extension-surface adoption (1.1.0) ----
+    /* ---- OPTIONAL extension-surface adoption (1.0.0) ----
      *
      * The machinery behind include/fdk/fdk_extend.h (see that
      * header for the ownership model; this is the backend half).
@@ -800,14 +800,14 @@ typedef struct fdk_platform_ops {
                                     const fdk_ext_native_handle *native,
                                     fdk_platform_window **out_pwindow);
 
-    /* OPTIONAL (1.1.0): writes a window's native surface handle in
+    /* OPTIONAL (1.0.0): writes a window's native surface handle in
      * the same tagged shape ext_surface_adopt consumed (X11: the
      * Window XID; Wayland: the wl_surface*) — the accessor behind
      * fdk_ext_surface_native(). NULL op = no native handle. */
     fdk_result (*ext_surface_native)(fdk_platform_window *pwindow,
                                      fdk_ext_native_handle *out);
 
-    /* OPTIONAL (1.1.0): an extension surface's ROLE assigned it a
+    /* OPTIONAL (1.0.0): an extension surface's ROLE assigned it a
      * new size (fdk_ext_surface_notify_configure — the Wayland
      * shape; X11's server-driven ConfigureNotify never goes through
      * it). The backend updates its buffer-side size bookkeeping
@@ -818,7 +818,7 @@ typedef struct fdk_platform_ops {
     void (*ext_surface_resized)(fdk_platform_window *pwindow,
                                 fdk_i32 width, fdk_i32 height);
 
-    /* ---- OPTIONAL foreign-toplevel management (1.1.0, D-4) ------
+    /* ---- OPTIONAL foreign-toplevel management (1.0.0, D-4) ------
      * (the types live just above this struct) */
     fdk_result (*toplevels_open)(
         fdk_platform_connection *conn,
@@ -833,7 +833,7 @@ typedef struct fdk_platform_ops {
     fdk_result (*toplevels_close_window)(
         struct fdk_platform_toplevels *toplevels, fdk_u32 index);
 
-    /* ---- OPTIONAL session participation (1.1.0, D-5) -------------------
+    /* ---- OPTIONAL session participation (1.0.0, D-5) -------------------
      * (the types live just above this struct). Wayland only: the
      * xdg-session-management-v1 object lane. X11's session half is
      * the objectLESS WM_COMMAND / WM_SAVE_YOURSELF lane (the
@@ -869,7 +869,7 @@ typedef struct fdk_platform_ops {
         struct fdk_platform_session *session, const char *name);
     void (*window_leave_session)(fdk_platform_window *pwindow);
 
-    /* ---- OPTIONAL subsurface operations (1.1.0, D-2) ---------------
+    /* ---- OPTIONAL subsurface operations (1.0.0, D-2) ---------------
      *
      * The machinery behind fdk_ext_subsurface_create() (see
      * fdk_extend.h's Subsurfaces section): an FDK-OWNED child
@@ -896,7 +896,7 @@ typedef struct fdk_platform_ops {
                                     fdk_i32 width, fdk_i32 height,
                                     fdk_platform_window **out_pwindow);
 
-    /* OPTIONAL (1.1.0, D-2): move the child to parent-relative
+    /* OPTIONAL (1.0.0, D-2): move the child to parent-relative
      * LOGICAL (x, y) — negative legal. X11 applies it server-side
      * now; Wayland applies the parent-managed tree state itself (an
      * empty commit on the topmost configured ancestor — the
@@ -906,13 +906,13 @@ typedef struct fdk_platform_ops {
     void (*subsurface_set_position)(fdk_platform_window *pwindow,
                                     fdk_i32 x, fdk_i32 y);
 
-    /* OPTIONAL (1.1.0, D-2): change the child's logical size. X11
+    /* OPTIONAL (1.0.0, D-2): change the child's logical size. X11
      * resizes the child window now (next framebuffer acquisition
      * follows); Wayland records it for the next present's buffer. */
     void (*subsurface_resize)(fdk_platform_window *pwindow,
                               fdk_i32 width, fdk_i32 height);
 
-    /* OPTIONAL (1.1.0, D-2): the child's commit mode — nonzero
+    /* OPTIONAL (1.0.0, D-2): the child's commit mode — nonzero
      * desync (independent updates; the create-time default), 0
      * sync (updates apply with the parent's commit). X11 has no
      * commit transaction: the op exists there as the documented
@@ -920,7 +920,7 @@ typedef struct fdk_platform_ops {
     void (*subsurface_set_desync)(fdk_platform_window *pwindow,
                                   int desync);
 
-    /* OPTIONAL (1.1.0, D-2): restack the child immediately above
+    /* OPTIONAL (1.0.0, D-2): restack the child immediately above
      * (above != 0) or below the sibling — the window layer already
      * validated both are subsurfaces of the SAME parent. X11:
      * XConfigureWindow with CWSibling/CWStackMode; Wayland:
@@ -931,7 +931,7 @@ typedef struct fdk_platform_ops {
                                    fdk_platform_window *sibling,
                                    int above);
 
-    /* OPTIONAL (1.1.0): the backend's native display connection
+    /* OPTIONAL (1.0.0): the backend's native display connection
      * handle, borrowed for the connection's lifetime — the
      * documented accessor behind fdk_ext_get_native_display()
      * (include/fdk/fdk_extend.h). X11 returns the Display*; Wayland
@@ -983,7 +983,7 @@ void fdk__dnd_free_uri_list(char **list, size_t count);
  * payload, or NULL. */
 char *fdk__dnd_build_uri_list(const char *const *uris, size_t count);
 
-/* ---- Extension surfaces (1.1.0) -----------------------------------------
+/* ---- Extension surfaces (1.0.0) -----------------------------------------
  *
  * The window-layer half of include/fdk/fdk_extend.h (implemented in
  * src/window/extend.c). The WAYLAND backend calls this from its
@@ -1005,7 +1005,7 @@ void fdk__ext_popup_attached(fdk_context *ctx,
                              fdk_platform_window *parent_pwindow,
                              void *native_popup);
 
-/* Popup close-request REASON channel (1.1.0-rc1, X3): a backend that
+/* Popup close-request REASON channel (1.0.0-rc1, X3): a backend that
  * is about to dispatch FDK_EVENT_WINDOW_CLOSE_REQUEST for a popup
  * calls this with WHY (window_internal.h's FDK_POPUP_CLOSE_* values)
  * immediately before the dispatch; the window layer's dispatcher
@@ -1015,7 +1015,7 @@ void fdk__ext_popup_attached(fdk_context *ctx,
  * non-popup close-request. Defined in window.c. */
 void fdk__window_note_popup_close(int reason);
 
-/* The reason values (1.1.0-rc1, X3). Here rather than
+/* The reason values (1.0.0-rc1, X3). Here rather than
  * window_internal.h so the BACKEND generators (x11_events.c's outside
  * click, wayland_window.c's xdg_popup_done) can cite them — they
  * include this header through their platform headers; window.c gets
@@ -1028,7 +1028,7 @@ enum {
     FDK_POPUP_CLOSE_PARENT = 4,        /* the parent's destroy sweep */
 };
 
-/* ---- Per-position drag acceptance (1.1.0, S-9 / B-13) ---------------------
+/* ---- Per-position drag acceptance (1.0.0, S-9 / B-13) ---------------------
  *
  * The backends' acceptance query for a hovering drag, implemented in
  * the CORE window layer (window.c): hit-test the widget tree at the

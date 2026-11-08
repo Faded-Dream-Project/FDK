@@ -54,7 +54,7 @@
 #include "fdk_layout.h"
 #include "fdk_text.h"
 #include "fdk_attr.h" /* §30: the textview editor surface takes attr lists */
-#include "fdk_i18n.h" /* 1.1.0 (S-10): fdk_date/fdk_time/locale, the
+#include "fdk_i18n.h" /* 1.0.0 (S-10): fdk_date/fdk_time/locale, the
                          calendar + pickers' substrate */
 
 #ifdef __cplusplus
@@ -1258,7 +1258,7 @@ fdk_picture_fit fdk_picture_get_fit(fdk_widget *picture);
 fdk_i32 fdk_picture_image_width(fdk_widget *picture);
 fdk_i32 fdk_picture_image_height(fdk_widget *picture);
 
-/* ---- The animated half (1.1.0 / C-4) ----
+/* ---- The animated half (1.0.0 / C-4) ----
  *
  * fdk_picture_set_animated_file loads an animated GIF (the fdk_gif
  * API in fdk_surface.h — WebP/APNG are the future families),
@@ -2286,7 +2286,7 @@ size_t fdk_tree_get_selected_nodes(fdk_widget *tree,
                                    fdk_tree_node *out_nodes,
                                    size_t max_nodes);
 
-/* ---- The calendar and the date/time pickers (1.1.0 / S-10) ----
+/* ---- The calendar and the date/time pickers (1.0.0 / S-10) ----
  *
  * The widget-set residue item: everything on the GTK4 checklist had
  * an FDK counterpart except a date/time picker. This is the close:

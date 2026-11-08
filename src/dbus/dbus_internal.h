@@ -326,7 +326,7 @@ char *fdk__dbus_bus_address(fdk_dbus_bus bus);
 int fdk__dbus_connect_first(const fdk__dbus_addr *addrs, int count,
                             struct fdk__dbus_addr *chosen);
 
-/* TEST SEAM (1.1.0-rc2): resets the process-wide "D-Bus unavailable"
+/* TEST SEAM (1.0.0-rc2): resets the process-wide "D-Bus unavailable"
  * once-flag so a test can pin the exactly-one-line behavior
  * deterministically regardless of test order or environment (any
  * earlier no-bus leg legitimately consumes the notice first). Never

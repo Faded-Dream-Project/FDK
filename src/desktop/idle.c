@@ -1,5 +1,5 @@
 /*
- * idle.c — the idle/screensaver inhibition module (1.1.0, S-3 / B-11)
+ * idle.c — the idle/screensaver inhibition module (1.0.0, S-3 / B-11)
  *
  * Two mechanisms, one handle (include/fdk/fdk_idle.h carries the
  * contract and the lifecycle story):

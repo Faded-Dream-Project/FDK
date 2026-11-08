@@ -69,7 +69,7 @@ desktop-stack dependencies FDK's minimalism goal excludes (Cairo/Pango
 are typically paired with GLib, which pulls in a much larger
 dependency surface than FDK wants). See `docs/licensing-policy.md`.
 
-## The no-libdbus policy (1.1.0, permanent — reconciled 2026-10-30)
+## The no-libdbus policy (1.0.0, permanent — reconciled 2026-10-30)
 
 **This section's 1.0-era text said FDK "never links, dlopens, spawns,
 or requires D-Bus — or any daemon, bus, or activation
@@ -93,7 +93,7 @@ because a daemon is absent. The embedded narrator
 (`fdk_a11y_set_speaker`) remains the no-daemon a11y answer; the
 AT-SPI bridge is the OPT-IN desktop-interop side, not a requirement.
 
-**Added in 1.1.0 — runtime-optional, dlopen'd, never build deps**
+**Added in 1.0.0 — runtime-optional, dlopen'd, never build deps**
 (the fontconfig posture, applied to the text/input/cursor lanes;
 none of them appears in the link line, and a build without any of
 them is unchanged — absent library means the documented fallback,

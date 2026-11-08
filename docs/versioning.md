@@ -3,10 +3,10 @@
 ## The rule
 
 FDK is **in development — no stable release yet.** The public version
-is whatever `include/fdk/fdk_version.h` says — currently a `1.1.0`
+is whatever `include/fdk/fdk_version.h` says — currently a `1.0.0`
 pre-release iteration (`rcN`) carrying the owner's 2026-10-25
 directive that FDK grow a public **extension API** (add-on packages
-building on `fdk/extend.h`); the owner explicitly chose `1.1.0-rc1`
+building on `fdk/extend.h`); the owner explicitly chose `1.0.0-rc1`
 over `1.0.1` because new public API is a minor bump ("not 1.0.1,
 since this adds public API"). The `-rcN` suffix is the owner's
 brake: **no git tag exists and nothing is published** — the project
@@ -19,7 +19,7 @@ life before the 1.0.0 era the number was a project joke (`0.0.1` —
 *this absurdly capable toolkit is still called 0.0.1*.)
 
 ```
-Public version:       1.1.0-rcN     (development iteration; no tag, no release)
+Public version:       1.0.0-rcN     (development iteration; no tag, no release)
 Engineering standard: extremely high (unchanged by the number)
 ```
 
@@ -82,7 +82,7 @@ with nothing published anywhere.
 ## Internal milestones are not versions
 
 `ROADMAP.md` tracks work with Phase numbers and internal
-milestone labels (`1.0.0`, `1.0.1`, `1.1.0`, …, `1.4.19`). These
+milestone labels (`1.0.0`, `1.0.1`, `1.0.0`, …, `1.4.19`). These
 are **engineering milestones** — history markers for when work
 landed. **Disambiguation, which matters:** the *roadmap milestone
 labelled "1.0.0"* (Phase 11 stabilization, 2024) is a different
@@ -136,9 +136,9 @@ The 1.0.0 bump of 2026-10-12 satisfied both: the owner demanded the
 release after verifying the picker work on real hardware, and this
 document was updated in the same commit that moved the macros.
 
-The 1.1.0-rc1 bump of 2026-10-25 satisfies both again: the owner set
+The 1.0.0-rc1 bump of 2026-10-25 satisfies both again: the owner set
 the release target and the number in the same breath as the feature
-directive ("Bump FDK to 1.1.0-rc1 (not 1.0.1, since this adds public
+directive ("Bump FDK to 1.0.0-rc1 (not 1.0.1, since this adds public
 API)... Do NOT create or move any git tag and do NOT touch the 1.0.0
 release. I'll decide on the final tag.") — that directive's tag
 embargo posture is the one the project still keeps today: no tags,
@@ -198,19 +198,19 @@ no releases, until the owner says otherwise.
   pins carried over to the fixture corpus in test_shipped_themes.c),
   and the `v1.0.0` tag re-created on the alignment commit with the
   release assets replaced on the main repository.
-- 2026-10-25: **1.1.0-rc1 — the extension API candidate.** The owner
+- 2026-10-25: **1.0.0-rc1 — the extension API candidate.** The owner
   directed the next version to add a public extension API
   (`include/fdk/fdk_extend.h`) so add-on packages can be built on top
   of FDK — proved by fdk-layer-shell, a separate layer-shell package that
   compiles against FDK's installed public headers and library only —
-  and set the number explicitly: 1.1.0-rc1, a MINOR bump because the
+  and set the number explicitly: 1.0.0-rc1, a MINOR bump because the
   change ADDS public API (the owner's own words ruled out 1.0.1).
   The additions are ABI-append-only (new
   functions, opaque types, no layout changes to existing public
   structs), so the SONAME stays `libfdk.so.1`.
-- 2026-10-26: **1.1.0-rc1 → 1.1.0-rc2 (rcN bump, same candidate).**
+- 2026-10-26: **1.0.0-rc1 → 1.0.0-rc2 (rcN bump, same candidate).**
   The owner's Phase 2 directive authorized rcN bumps freely ("Bump
-  FDK to 1.1.0-rc1 ... bumping rcN is fine"). rc2 marks the native
+  FDK to 1.0.0-rc1 ... bumping rcN is fine"). rc2 marks the native
   D-Bus client (the M-7 foundation): 115 new append-only public
   symbols in include/fdk/fdk_dbus.h, plus the additive
   fdk_ext_loop_update_fd() (FDK_EXT_API_VERSION stays 1 — no
@@ -221,6 +221,17 @@ no releases, until the owner says otherwise.
   `release` branch) was retired, and the history was re-published
   fresh — one branch, `main`, zero tags, no releases, no published
   artifacts of any kind. The version macros are untouched (still the
-  1.1.0 rcN iteration); they describe the development tree, not a
+  1.0.0 rcN iteration); they describe the development tree, not a
   release. This document, the README, and the CI workflows were
   reworded to match: nothing anywhere claims a published release.
+- 2026-11-08: **1.0.0 — THE FIRST RELEASE (the owner's decision).**
+  The owner set the first release to 1.0.0: the rcN candidate
+  numbering is retired, the suffix is dropped (the final release),
+  MINOR goes 1 → 0 (the candidates described a minor-bump iteration
+  that never shipped as such; the first release is the clean
+  1.0.0), and every cycle label in the tree — code comments, docs,
+  packaging, the changelog's candidate entries — reads 1.0.0. The
+  SONAME stays `libfdk.so.1` (the ABI is append-only throughout;
+  MAJOR owns the SONAME digit and it never moved). The test pins
+  moved with it (tests/test_core.c: MINOR 0, empty suffix, string
+  "1.0.0").

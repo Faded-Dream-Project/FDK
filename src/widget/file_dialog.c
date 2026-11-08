@@ -3283,7 +3283,7 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
         return FDK_ERR_INVALID_ARGUMENT;
     }
 
-    /* ---- The portal first (1.1.0, C-1 / B-09) ----------------------
+    /* ---- The portal first (1.0.0, C-1 / B-09) ----------------------
      *
      * Save the flight's callback/context and a full options copy
      * BEFORE the try: a portal failure can arrive inside the very

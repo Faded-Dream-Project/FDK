@@ -1,4 +1,4 @@
-/* test_dbus_live.c — the native D-Bus client against a REAL bus (1.1.0)
+/* test_dbus_live.c — the native D-Bus client against a REAL bus (1.0.0)
  *
  * Runs under `make test-dbus`, which wraps this binary in
  * dbus-run-session(1) and a throwaway Xvfb (the fdk_context the
@@ -528,7 +528,7 @@ static void name_event_cb(fdk_dbus_connection *c, const char *name,
 
 /* ---- the suite ------------------------------------------------------ */
 
-/* ---- The mock FileChooser portal (1.1.0, C-1 / B-09) --------------------
+/* ---- The mock FileChooser portal (1.0.0, C-1 / B-09) --------------------
  *
  * A becomes org.freedesktop.portal.Desktop serving
  * org.freedesktop.portal.FileChooser: OpenFile/SaveFile parse the
@@ -767,7 +767,7 @@ static void atspi_btn_cb(fdk_widget *b, void *user) {
     (*n)++;
 }
 
-/* ---- The mock AT-SPI stack (1.1.0, S-8 / B-10) --------------------------
+/* ---- The mock AT-SPI stack (1.0.0, S-8 / B-10) --------------------------
  *
  * A serves org.a11y.Bus on the SESSION bus, answering GetAddress with
  * the session bus's OWN address (the rig collapses the two-bus
@@ -1516,7 +1516,7 @@ int main(void) {
         remove(theme_root);
     }
 
-    /* ---- Idle inhibition vs the mock ScreenSaver (1.1.0, S-3) ---- */
+    /* ---- Idle inhibition vs the mock ScreenSaver (1.0.0, S-3) ---- */
     {
         g_reqname_done = 0;
         fdk_dbus_pending *sp = fdk_dbus_connection_request_name(
@@ -1592,7 +1592,7 @@ int main(void) {
         printf("[ok] idle: service refusal degrades to UNSUPPORTED\n");
     }
 
-    /* ---- The FileChooser portal (1.1.0, C-1 / B-09) ----------------------
+    /* ---- The FileChooser portal (1.0.0, C-1 / B-09) ----------------------
      *
      * A already owns org.freedesktop.portal.Desktop (the color-scheme
      * section took it; one name, two interfaces — exactly how the
@@ -1766,7 +1766,7 @@ int main(void) {
                "ERROR outcome, no fallback\n");
     }
 
-    /* ---- The AT-SPI bridge (1.1.0, S-8 / B-10) -----------------------------
+    /* ---- The AT-SPI bridge (1.0.0, S-8 / B-10) -----------------------------
      *
      * A serves org.a11y.Bus (GetAddress -> the session bus's own
      * address; the rig collapses the two-bus architecture). The FDK

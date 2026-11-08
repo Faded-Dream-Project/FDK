@@ -1,5 +1,5 @@
 /*
- * dbus_connection.c — the connection object (1.1.0)
+ * dbus_connection.c — the connection object (1.0.0)
  *
  * Everything above the wire: the async state machine (connect →
  * SASL → Hello → ready), the fd-source/pump integration, pending
@@ -69,7 +69,7 @@ static void sweep_dead_watchers(fdk_dbus_connection *c);
 static void handshake_queue_advance(fdk_context *ctx,
                                     const char *address);
 
-/* The process-wide "D-Bus unavailable" once-flag (1.1.0-rc2 — the
+/* The process-wide "D-Bus unavailable" once-flag (1.0.0-rc2 — the
  * owner's triple-startup-line report; see connect_common). */
 static int fdk__dbus_unavailable_logged = 0;
 
@@ -1564,7 +1564,7 @@ static fdk_dbus_connection *connect_common(fdk_context *ctx,
     int fd = fdk__dbus_connect_first(addrs, n_addrs, &chosen);
     if (fd < 0) {
         /* One line, once — the no-bus posture every feature above
-         * this layer keys off. (1.1.0-rc2: startup connects the session
+         * this layer keys off. (1.0.0-rc2: startup connects the session
          * bus up to three times — notifications, the tray watcher,
          * the settings bridge — and each failure used to repeat this
          * line; the verdict is a property of the machine, not of the

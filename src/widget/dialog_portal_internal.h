@@ -1,7 +1,7 @@
 #ifndef FDK_DIALOG_PORTAL_INTERNAL_H
 #define FDK_DIALOG_PORTAL_INTERNAL_H
 
-/* The xdg-desktop-portal FileChooser seam (1.1.0, C-1 / B-09).
+/* The xdg-desktop-portal FileChooser seam (1.0.0, C-1 / B-09).
  *
  * portal_file_chooser.c implements the portal client;
  * file_dialog.c owns the fallback. The two halves call each other

@@ -1,5 +1,5 @@
 /*
- * fdk_notify.h — Faded Dream ToolKit desktop notifications client (1.1.0)
+ * fdk_notify.h — Faded Dream ToolKit desktop notifications client (1.0.0)
  *
  * The APP side of the freedesktop notification protocol
  * (org.freedesktop.Notifications): send a notification to whatever

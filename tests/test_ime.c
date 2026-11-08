@@ -1,5 +1,5 @@
 /*
- * test_ime.c — the IME model's headless battery (1.1.0, M-1)
+ * test_ime.c — the IME model's headless battery (1.0.0, M-1)
  *
  * Three seams, one file:
  *

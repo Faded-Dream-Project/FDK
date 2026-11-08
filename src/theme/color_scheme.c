@@ -1,6 +1,6 @@
 #define FDK_LOG_TAG "theme"
 /*
- * color_scheme.c — the desktop's light/dark preference (1.1.0)
+ * color_scheme.c — the desktop's light/dark preference (1.0.0)
  *
  * One process-wide answer to "does the desktop prefer dark or
  * light?", sourced the way each world actually states it:

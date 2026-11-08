@@ -2,7 +2,7 @@
 
 #define FDK_LOG_TAG "wayland"
 
-/* Cursor shaping on Wayland (1.1.6; the full named set 1.1.0-rc2).
+/* Cursor shaping on Wayland (1.1.6; the full named set 1.0.0-rc2).
  *
  * Wayland clients own their cursor PIXELS: after wl_pointer::enter the
  * client must answer with wl_pointer.set_cursor(serial, surface, hx,
@@ -236,7 +236,7 @@ static int cursor_shape_get_named(fdk_platform_connection *conn,
 
 /* ---- the platform op --------------------------------------------- */
 
-/* THE shape application (1.1.0-rc1, the W2 report; the named set
+/* THE shape application (1.0.0-rc1, the W2 report; the named set
  * rc2). Two transports, in preference order:
  *
  *   cursor-shape-v1 (when the compositor offered the manager and the
@@ -330,7 +330,7 @@ void fdk_wayland_window_set_cursor(fdk_platform_window *pwindow, int edge) {
     fdk_wayland_cursor_apply(conn, pwindow, conn->last_input_serial, edge);
 }
 
-/* Test seam (1.1.0-rc2, S-5; platform_internal.h's fdk_platform_ops
+/* Test seam (1.0.0-rc2, S-5; platform_internal.h's fdk_platform_ops
  * entry — production code never calls it): drives the apply path for
  * ANY op shape with the newest input serial (synthetic 1 when none
  * arrived — the REQUEST still goes out; wlroots applies shape advice

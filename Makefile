@@ -59,7 +59,7 @@ FDK_VERSION_MAJOR := $(shell sed -n 's/^#define FDK_VERSION_MAJOR \([0-9]*\).*/\
 # no pre-release suffix, ever. Two reasons: it is the GNU convention
 # (versioned .so filenames are numeric), and Alpine's abuild derives
 # the apk so:provides version from the filename tail
-# (sover=${file##*.so.}) — a suffixed tail (libfdk.so.1.1.0-rc1) makes
+# (sover=${file##*.so.}) — a suffixed tail (libfdk.so.1.0.0-rc1) makes
 # apk index reject the package ("package file format error", proven
 # live on CI 2026-10-25). The rc suffix lives in the library's version
 # string, pkg-config Version, and package metadata — not here.
@@ -251,7 +251,7 @@ endif
 
 # Platform-common sources (explicitly listed; the src/platform root
 # has no wildcard — the wayland_disabled.c precedent). cursor_theme.c
-# is the shared XCursor theme loader both backends ride (1.1.0-rc2
+# is the shared XCursor theme loader both backends ride (1.0.0-rc2
 # S-5; needs neither backend's flags — plain libc).
 PLATFORM_COMMON_SRCS := src/platform/cursor_theme.c
 WINDOW_SRCS   := $(wildcard src/window/*.c)
@@ -595,7 +595,7 @@ test-x11: $(X11_TEST_BIN) $(X11_URI_TEST_BIN) $(THREAD_TEST_BIN)
 		exit $$TEST_RESULT; \
 	fi
 
-# D-Bus live-bus integration test (1.1.0) — NOT part of plain
+# D-Bus live-bus integration test (1.0.0) — NOT part of plain
 # `make test`. Wraps the test binary in dbus-run-session(1) (a real,
 # throwaway dbus-daemon) and a throwaway Xvfb (the fdk_context the
 # native client rides needs a display). Skips loudly when either is
@@ -608,7 +608,7 @@ DBUS_TRAY_BIN := $(BUILD_DIR)/tests/test_tray_item
 # One session, every live test: each binary skips individually when it
 # must, and REQUIRE knobs (FDK_DBUS_TEST_REQUIRE / FDK_TRAY_TEST_REQUIRE)
 # make the skips failures where CI demands it.
-# 1.1.0, C-1: the live test's portal-fallback leg opens the toolkit's
+# 1.0.0, C-1: the live test's portal-fallback leg opens the toolkit's
 # own browser window — the GL lane's exit-time Mesa allocations ride
 # it, same as the X11 suite (the suppression file is shared).
 DBUS_LIVE_ALL := "LSAN_OPTIONS=\"suppressions=$(CURDIR)/tests/data/lsan-gl.supp\" $(DBUS_LIVE_BIN) && $(DBUS_NOTIFY_BIN) && $(DBUS_TRAY_BIN)"
@@ -639,7 +639,7 @@ $(DBUS_LIVE_BIN): $(DBUS_LIVE_SRC) $(STATIC_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual $< $(STATIC_LIB) -o $@ $(LDFLAGS)
 
-# text_demo screenshot rig (the §10 hand-equivalent, 1.1.0): what the
+# text_demo screenshot rig (the §10 hand-equivalent, 1.0.0): what the
 # owner's eyes verify on the real desktop — complex-script ink, joined
 # Arabic, the Devanagari shirorekha, dense Han ideographs — proven
 # mechanically under a throwaway Xvfb against examples/text_demo

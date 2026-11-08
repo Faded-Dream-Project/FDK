@@ -43,7 +43,7 @@ written against — compile-time AND run-time, both:
 #include <fdk/fdk_extend.h>
 
 #if !defined(FDK_EXT_API_VERSION) || FDK_EXT_API_VERSION < 1
-#error "this add-on needs FDK's extension API v1 (FDK 1.1.0)"
+#error "this add-on needs FDK's extension API v1 (FDK 1.0.0)"
 #endif
 
 int addon_init(fdk_context *ctx) {
@@ -143,7 +143,7 @@ Rules that matter:
   layer-shell: create the role, set your parameters, and commit an
   EMPTY surface at show-time to start the configure — exactly what
   fdk-layer-shell's `fdk_layer_shell_layer_show` does.)
-- **Wayland, the buffer side (1.1.0-rc1)**: FDK now ENFORCES the
+- **Wayland, the buffer side (1.0.0-rc1)**: FDK now ENFORCES the
   "no buffer before the first configure" rule on the present path —
   a present before your first `fdk_ext_surface_notify_configure()`
   is deferred and committed post-ack by that call (or re-driven via
@@ -241,7 +241,7 @@ exposed as an `fdk_window*`, so the window-API operations that would
 be meaningless on a role-carrying surface (set_title, maximize,
 resize) are unreachable by construction.
 
-### The hover cursor (1.1.0-rc1)
+### The hover cursor (1.0.0-rc1)
 
 ```c
 fdk_ext_surface_set_cursor(surface, FDK_CURSOR_POINTER);
@@ -301,7 +301,7 @@ backend's events. `FDK_EXT_FD_IN/OUT` are the watch flags;
 `ERR/HUP` are reported like poll(2) reports them. The fd is never
 closed by FDK.
 
-**Retargeting the watch mask** (1.1.0): a protocol with an output
+**Retargeting the watch mask** (1.0.0): a protocol with an output
 buffer should watch `IN` alone while the buffer is empty and add
 `OUT` only while bytes are pending —
 
@@ -398,7 +398,7 @@ trip is harmless at any time.
   through FDK's translated events and the public clipboard API. An
   add-on needing RAW seat access would need a new accessor — raise
   it as an API proposal, never work around it.
-- X11 per-output geometry exists since 1.1.0 (M-6: RandR
+- X11 per-output geometry exists since 1.0.0 (M-6: RandR
   enumeration, per-output anchoring, output events through
   fdk-layer-shell's own connection). The X11 residue is the EWMH one:
   _NET_WM_STRUT_PARTIAL is screen-global, so an exclusive-zone
@@ -412,7 +412,7 @@ trip is harmless at any time.
 
 ---
 
-## 13. The D-Bus client — a first-class native subsystem (1.1.0)
+## 13. The D-Bus client — a first-class native subsystem (1.0.0)
 
 `include/fdk/fdk_dbus.h` is FDK's own D-Bus client, implemented
 from the public specification in raw C (src/dbus/) with **no
@@ -505,7 +505,7 @@ typed PropertiesChanged, name watching through its full lifecycle,
 introspection, and close-from-inside-its-own-callback). The
 ubuntu CI job runs the live suite with skips made fatal.
 
-## 14. Desktop notifications — the app side (1.1.0)
+## 14. Desktop notifications — the app side (1.0.0)
 
 `include/fdk/fdk_notify.h` is the CLIENT half of
 org.freedesktop.Notifications: send a notification to whatever
@@ -570,7 +570,7 @@ field validated at the mock (the image-data bytes read back
 flat), withdraw/replaces, malformed-request refusal, the daemon
 vanish/return cycle, and teardown-inside-its-own-event.
 
-## 15. The tray — the app side (1.1.0)
+## 15. The tray — the app side (1.0.0)
 
 `include/fdk/fdk_tray.h` is the ITEM half of the desktop tray:
 a StatusNotifierItem export (both the org.kde and org.ayatana
@@ -617,7 +617,7 @@ LayoutUpdated + the AboutToShow dirty handshake, New*/Properties-
 Changed receipts, activation/scroll, and the watcher
 vanish/return cycle with re-registration.
 
-## 16. The desktop HOST models — fdk-layer-shell's other half (1.1.0)
+## 16. The desktop HOST models — fdk-layer-shell's other half (1.0.0)
 
 Sections 14-15 are the APP side (FDK core: a client and an item).
 The HOST side lives in the fdk-layer-shell package:
@@ -643,7 +643,7 @@ a private bus (D-014 records the shape decisions, including the
 one-model-per-connection rule and the asynchronous name
 etiquette).
 
-## 17. The UI font size — one number, everywhere (1.1.0)
+## 17. The UI font size — one number, everywhere (1.0.0)
 
 `fdk_ui_font_size()` / `fdk_ui_scale()` / `fdk_ui_font_px()`
 (fdk_theme.h) answer "what size is the UI text?" the same way
@@ -669,7 +669,7 @@ size — the backward-compatible escape hatch.
 
 ---
 
-## 18. Subsurfaces — an FDK-owned child surface (1.1.0, extension API v2, D-2)
+## 18. Subsurfaces — an FDK-owned child surface (1.0.0, extension API v2, D-2)
 
 The video-in-UI / offscreen-overlay primitive: a rectangular region
 of an existing window (or extension surface) that renders, moves,

@@ -1,5 +1,5 @@
 /*
- * dbus_types.c — the fdk_dbus_value tree (1.1.0)
+ * dbus_types.c — the fdk_dbus_value tree (1.0.0)
  *
  * Constructors, cloning, and freeing of the public argument model.
  * Every constructor VALIDATES what the wire would validate anyway

@@ -321,7 +321,7 @@ fdk_result fdk_surface_present(fdk_surface *surface) {
         return r; /* damage retained — a retry re-presents it */
     }
 
-    /* Popup latency trace (1.1.0-rc1, X2): THE convergence point of
+    /* Popup latency trace (1.0.0-rc1, X2): THE convergence point of
      * every present — the widget-tree auto-paint tail and the
      * application-driven presents of extension-API popups (the demo
      * bar paints its popup surface directly) both land here. A motion

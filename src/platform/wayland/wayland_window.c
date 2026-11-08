@@ -98,7 +98,7 @@ static fdk_result create_shm_buffer(fdk_platform_connection *conn,
     }
 
     struct wl_shm_pool *pool = wl_shm_create_pool(conn->shm, fd, (int32_t)length);
-    /* FD LIFETIME (1.1.0-rc1, found live on sway/labwc headless — the
+    /* FD LIFETIME (1.0.0-rc1, found live on sway/labwc headless — the
      * invisible-hover/w1 chase): libwayland resolves an fd argument at
      * FLUSH time, by number. Closing it before the create_pool request
      * has been written to the socket lets the kernel hand that number
@@ -184,7 +184,7 @@ fdk_result fdk__wayland_surface_downgrade_from_lane(
 
 /* THE deferred-first-frame commit, shared by xdg_surface_configure()
  * and the extension path (wayland_ext.c's resized op — the add-on's
- * role configure). Mirrors the 1.1.0 fix: an application that painted
+ * role configure). Mirrors the 1.0.0 fix: an application that painted
  * BEFORE the first configure had its first present deferred (the
  * protocol forbids committing content before the ack) with the damage
  * already consumed — and every later present was a no-op against a
@@ -320,7 +320,7 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
                      });
     }
 
-    /* The deferred first frame (found live, 1.1.0): an application
+    /* The deferred first frame (found live, 1.0.0): an application
      * that paints BEFORE the first configure — exactly what every
      * FDK example does (show, paint, then enter the pump loop) — had
      * its first present deferred above (xdg-shell forbids committing
@@ -458,7 +458,7 @@ static void xdg_popup_configure(void *data, struct xdg_popup *popup,
 static void xdg_popup_done(void *data, struct xdg_popup *popup) {
     (void)popup;
     fdk_platform_window *pwindow = data;
-    /* X3 (1.1.0-rc1): the compositor's dismissal carries its reason —
+    /* X3 (1.0.0-rc1): the compositor's dismissal carries its reason —
      * the single-slot channel window.c's dispatcher consumes when the
      * close-request lands on the popup (the trace then says
      * "compositor dismissal (outside click or focus loss)" instead of
@@ -501,7 +501,7 @@ static void wl_surface_leave_output(void *data, struct wl_surface *surface,
     (void)fdk_wayland_window_recompute_scale(pwindow, output, 0);
 }
 
-/* Non-static (1.1.0): wayland_ext.c's adoption path attaches the same
+/* Non-static (1.0.0): wayland_ext.c's adoption path attaches the same
  * output-tracking listener to adopted extension surfaces — enter/leave
  * keeps the HiDPI scale machinery alive for them exactly like created
  * windows. */
@@ -530,7 +530,7 @@ static void fractional_preferred_scale(void *data,
     }
 }
 
-/* Non-static (1.1.0): wayland_ext.c attaches the same preferred-scale
+/* Non-static (1.0.0): wayland_ext.c attaches the same preferred-scale
  * listener to adopted extension surfaces. */
 const struct wp_fractional_scale_v1_listener
     g_fractional_scale_listener = {
@@ -998,7 +998,7 @@ static void apply_window_scale(fdk_platform_window *pwindow) {
     pwindow->scale_applied = 1;
 }
 
-/* Input region (1.1.0-rc2, S-4 / A-06): wl_surface.set_input_region
+/* Input region (1.0.0-rc2, S-4 / A-06): wl_surface.set_input_region
  * with a wl_compositor region built from the LOGICAL rects — the
  * protocol's surface-local space is exactly FDK's logical space (the
  * one pointer events deliver), so no scale conversion happens here
@@ -1285,7 +1285,7 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
             }
             /* Nothing buffered — READ from the display fd, bounded.
              *
-             * 1.1.0-rc1 rework (the W1 report): the old wait used
+             * 1.0.0-rc1 rework (the W1 report): the old wait used
              * wl_display_prepare_read() — the DEFAULT-queue variant,
              * which REFUSES while any default-queue event is pending.
              * Under heavy pointer motion that is always the case
@@ -1533,7 +1533,7 @@ static fdk_result commit_render_pending(fdk_platform_window *pwindow,
      * pwindow->frame_cb so window_destroy can reap one that never
      * fires.
      *
-     * ORDER (1.1.0-rc1, found live on sway/labwc headless rigs): the
+     * ORDER (1.0.0-rc1, found live on sway/labwc headless rigs): the
      * frame request MUST be marshalled BEFORE the commit it paces.
      * wl_surface.frame's contract attaches the callback to the commit
      * it is submitted with; requesting it after the commit attaches it
@@ -1577,7 +1577,7 @@ static fdk_result commit_render_pending(fdk_platform_window *pwindow,
               size.width, size.height,
               damage->full ? -1 : damage->count);
 
-    /* Flush after every commit (1.1.0-rc1, the W1 checklist): the
+    /* Flush after every commit (1.0.0-rc1, the W1 checklist): the
      * pump's dispatch tail flushes eventually, but a present from an
      * application paint loop (the demo bar, between pumps) would
      * otherwise sit in libwayland's output buffer until the next pump
@@ -1672,7 +1672,7 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
          * waiting for "the application's next present" would wait
          * forever: with the tree clean it would be a no-op).
          *
-         * EXTENSION surfaces (1.1.0) ride the SAME gate (1.1.0-rc1
+         * EXTENSION surfaces (1.0.0) ride the SAME gate (1.0.0-rc1
          * fix, found live on labwc/sway 2026-10-26: "zwlr_layer_
          * surface_v1: error 2: layer_surface has never been
          * configured" killed the bar the moment it painted before
@@ -1972,7 +1972,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
         (options != NULL && options->input_transparent != 0);
     pwindow->drop_formats = 0; /* fdk_window_set_drop_formats fills it */
     pwindow->xdg_popup = NULL;
-    /* Subsurface markers (1.1.0, D-2): never set on THIS path —
+    /* Subsurface markers (1.0.0, D-2): never set on THIS path —
      * subsurfaces come through wayland_ext.c's subsurface_create,
      * which builds the pwindow itself (no xdg objects at all).
      * Stated explicitly for the same reason every other field is:
@@ -1998,7 +1998,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
          * destroyed topmost-first — the window layer's popup-family
          * sweep guarantees that order.
          *
-         * 1.1.0 — EXTENSION-surface parents: the parent's wl_surface
+         * 1.0.0 — EXTENSION-surface parents: the parent's wl_surface
          * carries the ADD-ON's role (a layer surface), not an
          * xdg_surface, so the xdg_popup is created with NO xdg
          * parent and the kind's popup_attached hook hands the popup
@@ -2014,7 +2014,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
             return FDK_ERR_INVALID_ARGUMENT;
         }
         if (parent->is_subsurface) {
-            /* 1.1.0, D-2: xdg_popup cannot anchor to a wl_subsurface
+            /* 1.0.0, D-2: xdg_popup cannot anchor to a wl_subsurface
              * — the xdg-shell protocol requires the popup's parent to
              * be an xdg_surface (toplevel/popup) or a role object
              * that adopts it (the kind's popup_attached hook). An
@@ -2359,7 +2359,7 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
         pwindow->xdg_toplevel = NULL;
     }
     if (pwindow->xdg_surface != NULL) {
-        /* NULL for EXTENSION surfaces (1.1.0): an adopted surface's
+        /* NULL for EXTENSION surfaces (1.0.0): an adopted surface's
          * role belongs to the add-on and was torn down by the kind's
          * destroy callback BEFORE this — there is no xdg object here
          * to destroy (found live by the fdk-shell-overlay sway rig: the NULL
@@ -2369,7 +2369,7 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
         pwindow->xdg_surface = NULL;
     }
     if (pwindow->subsurface != NULL) {
-        /* Subsurfaces (1.1.0, D-2): the role object dies BEFORE the
+        /* Subsurfaces (1.0.0, D-2): the role object dies BEFORE the
          * wl_surface — destroying it removes the parent/child
          * association cleanly (a wl_surface_destroy with the
          * subsurface role still attached is a protocol error on
@@ -2383,14 +2383,14 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
 }
 
 void fdk_wayland_window_show(fdk_platform_window *pwindow) {
-    /* Subsurfaces (1.1.0, D-2): show() is a no-op — a subsurface
+    /* Subsurfaces (1.0.0, D-2): show() is a no-op — a subsurface
      * becomes visible with its FIRST PRESENT (the buffer attach is
      * the map; nothing maps a role-free child otherwise). Until
      * then the parent's pixels simply show through the region. */
     if (pwindow->is_subsurface) {
         return;
     }
-    /* Extension surfaces (1.1.0): no commit here. A role-carrying
+    /* Extension surfaces (1.0.0): no commit here. A role-carrying
      * surface (layer-shell above all) maps when its own protocol
      * handshake completes — committing before the role's initial
      * configure is a wlroots protocol ERROR that kills the whole
@@ -2421,13 +2421,13 @@ void fdk_wayland_window_show(fdk_platform_window *pwindow) {
 }
 
 void fdk_wayland_window_hide(fdk_platform_window *pwindow) {
-    /* Subsurfaces (1.1.0, D-2): the ONE ext class whose hide is
+    /* Subsurfaces (1.0.0, D-2): the ONE ext class whose hide is
      * FDK's own to perform — the role is FDK-owned (unlike a kind
      * surface's), so the NULL-buffer unmap below is exactly right:
      * desync mode applies it on this commit, sync defers it to the
      * parent's next one. Falls through to the buffer-clear branch
      * (the ext gate below excludes subsurfaces for that reason). */
-    /* Extension surfaces (1.1.0): no NULL-buffer commit — unmapping
+    /* Extension surfaces (1.0.0): no NULL-buffer commit — unmapping
      * a role-carrying surface is the ROLE's operation (a layer
      * surface unmaps by destroying and re-creating its role object,
      * the add-on's business), not a surface-state commit. Symmetric
@@ -2474,7 +2474,7 @@ void fdk_wayland_window_set_title(fdk_platform_window *pwindow, const char *titl
     xdg_toplevel_set_title(pwindow->xdg_toplevel, title != NULL ? title : "");
 }
 
-/* Toplevel icon (1.1.0, M-4) — xdg-toplevel-icon-v1.
+/* Toplevel icon (1.0.0, M-4) — xdg-toplevel-icon-v1.
  *
  * The protocol's shape drives this implementation:
  *   - the buffer MUST be wl_shm-backed and SQUARE; a non-square
@@ -2491,7 +2491,7 @@ void fdk_wayland_window_set_title(fdk_platform_window *pwindow, const char *titl
  *     GNOME): one INFO line, then a permanent quiet no-op per
  *     window (the warn-once stamp below).
  */
-/* Idle inhibition (1.1.0, S-3): the per-surface inhibitor, engaged
+/* Idle inhibition (1.0.0, S-3): the per-surface inhibitor, engaged
  * and released by the idle module through the ops table. The proxy
  * rides the pwindow (the window destroy path releases a live one);
  * the inhibitor object itself carries NO events — the protocol is
@@ -2524,7 +2524,7 @@ fdk_result fdk_wayland_window_set_idle_inhibit(
     return FDK_OK; /* release without engagement: idempotent */
 }
 
-/* ---- xdg-activation (1.1.0, S-6) ------------------------------------------
+/* ---- xdg-activation (1.0.0, S-6) ------------------------------------------
  *
  * The focus-stealing-prevention protocol, both halves. The token
  * mint is the interesting part: the compositor answers commit()
@@ -2831,7 +2831,7 @@ void fdk_wayland_window_set_icon(fdk_platform_window *pwindow,
 }
 
 void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height) {
-    /* Extension surfaces (1.1.0): the size is ROLE-driven (the
+    /* Extension surfaces (1.0.0): the size is ROLE-driven (the
      * add-on reports it via fdk_ext_surface_notify_configure) — a
      * client-side resize request has no meaning for a role FDK does
      * not know, and the buffer-commit machinery below would fight

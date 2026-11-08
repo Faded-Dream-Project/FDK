@@ -1,6 +1,6 @@
 #define FDK_LOG_TAG "notify"
 /*
- * notify_client.c — the app-facing notification client (1.1.0)
+ * notify_client.c — the app-facing notification client (1.0.0)
  *
  * The APP side of org.freedesktop.Notifications on the native
  * D-Bus client: Notify / CloseNotification / GetCapabilities /

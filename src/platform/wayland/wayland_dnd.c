@@ -153,7 +153,7 @@ static char *dnd_read_offer(fdk_platform_connection *conn,
                      FDK_WL_DND_READ_MS, len);
             break;
         }
-        /* SAME-CONNECTION drags (1.1.0, S-9): when the dragging
+        /* SAME-CONNECTION drags (1.0.0, S-9): when the dragging
          * client and the dropping client are ONE process — an app
          * dragging between its own windows, exactly what the sway
          * suite's icon leg does — the ::send that fills this pipe is
@@ -220,7 +220,7 @@ void fdk_wayland_dnd_device_enter(fdk_platform_connection *conn,
     if (conn->drag_hover == NULL) {
         return;
     }
-    /* Per-position acceptance (1.1.0, S-9): the widget tree's drop
+    /* Per-position acceptance (1.0.0, S-9): the widget tree's drop
      * targets own the answer under the pointer (the core layer's
      * hit-test + ancestor walk; the window's mask where no target
      * owns the position). */

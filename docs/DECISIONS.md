@@ -1,4 +1,4 @@
-# DECISIONS — the 1.1.0 implementation log
+# DECISIONS — the 1.0.0 implementation log
 
 Every non-obvious call made while closing the roadmap, with the
 reason. Append-only; the date is the decision's, not the file's.
@@ -65,7 +65,7 @@ Sub-calls worth recording:
   instead of a sender that cannot match.
 
 **Not decided here:** unix-fd passing (UNIX_FD not negotiated) —
-nothing on the 1.1.0 list needs it; revisit with the portal work
+nothing on the 1.0.0 list needs it; revisit with the portal work
 if a file-transfer API ever lands.
 
 ## D-002 — fdk_ext_loop_update_fd (extension API stays at v1)

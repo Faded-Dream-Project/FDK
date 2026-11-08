@@ -1,5 +1,5 @@
 /* test_cff.c — the CFF-outline item: native Type 2 charstring proof
- * tests (1.1.0; the Arch tofu report's closure — 'OTTO' faces were
+ * tests (1.0.0; the Arch tofu report's closure — 'OTTO' faces were
  * rejected outright before this).
  *
  * Three fonts under test:

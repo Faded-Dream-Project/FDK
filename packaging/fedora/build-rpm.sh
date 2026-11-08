@@ -18,8 +18,8 @@ fdk_require_release_posture
 
 VERSION="$(fdk_expected_version)"
 # Package metadata version: rpm reserves '-' for the Version-Release
-# separator, so the raw "1.1.0-rc1" is an illegal Version ("Illegal
-# char '-'"); the tilde form (1.1.0~rc1) is rpm's native pre-release
+# separator, so the raw "1.0.0-rc1" is an illegal Version ("Illegal
+# char '-'"); the tilde form (1.0.0~rc1) is rpm's native pre-release
 # spelling and sorts before the final. The tarball name and its top
 # directory follow the spec's Version (%setup -n fdk-%{version}), so
 # they use the SAME spelling; the %files wildcards (libfdk.so.1.*)

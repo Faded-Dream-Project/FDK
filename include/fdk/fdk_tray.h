@@ -1,5 +1,5 @@
 /*
- * fdk_tray.h — Faded Dream ToolKit tray icon API (1.1.0)
+ * fdk_tray.h — Faded Dream ToolKit tray icon API (1.0.0)
  *
  * The APP side of the desktop tray: a StatusNotifierItem export
  * (the org.kde.StatusNotifierItem protocol) plus its DBusMenu

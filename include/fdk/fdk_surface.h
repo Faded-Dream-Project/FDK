@@ -573,7 +573,7 @@ fdk_result fdk_surface_blit_transformed(fdk_surface *dst, fdk_matrix m,
  */
 bool fdk_surface_frame_ready(fdk_surface *surface);
 
-/* ---- Animated images (1.1.0 / C-4: GIF first) ----
+/* ---- Animated images (1.0.0 / C-4: GIF first) ----
  *
  * fdk_gif is a fully-decoded animated GIF: the canvas size, the
  * frame list (delays, disposal methods, transparency, per-frame

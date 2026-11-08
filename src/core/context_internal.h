@@ -48,7 +48,7 @@ struct fdk_context {
     const fdk_platform_ops *ops;
     fdk_platform_connection *conn;
 
-    /* Fatal-dispatch reporting (1.1.0-rc1, the labwc report
+    /* Fatal-dispatch reporting (1.0.0-rc1, the labwc report
      * 2026-10-26): the FIRST dispatch_pending failure a pump/fdk_run
      * sees is logged ONCE here (the backend logs its own one-time
      * detail line — Wayland's connection_dead carries the protocol
@@ -85,7 +85,7 @@ struct fdk_context {
      * nested pumps nest cleanly. */
     fdk_timer *timer_firing;
 
-    /* ---- Extension fd sources (1.1.0, include/fdk/fdk_extend.h) ----
+    /* ---- Extension fd sources (1.0.0, include/fdk/fdk_extend.h) ----
      *
      * Pointer array (stable handles across growth, same discipline
      * as timers). extfd_firing is the source whose callback is on
@@ -98,7 +98,7 @@ struct fdk_context {
     size_t extfd_capacity;
     struct fdk_ext_fd_source *extfd_firing;
 
-    /* ---- Extension surface kinds (1.1.0, src/window/extend.c) ----
+    /* ---- Extension surface kinds (1.0.0, src/window/extend.c) ----
      *
      * Intrusive singly-linked list of the kinds registered on this
      * context (fdk_ext_register_kind). Add-on OWNED objects — FDK
@@ -107,7 +107,7 @@ struct fdk_context {
      * context must not keep pointing at freed memory). */
     struct fdk_ext_surface_kind *ext_kinds_head;
 
-    /* ---- D-Bus connections (1.1.0, src/dbus/) ----------------------
+    /* ---- D-Bus connections (1.0.0, src/dbus/) ----------------------
      *
      * Every live fdk_dbus_connection registers here at creation and
      * unregisters when freed. The registry exists so fdk_shutdown()
@@ -123,7 +123,7 @@ struct fdk_context {
     size_t dbus_conn_capacity;
 };
 
-/* ---- Extension fd sources (1.1.0) — src/core/extfd.c ---------------
+/* ---- Extension fd sources (1.0.0) — src/core/extfd.c ---------------
  *
  * The pump-facing face of fdk_ext_loop_add_fd/remove_fd (public API
  * in fdk_extend.h): the poll-set builder and the reentrancy-safe

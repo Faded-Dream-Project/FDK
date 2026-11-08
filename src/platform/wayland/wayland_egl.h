@@ -140,7 +140,7 @@ void fdk__wayland_egl_test_reset(void);
  * which fails the moment a shutdown path skips the tail. */
 int fdk__wayland_egl_test_teardown_calls(int *release_thread);
 
-/* TEST SEAMS (1.1.0-rc2, the §19 upload-contract re-land): the fallback
+/* TEST SEAMS (1.0.0-rc2, the §19 upload-contract re-land): the fallback
  * CPU machinery is pure and driverless — the RGBA-twin swizzle and
  * the tight row packing are verified by unit tests WITHOUT any EGL
  * driver (this sandbox has none; the shapes still get pinned). */

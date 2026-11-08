@@ -1,6 +1,6 @@
 /*
  * emoji.c — color glyphs: COLRv0/v1 + CPAL, CBDT/CBLC, sbix (C-3 / B-02,
- * 1.1.0).
+ * 1.0.0).
  *
  * FDK drew text as one alpha mask per glyph blended with a solid
  * color — color glyphs (emoji) had no path at all. This module gives

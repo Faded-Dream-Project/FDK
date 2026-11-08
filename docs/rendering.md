@@ -405,7 +405,7 @@ two-slot dance in the SHM path does not exist here.
 
 **Policy** (who gets the GPU path):
 
-- **Small surfaces stay on the CPU path** (1.1.0-rc1, the X2 live
+- **Small surfaces stay on the CPU path** (1.0.0-rc1, the X2 live
   report): a window at or below `FDK_GL_MIN_PIXELS` (131072 px =
   256x512) never engages the lane — and a process whose windows are
   ALL small never even dlopens libGL. That is the whole panel/popup

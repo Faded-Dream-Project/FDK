@@ -3,7 +3,7 @@
 #define FDK_LOG_TAG "cursor"
 
 /* cursor_theme.c — the shared XCursor theme loader (1.1.4 Wayland,
- * shared + candidate lists 1.1.0-rc2 S-5).
+ * shared + candidate lists 1.0.0-rc2 S-5).
  *
  * Both backends need cursor images as raw ARGB pixels from the
  * system's XCursor theme files, with no libxcursor dependency: the

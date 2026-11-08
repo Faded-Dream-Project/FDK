@@ -472,7 +472,7 @@ void fdk_theme_clear_allowed_themes(void);
 size_t fdk_theme_allowed_count(void);
 const char *fdk_theme_allowed_name(size_t index);
 
-/* ---- The desktop color scheme (1.1.0) ------------------------------------
+/* ---- The desktop color scheme (1.0.0) ------------------------------------
  *
  * The desktop's light/dark preference, as the running session
  * actually states it: XSETTINGS Gtk/ColorScheme on X11 (live — the
@@ -502,7 +502,7 @@ typedef enum fdk_color_scheme {
 
 fdk_color_scheme fdk_system_color_scheme(void);
 
-/* ---- UI metrics (1.1.0) ---------------------------------------------------
+/* ---- UI metrics (1.0.0) ---------------------------------------------------
  *
  * The process's UI font size and scale — one answer, resolved like
  * the color scheme: the $FDK_UI_FONT_SIZE / $FDK_UI_SCALE
@@ -524,7 +524,7 @@ double fdk_ui_scale(void);
 /* The effective size: round(base * scale), clamped [8, 96]. */
 int fdk_ui_font_px(void);
 
-/* ---- Themed icon lookup (1.1.0) --------------------------------------------
+/* ---- Themed icon lookup (1.0.0) --------------------------------------------
  *
  * The icon-theme engine the file dialogs use (src/theme/icon_theme.c),
  * exposed for applications that draw their own chrome: panel trays,

@@ -1,5 +1,5 @@
 /*
- * wayland_ime.c — text-input-v3, the Wayland IME client (1.1.0, M-1)
+ * wayland_ime.c — text-input-v3, the Wayland IME client (1.0.0, M-1)
  *
  * Binds zwp_text_input_manager_v3 (optional global — absent means
  * the compositor has no text-input protocol; keyboard input still

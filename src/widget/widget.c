@@ -1200,7 +1200,7 @@ fdk_result fdk_widget_set_tooltip(fdk_widget *widget, const char *text) {
     return FDK_OK;
 }
 
-/* ---- Widget-level drop targets (1.1.0, S-9 / B-13) --------------------
+/* ---- Widget-level drop targets (1.0.0, S-9 / B-13) --------------------
  *
  * Pure registration state — the ROUTING lives in window.c's drag
  * dispatch (hit-test + ancestor walk), and the ACCEPTANCE it drives
@@ -1746,7 +1746,7 @@ int fdk__widget_ime_context(fdk_widget *focused, const char **out_text,
     return fdk__textview_ime_context(focused, out_text, out_cursor);
 }
 
-/* Hover cursor (1.1.0-rc2, S-5): the hovered widget's wanted shape.
+/* Hover cursor (1.0.0-rc2, S-5): the hovered widget's wanted shape.
  * The text-entry family wants the I-beam — pointer equality against
  * the class defs (the same identity discipline the IME seams use;
  * a subclass carries its own klass pointer simply does not match, the

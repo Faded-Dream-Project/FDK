@@ -42,12 +42,12 @@ unsigned long fdk_x11_theme_window_pixel(void) {
 #define X11_DEFAULT_HEIGHT 480
 #define X11_DEFAULT_TITLE  "FDK Application"
 
-/* Lazy per-window XIC (1.1.0-rc1, X1): the FIRST FocusIn or KeyPress
+/* Lazy per-window XIC (1.0.0-rc1, X1): the FIRST FocusIn or KeyPress
  * on a window brings up both the connection's XIM (once per process)
  * and this window's XIC. Declared in x11_platform.h; called from the
  * event translator.
  *
- * 1.1.0 (M-1): the IC is created with XIMPreeditCallbacks — the IM
+ * 1.0.0 (M-1): the IC is created with XIMPreeditCallbacks — the IM
  * hands COMPOSITION to us and we render it inline (the Entry
  * preedit groundwork) — falling back to the old PreeditNothing style
  * when the IM refuses (not every input method serves callbacks). */
@@ -243,7 +243,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
 
     /* Register for WM_DELETE_WINDOW so close requests arrive as an
      * event we can translate rather than killing the connection.
-     * WM_SAVE_YOURSELF (1.1.0, D-5) rides the same WM_PROTOCOLS list:
+     * WM_SAVE_YOURSELF (1.0.0, D-5) rides the same WM_PROTOCOLS list:
      * listing the atom is how a client volunteers for the ICCCM
      * appendix-C save protocol — the WM relays the session
      * manager's save request, FDK dispatches
@@ -257,7 +257,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
         XSetWMProtocols(conn->display, xwindow, protocols, 3);
     }
 
-    /* XI2 touch selection (1.1.0, M-3): harmless no-op where the
+    /* XI2 touch selection (1.0.0, M-3): harmless no-op where the
      * extension is absent; where present, the server routes
      * XI_TouchBegin/Update/End for this window and suppresses the
      * emulated core-button twin (XI 2.2's rule) — the tap synthesis
@@ -296,7 +296,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->popup_saved_revert = RevertToPointerRoot;
     pwindow->popup_grab_ms = 0;
     pwindow->popup_release_reason[0] = '\0';
-    /* Startup notification (1.1.0, S-6): windows created while the
+    /* Startup notification (1.0.0, S-6): windows created while the
      * connection holds a captured DESKTOP_STARTUP_ID carry it —
      * the property is the WM's match key between this window and
      * the launch feedback the launcher began. Popups are excluded
@@ -370,7 +370,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
         XSetClassHint(conn->display, pwindow->xwindow, &class_hint);
     }
 
-    /* Window identity, the M-4 set (1.1.0): _NET_WM_PID +
+    /* Window identity, the M-4 set (1.0.0): _NET_WM_PID +
      * WM_CLIENT_MACHINE (the process identity — session managers,
      * EWMH pagers, and taskbar correlators read the pair; the PID
      * alone is ambiguous across hosts) + WM_WINDOW_ROLE (ICCCM 5.5.1;
@@ -412,7 +412,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->render_size.width = 0;
     pwindow->render_size.height = 0;
 
-    /* Input context (1.3.1; LAZY since 1.1.0-rc1, X1): the XIC is
+    /* Input context (1.3.1; LAZY since 1.0.0-rc1, X1): the XIC is
      * created when this window first sees FocusIn or a KeyPress
      * (fdk__x11_window_ensure_xic, x11_events.c) — together with the
      * lazy XOpenIM this takes pointer-only apps (panels, the demo
@@ -433,7 +433,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
         return r;
     }
 
-    /* Creation BARRIER (1.1.0-rc1, found by the lazy-XIC change): the
+    /* Creation BARRIER (1.0.0-rc1, found by the lazy-XIC change): the
      * XCreateWindow + properties + name burst is fully async in Xlib;
      * fdk_window_create hands out the XID (fdk_window_xid, the
      * extension API's native accessor), and the CONTRACT of a handed
@@ -531,7 +531,7 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
     fdk_free(pwindow);
 }
 
-/* ---- popup lifecycle trace (FDK_POPUP_TRACE=1, 1.1.0-rc1) --------------
+/* ---- popup lifecycle trace (FDK_POPUP_TRACE=1, 1.0.0-rc1) --------------
  *
  * The dropdown investigation on real desktops needed exactly one
  * thing the logs never had: WHAT the popup machinery did and WHEN.
@@ -621,7 +621,7 @@ void fdk_x11_window_popup_grab(fdk_platform_window *pwindow) {
     }
     Display *dpy = pwindow->conn->display;
 
-    /* THE 1.1.0-rc1 GRAB REWORK (found live on Openbox, 2026-10-26):
+    /* THE 1.0.0-rc1 GRAB REWORK (found live on Openbox, 2026-10-26):
      * an active XGrabKeyboard DEACTIVATES the window manager's
      * passive grabs for as long as it is held — Openbox's Super+1..4
      * workspace bindings silently stopped working while a dropdown
@@ -817,7 +817,7 @@ fdk_result fdk_x11_window_set_modal(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
-/* ---- Activation + startup notification (1.1.0, S-6) ------------------------
+/* ---- Activation + startup notification (1.0.0, S-6) ------------------------
  *
  * The X11 half of the focus-stealing-prevention story. Activation
  * itself is one EWMH root message — _NET_ACTIVE_WINDOW with the
@@ -984,7 +984,7 @@ void fdk_x11_window_show(fdk_platform_window *pwindow) {
                     (unsigned long)pwindow->xwindow,
                     pwindow->last_size.width, pwindow->last_size.height);
         XMapWindow(pwindow->conn->display, pwindow->xwindow);
-        /* RAISE on map (1.1.0-rc1, the invisible-dropdown suspect):
+        /* RAISE on map (1.0.0-rc1, the invisible-dropdown suspect):
          * mapping does NOT restack — an override-redirect popup
          * created under a WM-managed window (a terminal over the
          * bar's area, or the bar itself re-raised by the WM's ABOVE
@@ -1004,7 +1004,7 @@ void fdk_x11_window_show(fdk_platform_window *pwindow) {
     XMapWindow(pwindow->conn->display, pwindow->xwindow);
     XFlush(pwindow->conn->display);
 
-    /* Startup-notification completion (1.1.0, S-6): the FIRST show
+    /* Startup-notification completion (1.0.0, S-6): the FIRST show
      * of the window carrying the launcher's id ends the launch
      * feedback — "remove: ID=..." tells every listening WM the
      * application is up (the hourglass/cursor feedback stops). One
@@ -1151,7 +1151,7 @@ fdk_result fdk_x11_window_bell(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
-/* ---- WM_COMMAND / WM_SAVE_YOURSELF (1.1.0, D-5) -----------------------
+/* ---- WM_COMMAND / WM_SAVE_YOURSELF (1.0.0, D-5) -----------------------
  *
  * The X11 session lane. WM_COMMAND is the restart command a session
  * manager re-executes at the next login (ICCCM 4.1.2.9: type STRING,
@@ -1826,7 +1826,7 @@ void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge) {
     XDefineCursor(conn->display, pwindow->xwindow, cursor);
 }
 
-/* Input region (1.1.0-rc2, S-4 / A-06): the XShape ShapeInput
+/* Input region (1.0.0-rc2, S-4 / A-06): the XShape ShapeInput
  * translation. Logical window rects are scaled to PHYSICAL by the
  * connection's HiDPI factor (the space XShape works in — the same
  * conversion ConfigureNotify applies in reverse); the clear case

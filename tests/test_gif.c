@@ -1,5 +1,5 @@
 /* test_gif.c — the animated GIF decoder + player + Picture widget
- * tests (1.1.0 / C-4).
+ * tests (1.0.0 / C-4).
  *
  * Three fixtures:
  *   - matrix.gif (PIL-generated, REAL encoder output: compressed

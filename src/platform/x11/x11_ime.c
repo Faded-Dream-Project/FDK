@@ -1,5 +1,5 @@
 /*
- * x11_ime.c — XIM preedit callbacks + the composition buffer (1.1.0, M-1)
+ * x11_ime.c — XIM preedit callbacks + the composition buffer (1.0.0, M-1)
  *
  * The X11 side of the IME model. The per-window XIC is created with
  * XIMPreeditCallbacks | XIMStatusNothing (falling back to

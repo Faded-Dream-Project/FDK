@@ -317,10 +317,10 @@ slice: the accessibility core — the a11y tree IS the widget tree;
 value, `fdk_a11y_subscribe` delivers children/state/name/bounds/
 value change notifications with the widget core's mutation points
 firing them, and `fdk_a11y_perform` drives widgets through their own
-public semantics — the seam the embedded narrator (1.1.0) and test
+public semantics — the seam the embedded narrator (1.0.0) and test
 drivers sit on; class-level descriptors ride a new `.a11y` field on
 the widget class vtable, and every catalog widget plus window roots
-describe themselves). `src/widget/a11y_narrator.c` (1.1.0: the
+describe themselves). `src/widget/a11y_narrator.c` (1.0.0: the
 embedded screen reader core — the no-bus policy made real; an
 ordinary subscriber that composes utterances from live describe()
 snapshots and speaks through an application-wired sink, so screen

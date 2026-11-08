@@ -6,7 +6,7 @@
 
 ## Current state (2026-11-07, after round 30)
 
-- **Version:** 1.1.0-dev line (no tags; the rc discipline holds —
+- **Version:** 1.0.0-dev line (no tags; the rc discipline holds —
   the repo's own M-9 rule: no tag without the owner's sign-off).
 - **Surface:** 1,020 exported symbols, 34 public headers, 36 widget
   classes; PARITY.md audited against the GTK4 4.24 catalog and Qt6.
@@ -36,6 +36,37 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 38 (2026-11-08) — the first release is 1.0.0: the 1.1.0 identity retired repo-wide
+
+The owner's call (recorded in docs/versioning.md History,
+2026-11-08): the first release is **1.0.0** — the 1.1.0-rcN
+candidate numbering is retired, the pre-release suffix is dropped,
+MINOR 1 → 0, and every cycle label in the tree reads 1.0.0.
+
+**The sweep:** 153 files, 853 occurrences (boundary-aware regex;
+rc-forms first so "1.1.0-rc2" became "1.0.0-rc2" in the
+changelog's historical candidate entries, then the bare triple),
+zero residuals outside .git/build/third_party. The version macros
+moved specially: FDK_VERSION_MINOR 0, FDK_VERSION_SUFFIX "",
+FDK_VERSION_STRING "1.0.0" — and the header's decision comment now
+tells the 2026-11-08 story. CHANGELOG.md opens with the [1.0.0]
+first-release entry; docs/versioning.md's History records the
+decision (SONAME stays libfdk.so.1 — the ABI was append-only
+throughout, the MAJOR digit owns the SONAME and never moved; the
+internal 1.4.x/Phase milestone axis is untouched by design).
+
+**The pins moved with it** (test_core.c: MINOR 0, empty suffix,
+string "1.0.0", ENCODE(1,0,0) — three of the four surfaced only
+when the battery ran, exactly what the pins are for: the first
+rerun failed on MINOR==1, the second on the stale "1.0.0-rc2"
+string literal and ENCODE(1,1,0)); third rerun 792/792.
+`[ok] version: 1.0.0 (1000000, pinned per docs/versioning.md)`.
+
+**Verified end to end:** dev build rc=0, battery 792/792, root
+release rc=0, fdk-langs 13/13 + 24/24 fails=0 with the thirteen
+language samples now reading "fdk 1.0.0" (confirmed in the release
+binary's strings), fdk-langs rc=0 under Xvfb.
 
 ## Round 37 (2026-11-07) — the user's Wayland full pass recorded; the -O2 warning in the gate closed
 
@@ -386,7 +417,7 @@ libxkbcommon.so.0; now pre-installs the same hermetic shlib lines
 FDK's own void install-test carries]. Proven locally: a mini
 installed-prefix + the exact clean-container compile line = SMOKE
 OK; the isolation proof (links the demo through the .pc alone)
-still green. docs/testing.md's 1.1.0-rc1
+still green. docs/testing.md's 1.0.0-rc1
 packaging-matrix lesson + CHANGELOG rc1 Fixed section carry the
 full narratives. Prior state below.)
 
@@ -411,7 +442,7 @@ accessor defects — fdk_dbus_message_signature and read_args were
 builder-blind for locally built messages — both fixed at the root,
 plus the FDK_LOG_TAG clobber in dbus_internal.h [ccafa7c]; DECISIONS
 D-004/D-005 record the reconciliation and the core/add-on split;
-ROADMAP-1.1.0 gained the verified-status table [this commit]. Prior
+ROADMAP-1.0.0 gained the verified-status table [this commit]. Prior
 state below.)
 
 Last audited: 2026-10-26, at milestone **1.7.4** (the push of the
@@ -504,13 +535,13 @@ proof re-run per packaging container; CI's ubuntu job runs the
 fdk-shell-overlay suites + the isolation proof]. Prior state below.)
 
 Last audited: 2026-10-25, at milestone **1.7.0** (the extension API
-+ fdk-shell-overlay — the 1.1.0-rc1 candidate: the owner directed FDK to
++ fdk-shell-overlay — the 1.0.0-rc1 candidate: the owner directed FDK to
 grow a public extension API ["add an extension API to FDK so
 add-on packages can be built on top of it, and prove it by building
 a layer-shell add-on as a SEPARATE package that uses only that
-public API"] and set the version to 1.1.0-rc1 [minor, not 1.0.1,
+public API"] and set the version to 1.0.0-rc1 [minor, not 1.0.1,
 because public API is added; a CANDIDATE — no git tag, the v1.0.0
-release and its tag untouched, the owner decides the final 1.1.0].
+release and its tag untouched, the owner decides the final 1.0.0].
 What landed: include/fdk/fdk_extend.h [the versioned extension API
 — surface kinds with create/destroy/popup_attached callbacks whose
 create builds the native surface through the documented
@@ -550,9 +581,9 @@ string everywhere the library reports itself. The second push
 then failed ALPINE at the repository index with "package file
 format error": abuild derives the apk so:provides version from
 the .so FILENAME tail (sover=${file##*.so.}), so the raw-named
-libfdk.so.1.1.0-rc1 produced provides = so:libfdk.so.1=1.1.0-rc1
+libfdk.so.1.0.0-rc1 produced provides = so:libfdk.so.1=1.0.0-rc1
 which apk index rejects (reproduced locally with apk-tools
-2.14.12 — even hyphenless 1.1.0rc1 is rejected; only numeric
+2.14.12 — even hyphenless 1.0.0rc1 is rejected; only numeric
 tails are valid) — fixed at the root: the Makefile now installs
 the real .so as the numeric FDK_SO_VERSION (libfdk.so.1.1.0;
 suffixes never appear in the .so file name), and the debian/void
@@ -564,7 +595,7 @@ the SUITE server's socket, probed the 96-dpi suite server via the
 TCP fallback, and aborted the debian job on the scale assertion;
 the private display now lives below every harness range, is checked
 free first, and is verified ours by its 800x600 geometry (proven
-both ways locally, docs/testing.md 1.1.0-rc1 lesson). See
+both ways locally, docs/testing.md 1.0.0-rc1 lesson). See
 CHANGELOG's rc1 Fixed section and docs/packaging.md's
 pre-release-versions section.
 
@@ -1165,7 +1196,7 @@ sidebar rhythm).
   viewport source rectangles, `fdk_window_get_scale`
 - **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
   detection, integer scales, physical windows, divided input
-- **The AT-SPI text interface + relations export: SHIPPED (1.1.0,
+- **The AT-SPI text interface + relations export: SHIPPED (1.0.0,
   C-2 / B-10 level 2)** — org.freedesktop.atspi.Text on the bridge
   (the full method surface; CODEPOINT<->BYTE conversion with the
   multibyte pin; per-character extents + hit-test through the
@@ -1177,7 +1208,7 @@ sidebar rhythm).
   TextChanged; GetRelationSet with the AT-SPI relation numbers pinned
   against at-spi2-core's constants. D-027; rigs: 3 live-bus legs + 2
   headless legs (incl. the no-op rule).
-- **Color glyphs (emoji): SHIPPED (1.1.0, C-3 / B-02)** —
+- **Color glyphs (emoji): SHIPPED (1.0.0, C-3 / B-02)** —
   COLRv0/v1 + CPAL, CBDT/CBLC, and sbix, all parsed natively
   (src/text/emoji.c) with layouts pinned against fontTools; the RGBA
   glyph cache entry (fdk_surface_blend_rgba composites it; the public
@@ -1189,19 +1220,19 @@ sidebar rhythm).
   $FDK_NO_COLOR_GLYPHS=1 escape hatch. D-026; rig: test_emoji
   (COLRv0 math, every v1 paint family, CBDT strikes, the real-Noto
   smoke leg, the truncation sweep).
-- **Basic gestures (pinch + swipe): SHIPPED (1.1.0, C-6 / B-17)** —
+- **Basic gestures (pinch + swipe): SHIPPED (1.0.0, C-6 / B-17)** —
   FDK_EVENT_GESTURE_PINCH (span arithmetic on the two-slot posture,
   scroll coexistence, re-baseline) + FDK_EVENT_GESTURE_SWIPE (the
   per-finger end-gesture verdict) on the pure touch engine; no
   backend moved. D-025; rig: 6 engine legs.
-- **fdk-shell-overlay runtime re-anchoring + auto-hide: SHIPPED (1.1.0,
+- **fdk-shell-overlay runtime re-anchoring + auto-hide: SHIPPED (1.0.0,
   C-5 / A-05 / A-08, fdk-shell-overlay 0.5.0)** — the LIVE desc (anchor/
   margin/zone/size/keyboard/level on a shown surface; the Wayland
   role swap with the wire-order lesson; the X11 state exchange) +
   the reveal-strip auto-hide (backend-native slide, withdrawn zone,
   the pointer state machine, reveal/hide_now). D-024; rigs: 9 X11
   legs + 4 sway legs.
-- **The AT-SPI2 bridge, level 1: SHIPPED (1.1.0, S-8 / B-10)** —
+- **The AT-SPI2 bridge, level 1: SHIPPED (1.0.0, S-8 / B-10)** —
   the accessibility WIRE over the internal a11y tree: the two-bus
   handshake (retry on a 2s throttle — late-starting screen readers
   are a real case), the object registry (virtual rows included), the
@@ -1210,7 +1241,7 @@ sidebar rhythm).
   $FDK_ATSPI=0 off. D-023; rig: 5 live-bus legs against the mock
   stack (the premature-degradation bug the rig caught is the retry
   posture's origin story).
-- **The xdg-desktop-portal FileChooser: SHIPPED (1.1.0, C-1 / B-09)**
+- **The xdg-desktop-portal FileChooser: SHIPPED (1.0.0, C-1 / B-09)**
   — fdk_dialog_open_file/save_file consult the desktop's own picker
   first (org.freedesktop.portal.FileChooser on the native D-Bus
   client; the spec's race-free request dance) and fall back to the
@@ -1218,7 +1249,7 @@ sidebar rhythm).
   auto. The fallback's re-entry guard (no second flight; the UAF the
   rig caught) and the null parent. 848 exports. D-022; rig: 5 live-
   bus legs against the mock portal.
-- **Drag icons + widget-level drop targets: SHIPPED (1.1.0, S-9)**
+- **Drag icons + widget-level drop targets: SHIPPED (1.0.0, S-9)**
   — `fdk_drag_begin_ex` (the icon: Wayland start_drag's own surface /
   X11's override-redirect tracker window, alpha-shaped) +
   `fdk_widget_set_drop_target`/`_get_drop_target`/`_set_drag_callback`
@@ -1229,7 +1260,7 @@ sidebar rhythm).
   the drag_drop_active fence); the 250 ms EOF wart and the X11
   DROP-event position closed. 847 exports. D-021; rigs: 7 X11 legs
   + 2 sway legs incl. the FDK-source drag-with-icon end to end.
-- **Window activation + startup notification: SHIPPED (1.1.0, S-6)**
+- **Window activation + startup notification: SHIPPED (1.0.0, S-6)**
   — `fdk_window_activate` (Wayland xdg-activation-v1 through a
   compositor token; X11 `_NET_ACTIVE_WINDOW` with the live
   last-user-event timestamp + the bare-X raise/focus fallback) and
@@ -1273,7 +1304,7 @@ sidebar rhythm).
   (untested on real hardware; the rig runs it through Mesa's
   swrast under FDK_GL_FORCE).
 
-- **Tablets / stylus: SHIPPED (1.1.0, D-3 / B-17)** —
+- **Tablets / stylus: SHIPPED (1.0.0, D-3 / B-17)** —
   FDK_EVENT_TABLET_PROXIMITY_IN/OUT/DOWN/MOTION/UP/BUTTON (enum
   52-57, appended) + fdk_tablet_event (position/pressure/tilt/
   tool id/type/button, the high-bit release marker); NO synthesis
@@ -1285,7 +1316,7 @@ sidebar rhythm).
   Seams drive the real bodies (the M-3 discipline) + the live
   halves (sway manager bind; the Xvfb device scan). 855 exports
   unchanged (enum + payload only).
-- **Subsurfaces: SHIPPED (1.1.0, D-2 / B-16, extension API v2)** —
+- **Subsurfaces: SHIPPED (1.0.0, D-2 / B-16, extension API v2)** —
   fdk_ext_subsurface_create/_create_ex + set_position/resize/
   set_desync/place_above/place_below (855 exports, +7): the
   FDK-owned child surface, X11 real child windows (server-clipped,
@@ -1294,7 +1325,7 @@ sidebar rhythm).
   issues the applying EMPTY ancestor commit at create/set_position/
   place so moves are immediate. Keyboard follows the parent; popups
   on subsurfaces: X11 yes, Wayland the loud UNSUPPORTED.
-- **The foreign toplevel list: SHIPPED (1.1.0, D-4)** —
+- **The foreign toplevel list: SHIPPED (1.0.0, D-4)** —
   include/fdk/fdk_toplevel.h (open/close/count/get_info/activate/
   close, 861 exports +6): the taskbar substrate, Wayland
   wlr-foreign-toplevel-management (LAZY manager bind at open — the
@@ -1303,7 +1334,7 @@ sidebar rhythm).
   PropertyNotify). The coarse changed-callback model (D-014's
   shape); the X11 retitle gap documented (D-031). Rigs: the X11
   fake-WM round trip + sway's LIVE section.
-- **Session save/restore: SHIPPED (1.1.0, D-5 / B-19)** —
+- **Session save/restore: SHIPPED (1.0.0, D-5 / B-19)** —
   include/fdk/fdk_session.h (open/destroy[state preserved]/remove
   [forgotten]/id/get_state + the coarse notify) +
   fdk_window_set_command (X11 WM_COMMAND, argv form, type STRING)
@@ -1466,7 +1497,7 @@ report fixes — CHANGELOG "Unreleased-candidate features")
 
 ### NEXT — nothing
 
-The backlog is EMPTY (and as of 2026-10-30, the 1.1.0 roadmap is
+The backlog is EMPTY (and as of 2026-10-30, the 1.0.0 roadmap is
 fully landed too: every register row DONE except M-9, the release
 gate — no code remains there, only the owner's real-desktop
 sign-off before any tag; see ROADMAP.md (Part 1)'s counts line). The widget families shipped across the
@@ -1504,7 +1535,7 @@ are the shipped surface — D-032's fence) · animated WebP/APNG
 (B-14's fence: future families on the GIF player's shape).
 
 (History note, kept honest: this list is the 1.0-era policy. The
-1.1.0 roadmap — owner-directed — then shipped icon-theme loading,
+1.0.0 roadmap — owner-directed — then shipped icon-theme loading,
 the D-Bus foundation and everything it rides (tray, notifications,
 portals, AT-SPI), touch AND gestures; those lines are gone from
 OUT because the roadmap overrode them, not because policy drifted.
@@ -2806,7 +2837,7 @@ says it matches, and any round whose push failed must be assumed LOST, not "pend
    a) X11 had NO `window_frame_ready` op (Wayland-only), so `fdk_surface_frame_ready()`
       short-circuited to always-true and every canonical `pump; if (frame_ready && damage)
       paint` loop painted UNPACED — one full acquire/raster/present per loop pass while a
-      drag kept damaging (every motion). X11 motion COALESCING already existed (1.1.0-rc1,
+      drag kept damaging (every motion). X11 motion COALESCING already existed (1.0.0-rc1,
       the XPeekIfEvent collapse) — the pegging was paint RATE, not event rate. FIX: X11 now
       ships the op — 17ms minimum present interval stamped by both render lanes (GLX and
       SHM/CPU), the 1.1.6 Wayland capacity gate's reasoning (both SHM slots in flight →

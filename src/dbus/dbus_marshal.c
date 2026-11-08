@@ -1,5 +1,5 @@
 /*
- * dbus_marshal.c — D-Bus wire marshaling (1.1.0)
+ * dbus_marshal.c — D-Bus wire marshaling (1.0.0)
  *
  * The byte-level truth of the module, implemented from the public
  * D-Bus Specification. Every rule below was additionally verified

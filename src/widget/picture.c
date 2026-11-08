@@ -42,7 +42,7 @@ typedef struct fdk_picture {
     fdk_i32 img_w;
     fdk_i32 img_h;
     fdk_picture_fit fit;
-    /* 1.1.0 (C-4): the animated source. The composited canvas IS
+    /* 1.0.0 (C-4): the animated source. The composited canvas IS
      * p->image (the fit machinery is format-agnostic); the player
      * mutates it in place on every tick. */
     fdk_gif *gif;             /* owned; NULL = static image    */
@@ -302,7 +302,7 @@ fdk_i32 fdk_picture_image_height(fdk_widget *picture) {
     return pic_of(picture)->img_h;
 }
 
-/* ---- the animated half (1.1.0 / C-4) ---- */
+/* ---- the animated half (1.0.0 / C-4) ---- */
 
 /* The tick: advance one frame, re-pace the timer to the NEW frame's
  * delay, repaint. The widget may be destroyed between ticks — the

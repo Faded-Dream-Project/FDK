@@ -2,7 +2,7 @@
 
 /*
  * portal_file_chooser.c — the xdg-desktop-portal FileChooser client
- * (1.1.0, C-1 / B-09).
+ * (1.0.0, C-1 / B-09).
  *
  * The desktop's own file picker, over the native D-Bus client: when a
  * portal service answers org.freedesktop.portal.FileChooser on the
