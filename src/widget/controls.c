@@ -20,6 +20,7 @@
 
 #include "widgets_internal.h"
 #include "../theme/theme_internal.h"
+#include "../window/window_internal.h"
 
 #include "core/alloc_internal.h"
 #include <stdio.h>
@@ -1179,4 +1180,530 @@ void fdk_radio_set_on_changed(fdk_widget *radio,
     fdk_check_widget *c = check_of(radio);
     c->on_change = (void (*)(fdk_widget *, bool, void *))on_change;
     c->on_change_data = user_data;
+}
+
+
+/* ---- Scale button (1.0.0) --------------------------------------------
+ *
+ * The slider-in-a-popup control (the GtkScaleButton/GtkVolumeButton
+ * row, FDK's own machinery): a compact button whose face is a value
+ * meter; a press pops a small window carrying a vertical slider and
+ * a live value label. See fdk_widgets.h for the contract. */
+
+#define SB_W 44            /* natural width                          */
+#define SB_H 28            /* natural height                         */
+#define SB_METER_X 9       /* the meter's x inset inside the face    */
+#define SB_METER_H 10      /* the meter trough height                */
+#define SB_POP_W 48        /* the popup window's width               */
+#define SB_POP_H 176       /* the popup window's height              */
+#define SB_POP_PAD 8       /* the slider's inset inside the popup    */
+#define SB_POP_LABEL_H 16  /* the value label's band at the bottom   */
+
+/* The heap guard bridging the popup's callbacks and a button that
+ * may die while its popup is open — the menubutton's pattern,
+ * model-free. The guard outlives the button while the popup lives;
+ * every callback treats a NULL widget pointer as "button gone, do
+ * bookkeeping only". Freed exactly once, by the closed hook (every
+ * end path). */
+typedef struct sb_guard {
+    fdk_widget *button;      /* NULL once the button is destroyed */
+    fdk_window *popup;       /* the popup window (dies with it)    */
+    fdk_widget *slider;      /* the popup's slider (lives with it) */
+    fdk_widget *label;       /* the popup's value label            */
+} sb_guard;
+
+typedef struct fdk_scale_button {
+    fdk_widget base;
+    fdk_font *font;          /* borrowed; the popup's value label */
+    double min, max, value;  /* the min < max invariant           */
+    double step;             /* 0 = continuous                    */
+    bool pressed;
+    bool hovering;
+    fdk_hover_fade fade;
+    fdk_scale_button_changed_fn on_change;
+    void *on_change_data;
+    fdk_window *popup;       /* the open popup (NULL when closed) */
+    sb_guard *guard;         /* shared with the popup callbacks   */
+} fdk_scale_button;
+
+static fdk_scale_button *sb_of(fdk_widget *w) {
+    return (fdk_scale_button *)(void *)w;
+}
+
+extern const fdk_widget_class fdk_scale_button_class_def;
+
+static const char *sb_value_text(const fdk_scale_button *sb, char *buf,
+                                 size_t cap) {
+    (void)snprintf(buf, cap, "%.10g", sb->value);
+    return buf;
+}
+
+/* The closed hook: fired on EVERY end path (the close request, the
+ * outside click, the destroy notify, the toggle-press teardown —
+ * whatever destroys the popup runs this once). */
+static void sb_popup_closed(void *user) {
+    sb_guard *guard = user;
+    fdk_widget *w = guard->button;
+    if (w != NULL && w->klass == &fdk_scale_button_class_def) {
+        fdk_scale_button *b = sb_of(w);
+        if (b->guard == guard) {
+            b->popup = NULL;
+            b->guard = NULL;
+            fdk_widget_invalidate(w);
+        }
+        /* Else: the button already reset its pointers (the toggle
+         * teardown path) — the guard is still the one to free. */
+    }
+    fdk_free(guard);
+}
+
+static void sb_close(fdk_scale_button *b) {
+    if (b->popup == NULL) {
+        return;
+    }
+    /* Reset the button side first: the destroy notify runs the
+     * closed hook, which must not clear already-reset pointers.
+     * The notify runs SYNCHRONOUSLY (destroy_notify fires while
+     * the window is still whole, before teardown), so it frees
+     * the guard before this returns — nothing here may touch the
+     * guard afterwards. */
+    fdk_window *pop = b->popup;
+    b->popup = NULL;
+    b->guard = NULL;
+    fdk_window_destroy(pop);
+}
+
+/* The close path FROM the popup's own callbacks (the guard holds
+ * the window): the button side when it lives, the raw destroy when
+ * it does not. The caller must not touch the guard after this —
+ * the destroy notify frees it. */
+static void sb_close_from_guard(sb_guard *guard) {
+    fdk_widget *w = guard->button;
+    if (w != NULL && w->klass == &fdk_scale_button_class_def) {
+        sb_close(sb_of(w));
+        return;
+    }
+    if (guard->popup != NULL) {
+        fdk_window_destroy(guard->popup);
+    }
+}
+
+static void sb_popup_destroyed(fdk_window *window, void *user) {
+    (void)window; /* the window is still whole here; do NOT destroy */
+    /* The popup died under us (the owner window closed, the WM
+     * killed it, or sb_close destroyed it): run the closed hook. */
+    sb_popup_closed(user);
+}
+
+static void sb_popup_event(fdk_window *window, const fdk_event_data *ev,
+                           void *user) {
+    (void)window;
+    sb_guard *guard = user;
+    if (ev->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
+        sb_close_from_guard(guard);
+        return;
+    }
+    if (ev->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+        /* A press delivered while the grab routes it here: outside
+         * the popup's bounds means the user clicked away — the
+         * dismissal contract. */
+        fdk_size wsz = {0, 0};
+        (void)fdk_window_get_size(window, &wsz);
+        if (ev->pointer_button.position.x < 0.0f ||
+            ev->pointer_button.position.y < 0.0f ||
+            ev->pointer_button.position.x >= (float)wsz.width ||
+            ev->pointer_button.position.y >= (float)wsz.height) {
+            sb_close_from_guard(guard);
+        }
+    }
+}
+
+static void sb_slider_changed(fdk_widget *slider, void *user) {
+    sb_guard *guard = user;
+    double value = fdk_slider_get_value(slider);
+    char buf[32];
+    (void)snprintf(buf, sizeof(buf), "%.10g", value);
+    if (guard->label != NULL) {
+        fdk_label_set_text(guard->label, buf);
+        fdk_widget_invalidate(guard->label);
+    }
+    fdk_widget *w = guard->button;
+    if (w == NULL || w->klass != &fdk_scale_button_class_def) {
+        return; /* the button is gone: label bookkeeping only */
+    }
+    fdk_scale_button *b = sb_of(w);
+    b->value = value;
+    fdk_widget_invalidate(w);
+    fdk__a11y_notify(w, FDK_A11Y_VALUE_CHANGED, 0);
+    if (b->on_change != NULL) {
+        /* The app callback may destroy the button (or the popup) —
+         * nothing is touched after it returns. */
+        b->on_change(w, value, b->on_change_data);
+    }
+}
+
+static void sb_open_popup(fdk_widget *w) {
+    fdk_scale_button *b = sb_of(w);
+    if (b->popup != NULL) {
+        sb_close(b);
+        return; /* the second press is the toggle-off half */
+    }
+    fdk_window *owner = fdk__window_of_owner(fdk__widget_window_owner(w));
+    fdk_context *ctx = fdk__window_context(fdk__widget_window_owner(w));
+    if (owner == NULL || ctx == NULL) {
+        return; /* detached tree: documented no-op */
+    }
+    /* Below the button, centered on it; above when the room runs
+     * out; clamped into the owner window's bounds either way. */
+    fdk_rect abs = fdk_widget_get_absolute_bounds(w);
+    fdk_size wsz = {0, 0};
+    (void)fdk_window_get_size(owner, &wsz);
+    fdk_i32 x = abs.x + (abs.width - SB_POP_W) / 2;
+    if (x < 0) {
+        x = 0;
+    }
+    if (x + SB_POP_W > wsz.width) {
+        x = wsz.width - SB_POP_W;
+    }
+    if (x < 0) {
+        x = 0;
+    }
+    fdk_i32 y = abs.y + abs.height + 2;
+    if (y + SB_POP_H > wsz.height) {
+        y = abs.y - SB_POP_H - 2;
+    }
+    if (y < 0) {
+        y = 0;
+    }
+
+    sb_guard *guard = fdk_alloc(sizeof(*guard));
+    if (guard == NULL) {
+        return; /* OOM: no popup this press (honest) */
+    }
+    guard->button = w;
+    guard->popup = NULL;
+    guard->slider = NULL;
+    guard->label = NULL;
+    fdk_window *pop = NULL;
+    fdk_result r = fdk_window_create_popup(ctx, owner, x, y, SB_POP_W,
+                                           SB_POP_H, &pop);
+    if (!fdk_ok(r)) {
+        fdk_free(guard);
+        return;
+    }
+    fdk__window_set_auto_paint(pop, true);
+    fdk__window_set_destroy_notify(pop, sb_popup_destroyed, guard);
+    fdk_window_set_event_callback(pop, sb_popup_event, guard);
+
+    fdk_widget *root = NULL;
+    r = fdk_window_get_root(pop, &root);
+    if (!fdk_ok(r)) {
+        fdk_window_destroy(pop);
+        return;
+    }
+    fdk_widget *slider = NULL;
+    r = fdk_slider_create(root, b->min, b->max, b->value, &slider);
+    if (!fdk_ok(r)) {
+        fdk_window_destroy(pop);
+        return;
+    }
+    fdk_slider_set_orientation(slider, FDK_SLIDER_VERTICAL);
+    if (b->step > 0.0) {
+        fdk_slider_set_step(slider, b->step);
+    }
+    fdk_widget_arrange(slider, (fdk_rect){SB_POP_PAD, SB_POP_PAD,
+                                          SB_POP_W - SB_POP_PAD * 2,
+                                          SB_POP_H - SB_POP_PAD * 2 -
+                                              SB_POP_LABEL_H});
+    fdk_slider_set_on_changed(slider, sb_slider_changed, guard);
+
+    char buf[32];
+    (void)snprintf(buf, sizeof(buf), "%.10g", b->value);
+    fdk_widget *label = NULL;
+    r = fdk_label_create(root, b->font, buf, &label);
+    if (!fdk_ok(r)) {
+        fdk_window_destroy(pop);
+        return;
+    }
+    fdk_widget_arrange(label, (fdk_rect){0, SB_POP_H - SB_POP_PAD -
+                                              SB_POP_LABEL_H,
+                                         SB_POP_W, SB_POP_LABEL_H});
+    guard->popup = pop;
+    guard->slider = slider;
+    guard->label = label;
+    b->popup = pop;
+    b->guard = guard;
+    fdk__a11y_notify(w, FDK_A11Y_STATE_CHANGED, FDK_A11Y_EXPANDED);
+}
+
+static void sb_toggle_popup(fdk_widget *w) {
+    fdk_scale_button *b = sb_of(w);
+    if (b->popup != NULL) {
+        sb_close(b);
+        return;
+    }
+    sb_open_popup(w);
+}
+
+static bool sb_handle_event(fdk_widget *w,
+                            const fdk_widget_event *ev) {
+    fdk_scale_button *b = sb_of(w);
+    switch (ev->type) {
+    case FDK_WIDGET_POINTER_DOWN:
+        if ((w->flags & FDK_WF_ENABLED) == 0 ||
+            ev->pointer.button != FDK_POINTER_BUTTON_LEFT) {
+            return false;
+        }
+        if (!fdk_widget_has_focus(w)) {
+            (void)fdk_widget_focus(w);
+        }
+        b->pressed = true;
+        fdk_widget_invalidate(w);
+        return true;
+    case FDK_WIDGET_POINTER_UP:
+        if (b->pressed) {
+            b->pressed = false;
+            fdk_widget_invalidate(w);
+            if (ev->pointer.button == FDK_POINTER_BUTTON_LEFT) {
+                sb_open_popup(w); /* the toggle-off half closes */
+            }
+        }
+        return true;
+    case FDK_WIDGET_KEY_DOWN:
+        if ((w->flags & FDK_WF_ENABLED) != 0 &&
+            (ev->key.scancode == FDK_KEY_SPACE ||
+             ev->key.scancode == FDK_KEY_ENTER)) {
+            sb_toggle_popup(w);
+            return true;
+        }
+        return false;
+    case FDK_WIDGET_POINTER_ENTER:
+        b->hovering = true;
+        fdk__hover_fade_arm(w, &b->fade, true);
+        fdk_widget_invalidate(w);
+        return false;
+    case FDK_WIDGET_POINTER_LEAVE:
+        b->hovering = false;
+        fdk__hover_fade_arm(w, &b->fade, false);
+        fdk_widget_invalidate(w);
+        return false;
+    default:
+        return false;
+    }
+}
+
+static void sb_paint(fdk_widget *w, fdk_surface *surface,
+                     fdk_rect bounds, fdk_rect clip) {
+    (void)clip;
+    fdk_scale_button *b = sb_of(w);
+    if (bounds.width <= 0 || bounds.height <= 0) {
+        return;
+    }
+    /* The face: the control-family paint (hover blend, pressed
+     * snapping, the disabled override). */
+    fdk_color face = fdk__pal_control();
+    if (b->fade.t > 0.0f) {
+        fdk_color hover = fdk__pal_control_hover();
+        face.r = face.r + (hover.r - face.r) * b->fade.t;
+        face.g = face.g + (hover.g - face.g) * b->fade.t;
+        face.b = face.b + (hover.b - face.b) * b->fade.t;
+        face.a = face.a + (hover.a - face.a) * b->fade.t;
+    }
+    if (b->pressed) {
+        face = fdk__pal_control_pressed();
+    }
+    if ((w->flags & FDK_WF_ENABLED) == 0) {
+        face = fdk__pal_control_disabled();
+    }
+    fdk_i32 radius =
+        fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS);
+    fdk_surface_fill_rounded_rect_aa(surface, bounds, radius, face);
+    if ((w->flags & FDK_WF_ENABLED) != 0) {
+        fdk_surface_draw_rounded_rect_aa(surface, bounds, radius,
+                                      fdk__pal_border());
+    }
+
+    /* The meter: trough + accent fill proportional to the value —
+     * the volume icon's honest stand-in. */
+    fdk_i32 meter_y = bounds.y + (bounds.height - SB_METER_H) / 2;
+    fdk_rect trough = {bounds.x + SB_METER_X, meter_y,
+                       bounds.width - SB_METER_X * 2, SB_METER_H};
+    if (trough.width <= 0) {
+        trough.width = 1;
+    }
+    fdk_color track = fdk__pal_control_pressed();
+    fdk_surface_fill_rounded_rect_aa(surface, trough, 4, track);
+    double span = b->max - b->min;
+    double frac = span > 0.0
+                      ? (b->value - b->min) / span
+                      : 0.0;
+    if (frac < 0.0) {
+        frac = 0.0;
+    }
+    if (frac > 1.0) {
+        frac = 1.0;
+    }
+    fdk_i32 fill_w = (fdk_i32)((double)trough.width * frac + 0.5);
+    if (fill_w > 0) {
+        fdk_color fill = fdk__pal_accent();
+        if ((w->flags & FDK_WF_ENABLED) == 0) {
+            fill.r = fill.r * 0.5f + face.r * 0.5f;
+            fill.g = fill.g * 0.5f + face.g * 0.5f;
+            fill.b = fill.b * 0.5f + face.b * 0.5f;
+        }
+        fdk_rect bar = {trough.x, trough.y, fill_w, trough.height};
+        fdk_surface_fill_rounded_rect_aa(surface, bar, 4, fill);
+    }
+}
+
+static void sb_measure(fdk_widget *w, fdk_size *out) {
+    (void)w;
+    out->width = SB_W;
+    out->height = SB_H;
+}
+
+static void sb_destroy(fdk_widget *w) {
+    fdk_scale_button *b = sb_of(w);
+    if (b->popup != NULL) {
+        /* The popup outlives the button (the combo's abandonment
+         * rule): the guard's button pointer NULLs, the closed hook
+         * still frees it when the popup ends. */
+        b->guard->button = NULL;
+        b->popup = NULL;
+        b->guard = NULL;
+    }
+}
+
+/* ---- a11y: a BUTTON whose value is the number ---- */
+
+static void sb_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_scale_button *sb = (const fdk_scale_button *)(const void *)w;
+    char buf[32];
+    out->value_text = fdk__strdup(sb_value_text(sb, buf, sizeof(buf)));
+    out->has_value = out->value_text != NULL;
+    out->value_min = sb->min;
+    out->value_max = sb->max;
+    out->value_current = sb->value;
+}
+
+static fdk_a11y_action_set sb_a11y_actions(const fdk_widget *w) {
+    (void)w;
+    return (fdk_a11y_action_set)FDK_A11Y_ACTION_ACTIVATE;
+}
+
+static bool sb_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                            double value) {
+    (void)value;
+    if (action != FDK_A11Y_ACTION_ACTIVATE) {
+        return false;
+    }
+    sb_toggle_popup(w);
+    return true;
+}
+
+static const fdk_a11y_class sb_a11y = {
+    .role = FDK_A11Y_ROLE_BUTTON,
+    .describe = sb_a11y_describe,
+    .actions = sb_a11y_actions,
+    .perform = sb_a11y_perform,
+};
+
+const fdk_widget_class fdk_scale_button_class_def = {
+    .size = sizeof(fdk_scale_button),
+    .name = "scalebutton",
+    .handle_event = sb_handle_event,
+    .paint = sb_paint,
+    .measure = sb_measure,
+    .arrange = NULL,
+    .destroy = sb_destroy,
+    .a11y = &sb_a11y,
+};
+
+/* ---- public API ---- */
+
+fdk_result fdk_scale_button_create(fdk_widget *parent, fdk_font *font,
+                                   double min, double max, double value,
+                                   fdk_widget **out_button) {
+    if (out_button == NULL || parent == NULL || font == NULL ||
+        min >= max) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_widget *w = NULL;
+    fdk_result r = fdk_widget_create(parent, &fdk_scale_button_class_def,
+                                     (fdk_rect){0, 0, 0, 0}, &w);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    fdk_scale_button *b = sb_of(w);
+    b->font = font;
+    b->min = min;
+    b->max = max;
+    b->value = (value < min) ? min : (value > max) ? max : value;
+    fdk_widget_set_can_focus(w, true);
+    fdk_widget_child_layout_changed(w->parent);
+    *out_button = w;
+    return FDK_OK;
+}
+
+void fdk_scale_button_set_range(fdk_widget *button, double min,
+                                double max) {
+    if (button == NULL || button->klass != &fdk_scale_button_class_def ||
+        min >= max) {
+        return; /* a bad range is a documented no-op */
+    }
+    fdk_scale_button *b = sb_of(button);
+    b->min = min;
+    b->max = max;
+    if (b->value < min) {
+        b->value = min;
+    }
+    if (b->value > max) {
+        b->value = max;
+    }
+    fdk_widget_invalidate(button);
+    fdk__a11y_notify(button, FDK_A11Y_VALUE_CHANGED, 0);
+}
+
+void fdk_scale_button_set_value(fdk_widget *button, double value) {
+    if (button == NULL || button->klass != &fdk_scale_button_class_def) {
+        return;
+    }
+    fdk_scale_button *b = sb_of(button);
+    if (value < b->min) {
+        value = b->min;
+    }
+    if (value > b->max) {
+        value = b->max;
+    }
+    if (value == b->value) {
+        return; /* idempotent */
+    }
+    b->value = value;
+    fdk_widget_invalidate(button);
+    fdk__a11y_notify(button, FDK_A11Y_VALUE_CHANGED, 0);
+}
+
+double fdk_scale_button_get_value(fdk_widget *button) {
+    if (button == NULL || button->klass != &fdk_scale_button_class_def) {
+        return 0.0;
+    }
+    return sb_of(button)->value;
+}
+
+void fdk_scale_button_set_step(fdk_widget *button, double step) {
+    if (button == NULL || button->klass != &fdk_scale_button_class_def) {
+        return;
+    }
+    sb_of(button)->step = (step > 0.0) ? step : 0.0;
+}
+
+void fdk_scale_button_set_on_value_changed(
+    fdk_widget *button, fdk_scale_button_changed_fn on_changed,
+    void *user_data) {
+    if (button == NULL || button->klass != &fdk_scale_button_class_def) {
+        return;
+    }
+    fdk_scale_button *b = sb_of(button);
+    b->on_change = on_changed;
+    b->on_change_data = user_data;
 }

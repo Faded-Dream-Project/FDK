@@ -178,12 +178,14 @@ MAPPING = [
          qt=["QToolButton"],
          fdk=["fdk_menu_button_create"],
          note="4 arrow variants + check/radio/separator items"),
-    dict(status="missing",
+    dict(status="parity",
          gtk=["ScaleButton", "VolumeButton"],
          qt=[],
-         fdk=[],
-         note="a slider-in-a-popup; every-application apps wire "
-              "slider+popover themselves — stated, not hidden"),
+         fdk=["fdk_scale_button_create", "fdk_scale_button_set_value",
+              "fdk_scale_button_set_on_value_changed"],
+         note="the slider-in-a-popup: a value-meter button, the press "
+              "pops a vertical slider + live value label, changes fire "
+              "live during the drag"),
     dict(status="parity",
          gtk=["Switch"],
          qt=[],

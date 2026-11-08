@@ -9,6 +9,23 @@ changes; the round-40 release-closing work below landed under the
 same release identity before the tag.
 
 
+### Added (round 45)
+
+- **`fdk_scale_button`** (fdk_widgets.h, 6 public functions): the
+  slider-in-a-popup control — the GtkScaleButton/GtkVolumeButton
+  row, closed. The face is a value meter; a press pops a window
+  below (above when out of room) carrying a vertical slider and a
+  live value label; drags fire on_value_changed live (the value
+  rides the call). Dismissal: Escape, a second press, or a
+  press-away routed to the popup by the grab. The family contracts
+  (silent setter, range rules, step, detached no-op, popup
+  abandonment) are the toggle's/combo's, verbatim.
+- **`examples/21_scale_button.c`**: the demo — a volume-posture
+  scale button with a live readout on the shared example helper.
+- **PARITY**: the ScaleButton/VolumeButton row reclassified parity.
+  The honest tail: Video/MediaControls and the policy rows.
+  1,046 exported symbols.
+
 ### Added (round 44)
 
 - **`fdk_font_button`** (fdk_dialog.h, 8 public functions): the

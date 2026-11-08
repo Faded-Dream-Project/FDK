@@ -2188,6 +2188,58 @@ void fdk_slider_set_orientation(fdk_widget *slider,
                                 fdk_slider_orientation orientation);
 fdk_slider_orientation fdk_slider_get_orientation(fdk_widget *slider);
 
+/* ---- Scale button (1.0.0) ----
+ *
+ * The slider-in-a-popup control (GTK's GtkScaleButton / GtkVolumeButton
+ * posture, FDK's own machinery): a compact button whose face is a
+ * value meter — a trough with an accent fill proportional to the
+ * value between min and max (the volume-icon's honest stand-in; the
+ * icon pack is theme territory). Pressing it opens a small popup
+ * window below the button (above when the room runs out) carrying a
+ * vertical slider and a live value label; every slider drag updates
+ * the button and fires on_value_changed LIVE (the slider's own
+ * contract), including mid-drag. A second press on the button closes
+ * the popup; so do Escape / the window-manager close request, and a
+ * pointer press delivered outside the popup's bounds while the grab
+ * routes it there. All of those paths run the same closed hook, so
+ * the button's state is exact whichever way the popup ends.
+ *
+ * The contract details are the family's, verbatim: set_value is
+ * CLAMPED and SILENT (the gesture callback belongs to user
+ * gestures); set_range re-clamps the value and refuses min >= max
+ * as a no-op; step quantizes the popup slider (0 = continuous); a
+ * detached-tree press is a consumed no-op (no window to pop from).
+ * The button stores the description, not the popup: destroying the
+ * button while its popup is open abandons the popup to the guard —
+ * the popup's callbacks see the gone button and clean up without
+ * touching freed memory. */
+
+fdk_result fdk_scale_button_create(fdk_widget *parent, fdk_font *font,
+                                   double min, double max, double value,
+                                   fdk_widget **out_button);
+/* Re-ranges; the value clamps into the new interval; min >= max is
+ * a no-op. */
+void fdk_scale_button_set_range(fdk_widget *button, double min,
+                                double max);
+/* Sets (clamped); does NOT fire on_value_changed. */
+void fdk_scale_button_set_value(fdk_widget *button, double value);
+/* The current value (0.0 out of a NULL button). */
+double fdk_scale_button_get_value(fdk_widget *button);
+/* Quantizes the popup slider's changes (0 = continuous). */
+void fdk_scale_button_set_step(fdk_widget *button, double step);
+/* The value-change callback: the NEW value rides the call (the
+ * color button's payload shape; the plain slider's callback omits
+ * it — here the value is the widget's whole point). */
+typedef void (*fdk_scale_button_changed_fn)(fdk_widget *button,
+                                            double value,
+                                            void *user_data);
+
+/* Fires on every USER-driven value change (the popup slider's
+ * drags), live during the drag. */
+void fdk_scale_button_set_on_value_changed(
+    fdk_widget *button, fdk_scale_button_changed_fn on_changed,
+    void *user_data);
+
 /* ---- SearchEntry debounce (1.0.0) ----
  *
  * The search preset's debounced twin of on_changed: the

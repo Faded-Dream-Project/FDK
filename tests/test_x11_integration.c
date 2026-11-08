@@ -7166,6 +7166,117 @@ static void test_combo_gui(void) {
     printf("[ok] combo GUI: dropdown lifecycle through real input\n");
 }
 
+static int scale_change_hits = 0;
+static double scale_change_last = -1.0;
+static void scale_change_cb(fdk_widget *button, double value,
+                            void *user) {
+    (void)button;
+    (void)user;
+    scale_change_hits++;
+    scale_change_last = value;
+}
+
+static void test_scale_button_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        NULL,
+    };
+    const char *font_path = font_candidates[0];
+    FILE *f = fopen(font_path, "rb");
+    if (f == NULL) {
+        printf("[skip] X11 scale button GUI (no system TrueType font "
+               "found)\n");
+        return;
+    }
+    fclose(f);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_font *font = fdk_font_load(font_path, 16);
+    assert(font != NULL);
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK scale button test",
+                                 .width = 320, .height = 320 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+
+    fdk_widget *sb = NULL;
+    assert(fdk_ok(fdk_scale_button_create(root, font, 0.0, 100.0, 50.0,
+                                          &sb)));
+    fdk_scale_button_set_on_value_changed(sb, scale_change_cb, NULL);
+    fdk_size nat = {0, 0};
+    fdk_widget_measure(sb, &nat);
+    fdk_widget_arrange(sb, (fdk_rect){20, 20, nat.width, nat.height});
+
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 150);
+    fdk_window_paint(win);
+    (void)fdk_pump_events(ctx, 100);
+
+    Display *send = XOpenDisplay(NULL);
+    assert(send != NULL);
+    Window xid = (Window)fdk_window_xid(win);
+    Window root_scr = DefaultRootWindow(send);
+    Window before[16], now[16];
+    int n_before = x11_child_windows(send, root_scr, before, 16);
+
+    /* Click the button: the popup maps (a root child — override
+     * redirect, placed below the button). */
+    scale_change_hits = 0;
+    x11_click(send, xid, 20 + nat.width / 2, 20 + nat.height / 2);
+    (void)fdk_pump_events(ctx, 200);
+    int n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 1);
+    Window pop = x11_new_child(before, n_before, now, n_now);
+    assert(pop != 0);
+    printf("[ok] scale button: the press opens the popup\n");
+
+    /* The vertical slider inside: click near its TOP (the max end;
+     * the trough runs down the 48x176 popup). The drag jumps the
+     * value, the app callback fires LIVE with it, and the button
+     * holds the same answer. */
+    x11_click(send, pop, 24, 20);
+    (void)fdk_pump_events(ctx, 200);
+    assert(scale_change_hits >= 1);
+    assert(scale_change_last > 50.0);
+    assert(fdk_scale_button_get_value(sb) == scale_change_last);
+    printf("[ok] scale button: a trough click drives the value live "
+           "(%.4g)\n", scale_change_last);
+
+    /* Escape: dismissed with the new value kept. */
+    x11_send_key_event(send, pop, KeyPress, 9);
+    x11_send_key_event(send, pop, KeyRelease, 9);
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before);
+    assert(fdk_scale_button_get_value(sb) == scale_change_last);
+    printf("[ok] scale button: Escape dismisses, the value stays\n");
+
+    /* The second press is the toggle-off half: open, then press
+     * again — no callback, the popup is gone. */
+    x11_click(send, xid, 20 + nat.width / 2, 20 + nat.height / 2);
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 1);
+    scale_change_hits = 0;
+    x11_click(send, xid, 20 + nat.width / 2, 20 + nat.height / 2);
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before);
+    assert(scale_change_hits == 0);
+    printf("[ok] scale button: the second press closes (toggle)\n");
+
+    XCloseDisplay(send);
+    fdk_window_destroy(win);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] scale button GUI: popup lifecycle through real "
+           "input\n");
+}
+
 static int dialog_responses = 0;
 static fdk_dialog_response dialog_last = (fdk_dialog_response)-99;
 
@@ -15445,6 +15556,7 @@ int main(void) {
     test_popup_window();
     test_menu_gui();
     test_combo_gui();
+    test_scale_button_gui();
     test_date_picker_gui();
     test_picture_anim_gui();
     test_dialog_gui();

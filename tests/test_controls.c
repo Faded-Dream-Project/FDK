@@ -1499,6 +1499,112 @@ static void test_levelbar(void) {
            "continuous natural, a11y meter interface\n");
 }
 
+/* ---- Scale button (1.0.0 — the headless half; the popup GUI path
+ * lives in the X11 integration suite) ---- */
+
+static int g_scale_changes = 0;
+static double g_scale_last = 0.0;
+static void on_scale_change(fdk_widget *button, double value,
+                            void *user) {
+    (void)button;
+    (void)user;
+    g_scale_changes++;
+    g_scale_last = value;
+}
+
+static void test_scale_button(void) {
+    fdk_widget *root = fresh_root();
+
+    fdk_widget *sb = NULL;
+    assert(fdk_ok(fdk_scale_button_create(root, g_font, 0.0, 100.0,
+                                          40.0, &sb)));
+    /* The validation ladder: min >= max refused; NULL anything
+     * refused. */
+    assert(fdk_scale_button_create(root, g_font, 10.0, 10.0, 0.0,
+                                   &sb) == FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_scale_button_create(NULL, g_font, 0.0, 10.0, 0.0,
+                                   &sb) == FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_scale_button_create(root, NULL, 0.0, 10.0, 0.0,
+                                   &sb) == FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_scale_button_create(root, g_font, 0.0, 10.0, 50.0,
+                                   NULL) == FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_scale_button_get_value(sb) == 40.0);
+    assert(fdk_scale_button_get_value(NULL) == 0.0);
+
+    /* set_value clamps and stays SILENT (the gesture callback's
+     * rule, verbatim from the toggle/checkbox setters). */
+    g_scale_changes = 0;
+    fdk_scale_button_set_on_value_changed(sb, on_scale_change, NULL);
+    fdk_scale_button_set_value(sb, 250.0);
+    assert(fdk_scale_button_get_value(sb) == 100.0);
+    assert(g_scale_changes == 0);
+    fdk_scale_button_set_value(sb, -5.0);
+    assert(fdk_scale_button_get_value(sb) == 0.0);
+    assert(g_scale_changes == 0);
+    fdk_scale_button_set_value(sb, 42.0);
+    assert(fdk_scale_button_get_value(sb) == 42.0);
+    fdk_scale_button_set_value(NULL, 1.0); /* argument safety */
+    fdk_scale_button_set_on_value_changed(NULL, on_scale_change, NULL);
+
+    /* set_range re-clamps; a bad range is a no-op. */
+    fdk_scale_button_set_range(sb, 0.0, 50.0);
+    assert(fdk_scale_button_get_value(sb) == 42.0);
+    fdk_scale_button_set_range(sb, 40.0, 45.0);
+    assert(fdk_scale_button_get_value(sb) == 42.0);
+    fdk_scale_button_set_range(sb, 10.0, 10.0);
+    assert(fdk_scale_button_get_value(sb) == 42.0); /* no-op range */
+    fdk_scale_button_set_range(NULL, 0.0, 10.0);
+    fdk_scale_button_set_range(sb, 0.0, 100.0);
+
+    /* Step: quantization is the popup slider's job; the button
+     * stores it, non-positive means continuous (0). */
+    fdk_scale_button_set_step(sb, 5.0);
+    fdk_scale_button_set_step(sb, 0.0);
+    fdk_scale_button_set_step(NULL, 3.0); /* argument safety */
+
+    /* Natural size + focusability (the button-family contract). */
+    fdk_size nat = {0, 0};
+    fdk_widget_measure(sb, &nat);
+    assert(nat.width >= 40 && nat.height >= 24);
+    assert(fdk_widget_get_can_focus(sb));
+
+    /* The meter paint: full = accent inside the meter; empty =
+     * track, not accent. The face paints over the root's black. */
+    fdk_widget_arrange(sb, (fdk_rect){10, 10, 64, 28});
+    fdk_scale_button_set_value(sb, 100.0);
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(400, 300, &s)));
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    fdk_u32 acc = pack_color(fdk_theme_get_color(NULL, FDK_TK_ACCENT));
+    assert(px_at(s, 30, 24) == acc); /* inside the full meter */
+    fdk_scale_button_set_value(sb, 0.0);
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    assert(px_at(s, 30, 24) != acc); /* the empty meter's track */
+    fdk_surface_destroy(s);
+
+    /* Presses in a DETACHED tree are a documented no-op (no window
+     * to pop from) — consumed, nothing fires, state intact. */
+    g_scale_changes = 0;
+    fdk_event_data down =
+        ev_button(FDK_EVENT_POINTER_BUTTON_DOWN, 30.0f, 20.0f);
+    fdk_event_data up =
+        ev_button(FDK_EVENT_POINTER_BUTTON_UP, 30.0f, 20.0f);
+    assert(fdk_widget_tree_handle_event(root, &down) == true);
+    (void)fdk_widget_tree_handle_event(root, &up);
+    assert(g_scale_changes == 0);
+    fdk_event_data sp = ev_key(FDK_EVENT_KEY_DOWN, FDK_KEY_SPACE);
+    assert(fdk_widget_tree_handle_event(root, &sp) == true);
+    assert(g_scale_changes == 0);
+
+    fdk_widget_destroy(root);
+    printf("[ok] scale button: create ladder (bad range/args), "
+           "clamped silent setter, range re-clamp + bad-range no-op, "
+           "step storage, meter paint (full accent vs empty track), "
+           "detached no-op presses\n");
+}
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -1534,6 +1640,7 @@ int main(void) {
     test_label_modes();
     test_radio_arrows();
     test_progress();
+    test_scale_button();
     test_separator();
     test_frame();
     test_button_link();

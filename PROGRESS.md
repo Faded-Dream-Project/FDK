@@ -4,12 +4,12 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-08, after round 44)
+## Current state (2026-11-08, after round 45)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
-- **Surface:** 1,040 exported symbols, 34 public headers, 39 widget
-  classes (the chooser trio's button host joined the catalog);
+- **Surface:** 1,046 exported symbols, 34 public headers, 40 widget
+  classes (the scale button joined the catalog);
   extension API v3 (widget hosting); PARITY.md audited against the
   GTK4 4.24 catalog and Qt6 — its gap table now carries zero OPEN
   rows.
@@ -37,6 +37,58 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 45 (2026-11-08) — the parity batch: the scale button; bug-rate: 1 found, 1 fixed, 0 new after the fix
+
+The honest tail's next implementable row: the slider-in-a-popup
+(the GtkScaleButton/GtkVolumeButton pair). The dedup check ran
+first — no scale/volume widget exists, and the popup machinery is
+the public fdk_window_create_popup + the menubutton's guard
+pattern (the menu session machinery is model-driven and wrong for
+a live slider, so it stays untouched):
+
+1. **fdk_scale_button** (fdk_widgets.h, 6 public functions): the
+   face is a value meter (trough + accent fill proportional to the
+   value — the volume icon's honest stand-in; icons are theme
+   territory); a press pops a small window below the button (above
+   when the room runs out) carrying a VERTICAL slider (min at the
+   bottom, the audio convention) and a live value label. Every
+   slider drag updates the button and fires on_value_changed LIVE
+   (the value rides the call — the color button's payload shape;
+   the plain slider's callback omits it). Dismissal: Escape (the
+   platform's close-request synthesis), a second press (the toggle
+   off), and a pointer press delivered outside the popup's bounds
+   while the grab routes it there. The family contracts verbatim:
+   the clamped silent setter, set_range re-clamps and refuses
+   min >= max as a no-op, step quantizes the popup slider, the
+   detached-tree press is a consumed no-op, and the popup
+   abandonment rule is the combo's (destroying the button while
+   open NULLs the guard's button; the closed hook still frees it).
+   Tests FIRST (test_controls.c, red): the create ladder, the
+   clamped silent setter, the range rules, the meter paint (full
+   accent vs empty track, pixel proofs), the detached no-op
+   presses. The popup path (test_x11_integration.c, GUI): the
+   press opens (a root child), a trough click drives the value
+   live through a REAL XTEST click (50 -> 98.39), Escape dismisses
+   with the value kept, the second press closes, all under ASan.
+2. **The in-round find+fix (the bug-rate 1):** the first GUI run
+   died in a heap-use-after-free INSIDE my own sb_close tail — the
+   destroy notify runs SYNCHRONOUSLY (it fires while the window is
+   still whole, before teardown), so it frees the guard before
+   fdk_window_destroy returns, and the leftover "defensive" read
+   of the guard after the destroy call was the use-after-free. The
+   tail is gone; the closed hook is the single owner of the
+   guard's lifetime. The project rule holds: the GUI test caught
+   it, ASan named it, the fix is structural (no band-aid).
+3. **examples/21_scale_button.c**: the demo app — a volume-posture
+   scale button (0..100, step 5) + a live readout label + the
+   status line narration, on the shared example-window helper.
+
+The sweep after the batch: CLEAN, missing rows 3 -> 2 (the honest
+tail is now Video/MediaControls and the policy rows). 1,046
+exports (+6), verify-exports green; 40 widget classes. Battery
+green (unit + X11 + threads); gate re-run below. Bug-rate: 1
+found, 1 fixed, 0 new after the fix.
 
 ## Round 44 (2026-11-08) — the parity batch: the font button; bug-rate: 0 new library bugs
 

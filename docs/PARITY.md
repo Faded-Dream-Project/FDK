@@ -5,7 +5,7 @@ build ANY desktop application with FDK and not feel the toolkit's
 limits — the API surface GTK4 and Qt6 Widgets cover, FDK covers
 too, and where a category is deliberately thinner the reason is
 stated here, not hidden. This audit enumerates what FDK ships
-(1,040 exported symbols, 39 widget classes, both backends), compares
+(1,046 exported symbols, 40 widget classes, both backends), compares
 it category by category against GTK4 and Qt6 Widgets, and lists
 the gaps with a priority verdict. It was produced by reading
 FDK's headers and sources directly — every "have" claim below is a
@@ -64,23 +64,27 @@ picture (fill/contain/cover fits), spinner, progress, levelbar
 (continuous/discrete), slider, spin, scrollbar via scrollview,
 separator, frame, expander, notebook, stack + stackswitcher,
 paned, toolbar, statusbar, list (single/multi/none selection),
-tree, iconview, calendar, date picker, time picker, combo, canvas, font button.
+tree, iconview, calendar, date picker, time picker, combo, canvas, font button,
+scale button.
 
 **GTK4 widget inventory diff**: missing are `GtkAssistant`
 (deliberate policy: OUT), `GtkActionBar` (toolbar + custom
 containers cover the layout), `GtkFixed` (FDK containers position
-explicitly — same role), `GtkScaleButton`, `GtkVolumeButton`,
-`GtkAppChooserWidget` (the app decides what "open" means through
+explicitly — same role), `GtkAppChooserWidget` (the app decides what "open" means through
 `fdk_desktop_open_uri`), `GtkVideo`/`GtkMediaControls` (no media
-stack), and `GtkEmojiChooser` (emoji rides the IME). Two rows the
-2026-11-08 parity batch reclassified: the font button closed the
-chooser-button row (`fdk_font_button` is the color swatch button's
-font twin — the label reads the description, the press opens the
-chooser dialog, ACCEPTED settles it; one engine, three hosts:
-dialog, widget, button), and `GtkSwitch`'s dedicated visual turns
-out to be already shipped — the toggle's own track+knob paint with
-live changed feedback, keyboard activation, and the TOGGLE_BUTTON
-a11y role. Two upstream facts the
+stack), and `GtkEmojiChooser` (emoji rides the IME). Three rows
+the 2026-11-08 parity batches reclassified: the font button closed
+the chooser-button row (`fdk_font_button` is the color swatch
+button's font twin — the label reads the description, the press
+opens the chooser dialog, ACCEPTED settles it; one engine, three
+hosts: dialog, widget, button), `GtkSwitch`'s dedicated visual
+turns out to be already shipped — the toggle's own track+knob
+paint with live changed feedback, keyboard activation, and the
+TOGGLE_BUTTON a11y role — and the scale button closed the
+ScaleButton/VolumeButton row (`fdk_scale_button`: the face is a
+value meter, the press pops a vertical slider + live value label,
+changes fire live during the drag; the popup carries the
+menu-popup dismissal contract). Two upstream facts the
 2026-11-08 LIVE sweep pinned (scripts/parity_check.py against
 docs.gtk.org): GTK4 has REMOVED `GtkToolbar`, `GtkInputDialog`,
 and the whole RecentChooser family — FDK's own toolbar and
