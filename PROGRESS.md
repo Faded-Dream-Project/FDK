@@ -56,11 +56,15 @@ build in the decorations rig, the GitHub Actions pin comments,
 dependency versions in the provenance docs, the integer
 extension-API contract version, and the SONAME digit.
 
-The rename lands via git plumbing (blobs -> index -> commit-tree
--> push): the sandbox's snapshot restore kept reverting
-working-tree writes to HEAD within seconds — the committed
-objects are the durable layer, and the worktree follows via
-reset --hard.
+The rename lands via git plumbing (blobs -> recursive mktree ->
+commit-tree -> push by hash): the sandbox's snapshot restore
+reverts tracked-file writes to HEAD within seconds, and — the
+real bug behind three green-looking no-op attempts — the
+line-level transform appended the UNtransformed line, so every
+earlier 'rename' was a faithful no-op (the string-level round-38
+version never had the bug). Blob identity is now asserted per
+file, the staged tree is diffed against HEAD before the commit,
+and the worktree follows via reset --hard.
 
 ## Round 38 (2026-11-08) — the first release is 1.0.0: the 1.0.0 identity retired repo-wide
 
