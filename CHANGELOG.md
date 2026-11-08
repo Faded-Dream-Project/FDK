@@ -9,6 +9,16 @@ changes; the round-40 release-closing work below landed under the
 same release identity before the tag.
 
 
+### Fixed (round 49)
+
+- **The tray fallback renders icon NAMES** — round 48's fallback
+  required pixmap pixels, but apps that open the item with
+  `set_icon_name` only (fdk-files' shape; found by the owner's
+  tint2 retest, whose log named the miss exactly) waited forever.
+  The theme engine now draws the named icon at 32 px (live theme
+  policy, straight alpha) and the item docks; app-set pixels still
+  win and swap live. `set_icon_name` retries the fallback.
+
 ### Fixed (round 48)
 
 - **The tray works on ANY X11 bar** — the tray item spoke only

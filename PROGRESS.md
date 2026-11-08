@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-08, after round 48)
+## Current state (2026-11-08, after round 49)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,56 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 49 (2026-11-08) — the name-render layer: the fallback docks apps that only have an icon name; bug-rate: 1 found (the field retest), 1 fixed, 0 new after the fix
+
+1. **The retest failed, and the diagnostics earned their keep**: the
+   owner's tint2 run printed the exact miss — "no
+   StatusNotifierWatcher and no XEmbed pixels yet". No SNI watcher
+   on that bus (the round-48 hypothesis confirmed), and the item
+   had no pixels because `test-apps/fdk-files` opens the tray with
+   `set_icon_name("folder")` ONLY (main.c:662) — round 48's
+   pixels-required rule made the fallback wait forever for pixels
+   an app might never set.
+2. **The fix: the toolkit renders the name it owns.** FDK has a
+   full icon-theme engine (the app's own log shows 'Papirus-
+   Nordic', 2107 lookups) — `xembed_render_named_icon` calls
+   `fdk_icon_theme_surface(name, 32)` (fresh ARGB8888 surface, the
+   engine's own resolution policy: live theme → Inherits →
+   hicolor → pixmaps), converts the surface's u32 0xAARRGGBB rows
+   into ARGB32 network-order bytes in the item's pixmap slot, and
+   the fallback docks with them. `set_icon_name` now retries the
+   fallback; a later `set_icon_pixmap` still swaps the pixels live
+   (app pixels win). Name-only apps work on any classic bar now.
+3. **The suite pins it**: the XEmbed phase gained the name leg —
+   an item opened with `set_icon_name("folder")` and no pixmap
+   must dock (skipped with a loud note where no icon theme
+   resolves — a bare container). The sandbox's Adwaita/hicolor
+   themes ran it: rendered, docked, asserted.
+4. **The LSan coin flip the leg exposed, triaged and defused
+   without a suppression entry**: the first green runs were
+   followed by a 52935 B / 35-allocation leak report from the
+   dbus lane. Bisect (stash → round-48 binary ALL PASS; name leg
+   off → still 5736 B / 2 allocations) + stack census (ZERO FDK
+   frames; every site inside libX11/libxcb — xcb_connect_to_fd,
+   XOpenDisplay, XInitExtension) said: libX11 retains per-CLOSED-
+   display state in process-global lists, and whether LSan sees
+   it depends on stale main-thread stack slots — the round-48
+   binary passed three runs in a row on luck, the round-49 line
+   shifts flipped it. Fix at the source: the rig now opens ONE
+   display for the process lifetime (the Xvfb dies with the run),
+   the guard probe reuses it, rig stop destroys windows only —
+   every block the rig owns stays reachable and the sanitizer
+   stays exact. The lsan-gl.supp file's discipline held: no
+   entry, because nothing third-party needed hiding once the
+   fixture stopped closing displays.
+5. **Field evidence for M-9**: the tint2 retest exercised the new
+   diagnostics (its log named the miss precisely) and now expects
+   the rendered 'folder' icon to dock; the next owner run closes
+   the loop.
+
+Battery: test-dbus ALL PASS twice (name leg on), core + X11
+suites green under -j2.
 
 ## Round 48 (2026-11-08) — the tray works on ANY X11 bar now; bug-rate: 1 found, 1 fixed, 0 new after the fix
 

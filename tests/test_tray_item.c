@@ -32,6 +32,7 @@
 #include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_dbus.h"
+#include "fdk/fdk_theme.h" /* the name-render leg's probe */
 #include "fdk/fdk_tray.h"
 
 #include <assert.h>
@@ -777,12 +778,29 @@ typedef struct {
     int dock_requests;
 } xembed_rig;
 
+/* ONE rig display for the whole process (round 49). libX11 retains
+ * per-CLOSED-display state (the Display registration, the xcb
+ * connection, the extension caches) in process-global lists on this
+ * Xlib, so open/close cycles of auxiliary displays turn LSan's exit
+ * audit into a coin flip: the round-48 binary passed three runs in a
+ * row and then reported ~52 KB after an unrelated line shift — same
+ * allocation sites (xcb_connect_to_fd / XOpenDisplay / XInitExtension,
+ * ZERO FDK frames in any stack), new stack layout flipping the
+ * stale-slot reachability. Keeping the rig's display for the process
+ * lifetime (the Xvfb dies with the test run anyway) keeps every block
+ * it owns reachable and the sanitizer exact — no third-party
+ * suppression entry needed for the rig. */
+static Display *g_rig_dpy = NULL;
+
 static int xembed_rig_start(xembed_rig *rig) {
     memset(rig, 0, sizeof(*rig));
-    rig->dpy = XOpenDisplay(NULL);
-    if (rig->dpy == NULL) {
-        return 0;
+    if (g_rig_dpy == NULL) {
+        g_rig_dpy = XOpenDisplay(NULL);
+        if (g_rig_dpy == NULL) {
+            return 0;
+        }
     }
+    rig->dpy = g_rig_dpy;
     rig->root = DefaultRootWindow(rig->dpy);
     rig->sel = XInternAtom(rig->dpy, "_NET_SYSTEM_TRAY_S0", False);
     rig->opcode = XInternAtom(rig->dpy, "_NET_SYSTEM_TRAY_OPCODE", False);
@@ -793,7 +811,6 @@ static int xembed_rig_start(xembed_rig *rig) {
     XSetSelectionOwner(rig->dpy, rig->sel, rig->mgr, CurrentTime);
     if (XGetSelectionOwner(rig->dpy, rig->sel) != rig->mgr) {
         XDestroyWindow(rig->dpy, rig->mgr);
-        XCloseDisplay(rig->dpy);
         memset(rig, 0, sizeof(*rig));
         return 0;
     }
@@ -824,7 +841,7 @@ static void xembed_rig_stop(xembed_rig *rig) {
     if (rig->mgr != None) {
         XDestroyWindow(rig->dpy, rig->mgr);
     }
-    XCloseDisplay(rig->dpy);
+    rig->dpy = NULL; /* the display itself lives for the process */
     memset(rig, 0, sizeof(*rig));
 }
 
@@ -888,16 +905,20 @@ static int pred_item_hosted(void *u) { return fdk_tray_item_hosted(u); }
 static int pred_item_unhosted(void *u) { return !fdk_tray_item_hosted(u); }
 
 static int xembed_fallback_phase(fdk_context *ctx) {
-    /* Guard: a REAL bar owning the selection would fight the rig. */
+    /* Guard: a REAL bar owning the selection would fight the rig.
+     * The probe rides the shared rig display (never closed — see
+     * g_rig_dpy above; a probe display's open/close cycle is one
+     * more coin flip in LSan's exit audit). */
     {
-        Display *dpy = XOpenDisplay(NULL);
-        if (dpy == NULL) {
+        if (g_rig_dpy == NULL) {
+            g_rig_dpy = XOpenDisplay(NULL);
+        }
+        if (g_rig_dpy == NULL) {
             return live_skip("the XEmbed phase needs an X display "
                              "(run: make test-dbus)");
         }
-        Atom sel = XInternAtom(dpy, "_NET_SYSTEM_TRAY_S0", False);
-        Window owner = XGetSelectionOwner(dpy, sel);
-        XCloseDisplay(dpy);
+        Atom sel = XInternAtom(g_rig_dpy, "_NET_SYSTEM_TRAY_S0", False);
+        Window owner = XGetSelectionOwner(g_rig_dpy, sel);
         if (owner != None) {
             return live_skip("a REAL bar owns the X11 systray selection "
                              "on this display — the XEmbed phase needs a "
@@ -1024,6 +1045,39 @@ static int xembed_fallback_phase(fdk_context *ctx) {
     assert(g_app.host_count == 3 && g_app.hosted_now == 1);
     printf("[ok] tray XEmbed restart: unhosted on the bar's death, "
            "re-docked via the MANAGER announcement\n");
+
+    /* 4. the NAME leg (round 49): an item opened with an icon NAME
+     * only (fdk-files' shape — set_icon_name, no pixmap) docks too:
+     * the theme engine renders the pixels for the fallback. Skipped
+     * where no icon theme resolves (a bare container), asserted
+     * where one does. */
+    {
+        fdk_surface *probe = fdk_icon_theme_surface("folder", 32);
+        if (probe == NULL) {
+            printf("[note] no icon theme resolves here — the name-render "
+                   "leg asserts nothing (install an icon theme to run "
+                   "it)\n");
+        } else {
+            fdk_surface_destroy(probe);
+            assert(xembed_rig_start(&rig));
+            fdk_tray_item_options n_opts = {
+                .id = "fdk-tray-xembed-name",
+                .title = "XEmbed name",
+            };
+            fdk_tray_item *nitem =
+                fdk_tray_item_open(ctx, &n_opts, &cb, NULL);
+            assert(nitem != NULL);
+            fdk_tray_item_set_icon_name(nitem, "folder");
+            assert(pump_xembed_until(ctx, &rig, 5000, nitem,
+                                     pred_item_hosted));
+            assert(rig.dock_requests >= 1);
+            assert(g_app.host_count == 4 && g_app.hosted_now == 1);
+            printf("[ok] tray XEmbed name-render: an icon-NAME item docks "
+                   "(the theme engine drew the pixels)\n");
+            fdk_tray_item_close(nitem);
+            xembed_rig_stop(&rig);
+        }
+    }
 
     fdk_tray_item_close(item);
     xembed_rig_stop(&rig);

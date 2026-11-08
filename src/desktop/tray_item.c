@@ -34,6 +34,9 @@ static void send_or_free(fdk_dbus_connection *bus, fdk_dbus_message *m) {
 #include "core/alloc_internal.h"
 #include "core/context_internal.h" /* ctx->ops / ctx->conn (the XEmbed
                                     * systray fallback) */
+#include "fdk/fdk_surface.h"
+#include "fdk/fdk_theme.h" /* fdk_icon_theme_surface: the named-icon
+                            * render for the XEmbed fallback (round 49) */
 
 #include <stdlib.h>
 #include <string.h>
@@ -43,6 +46,8 @@ static void send_or_free(fdk_dbus_connection *bus, fdk_dbus_message *m) {
 
 /* The XEmbed fallback (round 48) — defined below the registration
  * section; watcher_event and the setters call it. */
+#define FDK_TRAY_XEMBED_RENDER_PX 32
+static int xembed_render_named_icon(fdk_tray_item *it);
 static void xembed_try(fdk_tray_item *it);
 static void xembed_leave(fdk_tray_item *it);
 
@@ -866,6 +871,50 @@ static void watcher_event(fdk_dbus_connection *bus, const char *name,
 
 /* ---- the XEmbed fallback (1.0.0-rc1, round 48) --------------------------------- */
 
+/* Render the item's icon NAME through the theme engine into the
+ * item's pixmap slot (ARGB32 network order — the fallback's pixel
+ * format). Returns 0 when the name resolves to nothing (the engine's
+ * contract: never a wrong-type icon). App-set pixels are never
+ * touched — the caller only asks when icon_px is empty, and a later
+ * set_icon_pixmap swaps the rendered pixels live. */
+static int xembed_render_named_icon(fdk_tray_item *it) {
+    fdk_surface *s = fdk_icon_theme_surface(it->icon_name,
+                                            FDK_TRAY_XEMBED_RENDER_PX);
+    if (s == NULL) {
+        return 0;
+    }
+    fdk_surface_info info;
+    int ok = 0;
+    if (fdk_ok(fdk_surface_get_info(s, &info)) && info.pixels != NULL &&
+        info.width > 0 && info.height > 0) {
+        size_t len = (size_t)info.width * (size_t)info.height * 4;
+        uint8_t *bytes = fdk_alloc(len);
+        if (bytes != NULL) {
+            for (int32_t y = 0; y < info.height; y++) {
+                const fdk_u32 *row =
+                    info.pixels + (size_t)y * (size_t)info.stride;
+                uint8_t *dst = bytes + (size_t)y * (size_t)info.width * 4;
+                for (int32_t x = 0; x < info.width; x++) {
+                    fdk_u32 v = row[x]; /* ARGB8888 host order: 0xAARRGGBB */
+                    dst[0] = (uint8_t)(v >> 24); /* A */
+                    dst[1] = (uint8_t)(v >> 16); /* R */
+                    dst[2] = (uint8_t)(v >> 8);  /* G */
+                    dst[3] = (uint8_t)v;         /* B */
+                    dst += 4;
+                }
+            }
+            fdk_free(it->icon_px.bytes);
+            it->icon_px.bytes = bytes;
+            it->icon_px.len = len;
+            it->icon_px.w = info.width;
+            it->icon_px.h = info.height;
+            ok = 1;
+        }
+    }
+    fdk_surface_destroy(s);
+    return ok;
+}
+
 /* The platform systray ops' dock callback: the tray confirmed the
  * embed (1) or its manager went away (0). */
 static void xembed_event(void *user, int docked) {
@@ -895,10 +944,24 @@ static void xembed_try(fdk_tray_item *it) {
         return;
     }
     if (it->icon_px.bytes == NULL) {
-        FDK_INFO("tray: no StatusNotifierWatcher and no XEmbed pixels "
-                 "yet — call fdk_tray_item_set_icon_pixmap() and the "
-                 "fallback docks into any classic X11 bar");
-        return;
+        /* No app pixels: render the icon NAME through the theme
+         * engine (round 49 — the field retest showed an app that
+         * opens the item with set_icon_name only; a name alone is
+         * only a theme lookup an SNI host could do, but the
+         * toolkit OWNS the theme engine, so the fallback renders
+         * it. App-set pixels always win: set_icon_pixmap later
+         * swaps them live via set_icon. */
+        if (it->icon_name != NULL && xembed_render_named_icon(it)) {
+            FDK_INFO("tray: rendered the named icon '%s' at %d px for "
+                     "the XEmbed fallback",
+                     it->icon_name, FDK_TRAY_XEMBED_RENDER_PX);
+        } else {
+            FDK_INFO("tray: no StatusNotifierWatcher and nothing to "
+                     "draw — call fdk_tray_item_set_icon_pixmap() or "
+                     "set_icon_name() and the fallback docks into any "
+                     "classic X11 bar");
+            return;
+        }
     }
     void *handle = NULL;
     fdk_result r = ops->open(it->ctx->conn, it->icon_px.bytes,
@@ -1049,6 +1112,11 @@ void fdk_tray_item_set_icon_name(fdk_tray_item *item, const char *name) {
     set_string(&item->icon_name, name);
     emit_new_signal(item, "NewIcon");
     emit_properties_changed(item, "IconName");
+    if (!item->hosted && !item->xembed_active) {
+        /* The name can now feed the XEmbed fallback (round 49):
+         * render it through the theme engine and dock. */
+        xembed_try(item);
+    }
 }
 
 static void set_pixmap(fdk_tray_item *item, int32_t width,
