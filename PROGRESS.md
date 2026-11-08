@@ -37,6 +37,31 @@
 > checks on every push. See `docs/versioning.md` for the record.
 
 
+## Round 39 (2026-11-08) — everything above the first release reads 1.0.0, both repos
+
+The owner's instruction, applied across FDK and the fdk-layer-shell
+add-on (fresh-cloned from Faded-Dream-Project/fdk-layer-shell and
+synced to origin before any change): any version label above the
+first release now reads **1.0.0**. The internal engineering-
+milestone series that docs/versioning.md kept as a separate axis is
+retired by this same decision — FDK renamed 194 files /
+1539 occurrences, layer-shell 17 files / 42
+occurrences (its FDK-cycle references and its requirement strings —
+"needs FDK 1.0.0" — moved with it). The add-on's own version
+(0.5.0) is BELOW the first release and stays.
+
+Kept on purpose — third-party provenance, where renaming would
+falsify what upstream artifact the text points at: the openbox
+build in the decorations rig, the GitHub Actions pin comments,
+dependency versions in the provenance docs, the integer
+extension-API contract version, and the SONAME digit.
+
+The rename + commit run as one step: the sandbox's snapshot
+restores rolled uncommitted tree state back twice this round (the
+battery had already passed 792/792 on a renamed tree that a recycle
+then ate); this entry rides the same commit as the rename it
+describes.
+
 ## Round 38 (2026-11-08) — the first release is 1.0.0: the 1.1.0 identity retired repo-wide
 
 The owner's call (recorded in docs/versioning.md History,
@@ -609,7 +634,7 @@ packaged copy of the built-in default/fallback; the next faces are
 the Makefile's SHIPPED_THEMES is PINNED to that single file [the
 wildcard is gone — a stray .fdk can no longer ride into a release],
 the source tree's `.FDKThemes/` carries only the one face, and the
-nine faces FDK grew between 1.4.13 and 1.4.17 are preserved as
+nine faces FDK grew between 1.0.03 and 1.0.07 are preserved as
 engine fixtures in `tests/data/faces/` [never installed:
 test_shipped_themes.c pins BOTH the one-face shipped contract —
 opendir scan of `.FDKThemes/` included — AND the nine-fixture
@@ -742,7 +767,7 @@ the new external-application test — a standalone app compiled
 through pkg-config against the INSTALLED tree, run under Xvfb with
 the file dialog + icon engine live]; repo-wide TODO/stub/no-op
 sweep clean, both-backend batteries green, sway/X11 example rigs
-refreshed for the 1.4.16 theme colors and 1.4.17 scrolled catalog;
+refreshed for the 1.0.06 theme colors and 1.0.07 scrolled catalog;
 full narrative: ROADMAP.md "1.5.2"), building on **1.5.1**
 (the picker
 stabilization — the file/folder pickers wear the desktop's icon
@@ -783,7 +808,7 @@ with minimal permissions and SHA-pinned actions]; docs/packaging.md
 the full packaging+release reference; the Debian and RPM pipelines
 validated END-TO-END locally [build, package, extraction-based
 graphical smoke under Xvfb], musl compile probe 80/80 — then the CI iterations themselves took the matrix to fully green: all five distro pipelines + the ubuntu home-ground job pass end-to-end on main [build, native package, clean-container install-test, graphical smoke, removal] — all before the retraction; the v1.0.0 tag's DRAFT release (four validated families + source + SHA256SUMS, void joining on main after the tag) was deleted as part of it), building on
-**1.4.19** (the drop that
+**1.0.09** (the drop that
 landed — the maintainer's live report that real-file-manager drops
 hover fine but never complete; three XDND receiver bugs found and
 pinned: the XdndStatus action atom was always None, which
@@ -798,7 +823,7 @@ the capabilities example now prints every decoded payload entry
 including folders; verified by a new GTK-faithful rig [8-type
 TypeList with uri-list at index 4, real timestamps, strict and
 refusing source modes] across a 6-mode x 2-lane app-level matrix and
-three new suite groups), building on **1.4.18** (the GPU present
+three new suite groups), building on **1.0.08** (the GPU present
 lane — the maintainer's hardware-acceleration ask, verified-absent
 first, then implemented as a hybrid: CPU rasterization unchanged and
 byte-identical, GLX presentation runtime-loaded via dlopen with a
@@ -810,7 +835,7 @@ any failure, observable via fdk_window_get_render_path; the whole
 160-group X11 suite additionally ran three times with FDK_GL_FORCE=1
 so every widget/dialog/DnD test went through the lane, and a new
 examples rig proves byte-identity at the app level), building on
-**1.4.17** (the smooth
+**1.0.07** (the smooth
 pass: the maintainer's polishing report — every themed control now
 paints through the antialiased primitives so corners and circle
 indicators read smooth; the hover-fade use-after-free fixed with
@@ -818,7 +843,7 @@ the done-callback handle clear every other animation owner already
 had; example 04 opens screen-sized and scrolls its whole catalog
 through the new `fdk_scrollview_set_vertical_only` recipe; the five
 data-only faces from the previous task are now pinned in the
-shipped-theme suite), building on **1.4.16** (the three faces:
+shipped-theme suite), building on **1.0.06** (the three faces:
 Mono Chromatic, Pink Rave, and Faded Dream as the new built-in
 default — the maintainer's theming-ability test, shipped as three
 .fdk files in the custom `.FDKThemes/` folder with the TITLEBAR
@@ -826,21 +851,21 @@ token family that themes the decoration band and the `button_shape`
 metric that turns every button circular; plus FIVE MORE faces
 shipped data-only at the same audit: Catppuccin Mocha, Catppuccin
 Latte, Nordic Frost, AMOLED Void, Solar Flare — ten stems total in
-.FDKThemes/), 1.4.15 (the chrome uniformity tail: the toolkit's
-own dialogs wear the FDK title bar), 1.4.14 (the live settings
+.FDKThemes/), 1.0.05 (the chrome uniformity tail: the toolkit's
+own dialogs wear the FDK title bar), 1.0.04 (the live settings
 desktop — per-app themes, LIVE re-theming when the command runs,
 the X11 INCR-drop fix, the FDK title bar on every example, the
 file-picker size retune, the developer theme whitelist) and the
-1.4.12 full in-depth code review — every claim below was
+1.0.02 full in-depth code review — every claim below was
 re-verified against the tree, not copied from docs. THIS AUDIT'S
-OWN FIRST CATCHES: 1.4.15's "X11 suite all-pass" claim was stale —
+OWN FIRST CATCHES: 1.0.05's "X11 suite all-pass" claim was stale —
 the decorated dialogs had shifted every dialog test's child
 navigation one slot (the band became root child 0) and the suite
 had not actually been run; worse, all five custom dialog-body
 arrange hooks (message/prompt, About, font chooser, color chooser,
 file picker) were double-offsetting their children by the band
-height — every dialog's content rode 28px too low since 1.4.15.
-Both fixed and pinned at 1.4.16; the tree is always the truth,
+height — every dialog's content rode 28px too low since 1.0.05.
+Both fixed and pinned at 1.0.06; the tree is always the truth,
 including over this file. THE AUDIT'S OWN FIRST CATCH: the ledger's "themed
 tooltips" candidate was stale (the 1.3.2 tooltip has been fully
 themed since birth — tokens, parser, Modern retune, tests); the tree
@@ -939,27 +964,27 @@ the retraction is the next ledger entry.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.19** (the drop that landed — the XDND
+- **HEAD:** milestone **1.0.09** (the drop that landed — the XDND
   receiver-faithfulness pass: XdndStatus now answers the action atom
   so action-strict sources [Qt family, several XWayland bridges]
   commit their drops, a failed payload transfer delivers an
   empty-payload DRAG_DROP instead of silently vanishing, the
   XdndTypeList slab-read replaced the 64-atom truncation; the full
-  narrative is ROADMAP.md "1.4.19 — the drop that landed").
-  Before it: **1.4.18** (the GPU present lane — see above;
-  the full narrative is ROADMAP.md "1.4.18 — the GPU present
+  narrative is ROADMAP.md "1.0.09 — the drop that landed").
+  Before it: **1.0.08** (the GPU present lane — see above;
+  the full narrative is ROADMAP.md "1.0.08 — the GPU present
   lane (hybrid rendering)"; the one-sentence architecture: FDK is now
   a hybrid renderer — every pixel rasterized on the CPU exactly as
   before, presentation on the GPU where one exists. Verified
   GPU-accelerated operations: the damaged-rect texture upload, the
   fullscreen composite, and the buffer swap — i.e. the entire
-  pixels-to-screen half of every frame). Before it: **1.4.17** (the
+  pixels-to-screen half of every frame). Before it: **1.0.07** (the
   smooth pass — see above;
-  the full narrative is ROADMAP.md "1.4.17 — the smooth
-  pass"). Before it: 1.4.16 (the three faces — the theming
+  the full narrative is ROADMAP.md "1.0.07 — the smooth
+  pass"). Before it: 1.0.06 (the three faces — the theming
   ability test the maintainer asked for: **Faded Dream** is the new
   built-in default (the calm gray-with-violet retune; the packaged
-  copy ships as .FDKThemes/faded-dream.fdk and the pre-1.4.16
+  copy ships as .FDKThemes/faded-dream.fdk and the pre-1.0.06
   "FDK Modern" values survive as a documented recipe), **Mono
   Chromatic** (black-and-white discipline: white world, black
   speech, a near-black titlebar family, CIRCLE buttons) and **Pink
@@ -970,7 +995,7 @@ the retraction is the next ledger entry.
   canonical `<datadir>/fdk/.FDKThemes` install target (the legacy
   `fdk/themes` still scanned). The engine grew the **TITLEBAR
   token family** (five FALLBACK tokens: unset keys read through to
-  control/text/border, so pre-1.4.16 themes keep their exact band;
+  control/text/border, so pre-1.0.06 themes keep their exact band;
   the band's fill, text, rule, and button hover/pressed now come
   from the theme — the title label follows TITLEBAR_TEXT on every
   switch), the **`button_shape` metric** (0 rounded / 1 circle /
@@ -981,12 +1006,12 @@ the retraction is the next ledger entry.
   time, so app surfaces track every theme switch live — every
   example's panels now ride it, and the examples' hardcoded root
   backgrounds are gone so all twelve demo apps re-face under every
-  theme). Also this milestone: the 1.4.15 dialog double-offset bug
+  theme). Also this milestone: the 1.0.05 dialog double-offset bug
   fixed in all five custom body-arrange hooks + the stale dialog
-  X11 groups repaired and re-run for real. 1.4.15 the chrome
-  uniformity tail; 1.4.14 the live settings desktop; 1.4.13 the
-  command-line face; 1.4.12 INCR clipboard transfers; 1.4.11
-  markup; 1.4.10 fullscreen; 1.4.9 PNG codec + Picture +
+  X11 groups repaired and re-run for real. 1.0.05 the chrome
+  uniformity tail; 1.0.04 the live settings desktop; 1.0.03 the
+  command-line face; 1.0.02 INCR clipboard transfers; 1.0.01
+  markup; 1.0.00 fullscreen; 1.4.9 PNG codec + Picture +
   clipboard images)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
@@ -999,26 +1024,26 @@ the retraction is the next ledger entry.
   `make verify-exports` OK in debug AND release
 - **Tests:** headless suite all-pass — **570 [ok] checks** (incl.
   the 1.4.4 + iconview suites, the eight 1.4.8 textview groups,
-  the 1.4.9 png/picture suite, the 1.4.11 markup suite, the
-  1.4.13 theme-discovery + CLI-tools suites, the 1.4.14
+  the 1.4.9 png/picture suite, the 1.0.01 markup suite, the
+  1.0.03 theme-discovery + CLI-tools suites, the 1.0.04
   per-app-priority / whitelist / live-recheck / fdk-set groups,
-  and the 1.4.16 additions: the titlebar-fallback, button-shape
+  and the 1.0.06 additions: the titlebar-fallback, button-shape
   (arithmetic + pixel proof), widget-background-token groups in
   test_theme, the ~/.FDKThemes + XDG-canonical-vs-legacy
   discovery groups, and the whole test_shipped_themes suite —
   the five faces pinned: faded-dream byte-equal to the built-in,
   mono's black band + circle buttons, rave's hot-pink band);
   X11 integration suite all-pass (**160 [ok] groups**, real Xvfb,
-  real input, incl. the four 1.4.18 GPU-lane groups — policy matrix,
+  real input, incl. the four 1.0.08 GPU-lane groups — policy matrix,
   byte-identity of GPU vs CPU presents, the poisoned-present
   downgrade salvage, resize-under-the-lane — plus the whole suite
   green three times over with FDK_GL_FORCE=1; the MIT-SHM
   double-buffer test is lane-aware),
   the modern-batch, HiDPI (private 192-dpi server), iconview GUI,
   file-dialog icon-mode, textview GUI, clipboard-image, the
-  1.4.12 INCR read/serve/image groups, the 1.4.14 INCR-DROP
+  1.0.02 INCR read/serve/image groups, the 1.0.04 INCR-DROP
   + settings-live-follow groups against the external rigs, and
-  the 1.4.16 titlebar-theming group — Mono Chromatic's black
+  the 1.0.06 titlebar-theming group — Mono Chromatic's black
   band over white content, Pink Rave's hot-pink band over plum,
   the built-in's fallback gray, each on the server's own pixels);
   39 test files (40 .c in tests/ counting bench.c, which is the
@@ -1070,16 +1095,16 @@ the retraction is the next ledger entry.
 
 ### Widget catalog (all SHIPPED, class names from `src/widget/*.c`)
 
-button (with **MARKUP since 1.4.11** — fdk_button_set_markup:
+button (with **MARKUP since 1.0.01** — fdk_button_set_markup:
 styled label widths, run colors, decoration bars; the role
 machinery is markup-agnostic), toggle, checkbox, radio, label
-(with **MARKUP since 1.4.11** — rich spans in all three display
+(with **MARKUP since 1.0.01** — rich spans in all three display
 modes: NOWRAP measures styled, WRAP breaks by styled widths,
 ELLIPSIZE cuts by styled metrics; get_text reports the PLAIN
 text), entry, progress (determinate +
 busy), separator, frame, notebook, list (multi-select, rubber-band +
 auto-scroll, row icons), tree (row icons; multi-select + rubber band
-+ auto-scroll), scrollview + scrollbar (smooth wheel; 1.4.17:
++ auto-scroll), scrollview + scrollbar (smooth wheel; 1.0.07:
 `fdk_scrollview_set_vertical_only` — content arranged at the
 viewport's width, horizontal range collapsed, the recipe for a
 scrolling whole-window catalog), menu /
@@ -1099,7 +1124,7 @@ break engine + no-wrap mode, caret/selection across visual lines
 with the goal column, PageUp/PageDown, paragraph triple-click,
 the Entry's whole splice/undo/clipboard/PRIMARY/preedit
 discipline, the full a11y text interface under TEXT_VIEW),
-toolbar, tooltip (with **MARKUP since 1.4.11** —
+toolbar, tooltip (with **MARKUP since 1.0.01** —
 fdk_widget_set_tooltip_markup: the tip wraps by styled widths and
 paints run colors + decoration bars; get_tooltip reports the
 PLAIN text), spinner, link-button (role on button), paned,
@@ -1113,19 +1138,19 @@ bar, Ctrl+L location entry — modernized 1.4.0; XDG recently-used
 place + accept-time recording since 1.4.4; **icon mode since
 1.4.7** — options.view seeds the IconView browsing surface, the
 toolbar's Icons checkbox flips it live, and every accept path
-reads through the surface abstraction; **the 1.4.14 size retune**
+reads through the surface abstraction; **the 1.0.04 size retune**
 — 866x614 window, 15px face, 34px rows, 184px places, 640x420
 list: the "small picker, small text" report closed), **color button** (the
 color-well swatch that opens the ColorChooser — 1.4.4; alpha
 checkerboard, heap-token lifetime guard), path-bar composite,
 window decorations (the FDK-drawn title band — themed fill, title,
-  **its every pixel theme data since 1.4.16: the TITLEBAR token
+  **its every pixel theme data since 1.0.06: the TITLEBAR token
   family (fallback semantics) paints the band, rule, glyphs, and
   title label, and the window buttons follow the theme's
   button_shape story (circle themes get circular window
   buttons)**,
 close/min/max, band drag, FDK-driven resize; **worn by EVERY
-example since 1.4.14** — example_window.h decorates the standard
+example since 1.0.04** — example_window.h decorates the standard
 window, 06/07/09/10 decorate their own, 02 stays bare because its
 subject is raw-surface rendering that never paints the tree). Entry icon slots
 (leading/trailing glyphs + custom painters + press callbacks,
@@ -1172,13 +1197,13 @@ sidebar rhythm).
   resilience, cursor shapes
 - Clipboard: text + URI formats, **PRIMARY selection** (1.3.4)
 - DnD: both directions (X11 + Wayland), `fdk_drag_begin`; **the
-  1.4.14 INCR-drop fix** — X11 drops now read through the shared
+  1.0.04 INCR-drop fix** — X11 drops now read through the shared
   requestor-parameterized selection engine (atomic, multi-part,
   AND incremental transfers; what GTK/Qt file managers do for
   larger uri-lists — previously the drop read the INCR seed as
   garbage and vanished after a "drop it" hover), with format
   fallback (uri-list refused -> UTF-8 text) and a 1000 ms
-  convert budget; **the 1.4.19 receiver-faithfulness pass** —
+  convert budget; **the 1.0.09 receiver-faithfulness pass** —
   XdndStatus answers the v2+ action atom (XdndActionCopy; action-
   strict sources like Qt read a None action as a refusal and cancel
   the drop: hover highlights, release vanishes — the maintainer's
@@ -1189,7 +1214,7 @@ sidebar rhythm).
   the GTK-faithful rig + three suite groups pin all of it
 - Focus traversal, double/triple-click, shift-click range select
 - **Window states**: maximize/minimize/restore (Phase 8) +
-  **FULLSCREEN (1.4.10)** on both backends — EWMH client messages
+  **FULLSCREEN (1.0.00)** on both backends — EWMH client messages
   with the bare-X fallback; xdg_toplevel requests with the
   configure states array as truth
 - **HiDPI on Wayland: SHIPPED** — fractional-scale-v1 listener,
@@ -1274,7 +1299,7 @@ sidebar rhythm).
   roundtrip_queue). 843 exports. D-020; rigs: 6 X11 legs + 5 sway
   legs incl. the two-process launcher flow (held-button serial,
   re-exec'd child, focus flip through the voucher)
-- **GPU present lane: SHIPPED (1.4.18, X11)** — hybrid rendering:
+- **GPU present lane: SHIPPED (1.0.08, X11)** — hybrid rendering:
   CPU rasterization unchanged (byte-identical, pinned by tests),
   GLX presentation via runtime-loaded libGL (dlopen, hand-declared
   API subset, no new build deps); hardware-renderer policy with
@@ -1283,7 +1308,7 @@ sidebar rhythm).
   self-verification; permanent downgrade with full frame salvage;
   `fdk_window_get_render_path()` introspection (621st export);
   `tests/data/lsan-gl.supp` for Mesa's exit-time allocations. See
-  docs/rendering.md "The GPU present lane (1.4.18)". The Wayland/EGL
+  docs/rendering.md "The GPU present lane (1.0.08)". The Wayland/EGL
   sibling SHIPPED 2026-10-30 (D-1 / B-15): src/platform/wayland/
   wayland_egl.c — the same contract on dlopen'd libEGL.so.1 +
   libwayland-egl.so.1 (eglGetProcAddress for the GLES2 subset;
@@ -1359,7 +1384,7 @@ sidebar rhythm).
 
 ### Infrastructure (SHIPPED)
 
-- **The AA chrome pass (1.4.17)**: every themed control paints
+- **The AA chrome pass (1.0.07)**: every themed control paints
   through the antialiased primitives (fill/draw_rounded_rect_aa,
   fill_circle_aa — 57 call sites across the widget layer); interior
   pixels byte-identical to the crisp path, only the curved fringes
@@ -1367,7 +1392,7 @@ sidebar rhythm).
   AA family (1-px stroke through the edge rows' pixel centers —
   radius 0 is byte-identical to draw_rect, straight sides exactly
   the crisp outline's pixels, corners ramp)
-- **Hover-fade handle lifetime (1.4.17)**: the shared
+- **Hover-fade handle lifetime (1.0.07)**: the shared
   fdk__hover_fade_arm's done callback clears the stored flight
   handle on completion AND cancel — the reaped-zombie
   use-after-free the settings demo found under ASan; the
@@ -1375,10 +1400,10 @@ sidebar rhythm).
 - Theme engine: `.fdk` format, **33 color tokens + 15 metrics**
   (`FDK_TK_*` / `FDK_TM_*`), runtime switching, the Faded Dream /
   Modern / v1 recipes; button roles (suggested/destructive/link),
-  placeholder text, hover fades (1.4.1/1.4.2). **The 1.4.16
+  placeholder text, hover fades (1.0.0/1.4.2). **The 1.0.06
   additions: the TITLEBAR family** (titlebar_background/text/
   border/button_hover/button_pressed — FALLBACK tokens: unset keys
-  read through to control/text/border so pre-1.4.16 partial themes
+  read through to control/text/border so pre-1.0.06 partial themes
   keep their exact band; the deco band, its rule, its glyphs, and
   the title label all resolve them; titlebar_button_* carry the
   band buttons' hover/pressed) **and the button_shape metric**
@@ -1390,12 +1415,12 @@ sidebar rhythm).
   test suite diffs them byte-for-byte); **the override mask**
   (colors_set[] behind the fallback) also fixed a latent UB: the
   parser's duplicate-detection bitmask crossed 32 tokens
-- **fdk_widget_set_background_token (1.4.16)**: the token-following
+- **fdk_widget_set_background_token (1.0.06)**: the token-following
   background — a widget's fill resolves a theme token at PAINT
   time, tracking every theme switch live with no hook (explicit
   set_background still wins and cancels the mode); the examples'
   structural panels ride it
-- **The three faces + the .FDKThemes folder (1.4.16)**: Mono
+- **The three faces + the .FDKThemes folder (1.0.06)**: Mono
   Chromatic (white world / black speech / near-black titlebar /
   circle buttons), Pink Rave (plum floor / rose ramp / hot-pink
   accent and band), Faded Dream (the default's packaged copy);
@@ -1405,8 +1430,8 @@ sidebar rhythm).
   ($FDK_THEME_DIR > **$HOME/.FDKThemes** > $XDG_DATA_HOME/fdk/
   .FDKThemes > the legacy fdk/themes > each XDG_DATA_DIRS entry's
   pair) — test_shipped_themes pins all five
-- **Theme discovery + the settings engine + the CLI (1.4.13,
-  grown into its final shape 1.4.14)**: fdk_theme_find /
+- **Theme discovery + the settings engine + the CLI (1.0.03,
+  grown into its final shape 1.0.04)**: fdk_theme_find /
   fdk_theme_available_* over the search path above
   (where `make install` puts the shipped five faces),
   fdk_theme_file_path, the settings ENGINE (src/theme/settings.c:
@@ -1440,7 +1465,7 @@ sidebar rhythm).
   ENCODER over zlib (fdk_surface_save_png), the Picture widget,
   clipboard image/png (X11 atomic property + Wayland data-device
   pipe, one-content-at-a-time)
-- **Rich text / markup (1.4.11)**: fdk_span (byte range +
+- **Rich text / markup (1.0.01)**: fdk_span (byte range +
   absolute style + optional color + underline/strikethrough), the
   span twins of measure/draw/break/ellipsize (zero spans == the
   classic behavior), fdk_markup_parse — a TAG SCANNER (<b> <i>
@@ -1501,18 +1526,18 @@ The backlog is EMPTY (and as of 2026-10-30, the 1.0.0 roadmap is
 fully landed too: every register row DONE except M-9, the release
 gate — no code remains there, only the owner's real-desktop
 sign-off before any tag; see ROADMAP.md (Part 1)'s counts line). The widget families shipped across the
-board; rich text shipped in 1.4.11; INCR transfers shipped in
-1.4.12; the command-line face shipped in 1.4.13; the live settings
-desktop shipped in 1.4.14 (per-app themes, live re-theming, the
+board; rich text shipped in 1.0.01; INCR transfers shipped in
+1.0.02; the command-line face shipped in 1.0.03; the live settings
+desktop shipped in 1.0.04 (per-app themes, live re-theming, the
 INCR-drop fix, the whitelist — the maintainer's own usage reports
 were the backlog, and every item closed); the three faces shipped
-in 1.4.16 (Mono Chromatic, Pink Rave, Faded Dream as the default,
+in 1.0.06 (Mono Chromatic, Pink Rave, Faded Dream as the default,
 the .FDKThemes folder, the titlebar family, button shapes, the
 token-following background — the theming-ability test the
-maintainer asked for, and with it the 1.4.15 dialog-offset bug
+maintainer asked for, and with it the 1.0.05 dialog-offset bug
 swept out); the five extra faces shipped data-only on top of it
 (Catppuccin Mocha/Latte, Nordic Frost, AMOLED Void, Solar Flare);
-and 1.4.17 closed the maintainer's polishing report in full (the
+and 1.0.07 closed the maintainer's polishing report in full (the
 AA chrome pass over every themed control, the hover-fade
 use-after-free, example 04's screen-sized scrolling catalog, the
 ten-face enumeration pins). What remains is
