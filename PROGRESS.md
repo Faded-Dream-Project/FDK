@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-08, after round 45)
+## Current state (2026-11-08, after round 46)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,51 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 46 (2026-11-08) — the field report: the scale button's popup never mapped; bug-rate: 2 found, 2 fixed, 0 new after the fix
+
+The owner ran examples/21_scale_button on the REAL desktop and could
+not drag the slider — the value sat at 35% forever. The report was
+worth exactly what the sign-off walkthrough's worth: the GUI suite
+was green, the real machine was broken.
+
+1. **The reproduction gap the suite carried:** the scale button's
+   GUI test drove the popup with XSendEvent — which delivers to an
+   UNMAPPED window, bypassing mapping, the server grab, and window
+   geometry entirely. The suite was green because it never
+   exercised the real delivery path.
+2. **Bug 1 (fatal): sb_open_popup packed the slider and the value
+   label into a popup window that was NEVER SHOWN** — the
+   menu-session order is create, pack, SHOW (the pointer grab
+   happens on map, inside the platform), and the show call was
+   missing. On a real desktop the press opened a popup that did
+   not exist on screen; the user clicked a meter-shaped face and
+   tried to drag it. The popup-trace rig proved it: a lone
+   "create ... 48x176" line, no map, no grab.
+3. **Bug 2 (placement): the first cut clamped the popup into the
+   OWNER WINDOW's bounds** — a 176px popup in a 190px window
+   neither fits below nor above, and the clamp slammed it onto the
+   title band at (24,0). A popup is a root-level window: it hangs
+   BELOW its owner onto the desktop exactly like a menu — the
+   clamping is gone and the anchor is the menu rule (below the
+   button, centered on it).
+4. **The regression rig is REAL input:** the GUI test grew an
+   XTest section — server-routed input that rides the popup grab
+   the way a human's pointer does: warp to the button, click, warp
+   onto the trough in motion steps, PRESS, drag, release. It
+   FAILED before the fix (the grab-routed press did nothing) and
+   now passes: the drag drives the value (100), the popup survives
+   it, and a real press-away dismisses. scripts/xtest_drag.c is
+   the standalone field-rig twin (build line in its header) that
+   drove the actual example against the popup trace.
+5. **The example verified end-to-end:** create at (24,84) — below
+   the button — then map, grab, first-present, motion->present
+   during the drag, still open after.
+
+Battery green (unit + X11 + threads, ASan clean). Bug-rate: 2
+found, 2 fixed, 0 new after the fix — both in the round-45 widget,
+both the suite's blind spot (synthetic input), neither reachable
+by reading code alone.
 
 ## Round 45 (2026-11-08) — the parity batch: the scale button; bug-rate: 1 found, 1 fixed, 0 new after the fix
 

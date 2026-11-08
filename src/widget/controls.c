@@ -1353,28 +1353,15 @@ static void sb_open_popup(fdk_widget *w) {
     if (owner == NULL || ctx == NULL) {
         return; /* detached tree: documented no-op */
     }
-    /* Below the button, centered on it; above when the room runs
-     * out; clamped into the owner window's bounds either way. */
+    /* Below the button, centered on it — the menu-anchor rule, no
+     * owner-bounds clamping: a popup is a root-level window and
+     * hangs BELOW its owner onto the desktop exactly like a menu
+     * does (the first cut clamped into the owner's 190px frame,
+     * slammed a 176px popup onto the title band, and the field
+     * report was the proof nobody could reach it). */
     fdk_rect abs = fdk_widget_get_absolute_bounds(w);
-    fdk_size wsz = {0, 0};
-    (void)fdk_window_get_size(owner, &wsz);
     fdk_i32 x = abs.x + (abs.width - SB_POP_W) / 2;
-    if (x < 0) {
-        x = 0;
-    }
-    if (x + SB_POP_W > wsz.width) {
-        x = wsz.width - SB_POP_W;
-    }
-    if (x < 0) {
-        x = 0;
-    }
     fdk_i32 y = abs.y + abs.height + 2;
-    if (y + SB_POP_H > wsz.height) {
-        y = abs.y - SB_POP_H - 2;
-    }
-    if (y < 0) {
-        y = 0;
-    }
 
     sb_guard *guard = fdk_alloc(sizeof(*guard));
     if (guard == NULL) {
@@ -1433,6 +1420,14 @@ static void sb_open_popup(fdk_widget *w) {
     guard->label = label;
     b->popup = pop;
     b->guard = guard;
+    /* SHOW IT (the menu-session order: create, pack, show — the
+     * grab happens on map, inside the platform). The first cut
+     * packed the slider and label into a window that was never
+     * mapped: invisible on every real desktop, while the SendEvent
+     * GUI tests "passed" — XSendEvent delivers to unmapped windows,
+     * bypassing mapping, grabs, and geometry entirely. The XTest
+     * rig in the integration suite is the proof that maps. */
+    fdk_window_show(pop);
     fdk__a11y_notify(w, FDK_A11Y_STATE_CHANGED, FDK_A11Y_EXPANDED);
 }
 

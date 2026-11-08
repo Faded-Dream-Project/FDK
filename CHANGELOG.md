@@ -9,6 +9,23 @@ changes; the round-40 release-closing work below landed under the
 same release identity before the tag.
 
 
+### Fixed (round 46)
+
+- **`fdk_scale_button`: the popup never mapped** — the open path
+  packed the slider and value label but never called
+  fdk_window_show (the menu machinery's third step). Invisible on
+  every real desktop; the SendEvent-based GUI tests could not see
+  the difference. Found by the owner's field report.
+- **Placement** follows the menu-anchor rule (below the button,
+  centered; a root-level popup hangs below its owner like any
+  menu) — the owner-bounds clamp that slammed a 176px popup onto
+  the title band of a 190px window is gone.
+- The GUI suite now drives the popup with REAL server-routed input
+  (an XTest rig: warp, click, motion steps, press-drag-release) —
+  the grab-routed path the SendEvent clicks bypassed.
+- **`scripts/xtest_drag.c`**: the standalone field rig (real-input
+  driver + build line in the header).
+
 ### Added (round 45)
 
 - **`fdk_scale_button`** (fdk_widgets.h, 6 public functions): the

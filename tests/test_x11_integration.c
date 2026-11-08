@@ -7269,6 +7269,79 @@ static void test_scale_button_gui(void) {
     assert(scale_change_hits == 0);
     printf("[ok] scale button: the second press closes (toggle)\n");
 
+    /* THE REAL-DESKTOP DRAG (the field report): the user DRAGS, not
+     * clicks — real server input rides the POPUP GRAB
+     * (owner_events False), which the SendEvent clicks above bypass
+     * entirely. XTest drives the true path: warp to the button,
+     * click, warp onto the trough in steps, PRESS, drag, release.
+     * The value must track the drag live and the popup must
+     * survive it. */
+    scale_change_hits = 0;
+    {
+        Window rw, cw;
+        int wx, wy;
+        unsigned int ww, wh, wb, wd;
+        assert(XGetGeometry(send, xid, &rw, &wx, &wy, &ww, &wh, &wb,
+                            &wd));
+        XTranslateCoordinates(send, xid, root_scr, 0, 0, &wx, &wy, &cw);
+        int bx = wx + 20 + (int)nat.width / 2;
+        int by = wy + 20 + (int)nat.height / 2;
+        XTestFakeMotionEvent(send, 0, bx, by, CurrentTime);
+        XTestFakeButtonEvent(send, 1, True, CurrentTime);
+        XSync(send, False);
+        XTestFakeButtonEvent(send, 1, False, CurrentTime);
+        XSync(send, False);
+        (void)fdk_pump_events(ctx, 200);
+        n_now = x11_child_windows(send, root_scr, now, 16);
+        assert(n_now == n_before + 1);
+        Window drag_pop = x11_new_child(before, n_before, now, n_now);
+        assert(drag_pop != 0);
+        printf("[ok] scale button: XTEST click opens the popup\n");
+
+        /* Onto the trough (popup-local (24, 76) = the middle), in
+         * motion steps — the approach the SendEvent clicks skip. */
+        int px, py;
+        XTranslateCoordinates(send, drag_pop, root_scr, 0, 0, &px, &py,
+                              &cw);
+        XTestFakeMotionEvent(send, 0, px + 24, py + 76, CurrentTime);
+        XSync(send, False);
+        (void)fdk_pump_events(ctx, 100);
+        XTestFakeButtonEvent(send, 1, True, CurrentTime);
+        XSync(send, False);
+        (void)fdk_pump_events(ctx, 100);
+        assert(scale_change_hits >= 1); /* the press jumps the value */
+
+        int before_hits = scale_change_hits;
+        for (int step = 1; step <= 6; step++) {
+            XTestFakeMotionEvent(send, 0, px + 24, py + 76 - step * 10,
+                                 CurrentTime);
+            XSync(send, False);
+            (void)fdk_pump_events(ctx, 40);
+        }
+        assert(scale_change_hits > before_hits); /* THE DRAG TRACKS */
+        assert(fdk_scale_button_get_value(sb) == scale_change_last);
+        XTestFakeButtonEvent(send, 1, False, CurrentTime);
+        XSync(send, False);
+        (void)fdk_pump_events(ctx, 100);
+        n_now = x11_child_windows(send, root_scr, now, 16);
+        assert(n_now == n_before + 1); /* the popup SURVIVES the drag */
+        printf("[ok] scale button: a real grab-routed drag drives the "
+               "value (%.4g)\n", scale_change_last);
+
+        /* The press-away dismiss with REAL input: warp back to the
+         * button (the press lands at negative popup coords) and the
+         * platform's outside-click close fires. */
+        XTestFakeMotionEvent(send, 0, bx, by, CurrentTime);
+        XTestFakeButtonEvent(send, 1, True, CurrentTime);
+        XSync(send, False);
+        XTestFakeButtonEvent(send, 1, False, CurrentTime);
+        XSync(send, False);
+        (void)fdk_pump_events(ctx, 200);
+        n_now = x11_child_windows(send, root_scr, now, 16);
+        assert(n_now == n_before);
+        printf("[ok] scale button: a real press-away dismisses\n");
+    }
+
     XCloseDisplay(send);
     fdk_window_destroy(win);
     fdk_font_destroy(font);
