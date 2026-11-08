@@ -609,6 +609,60 @@ void fdk_color_button_set_on_color_set(fdk_widget *button,
                                        fdk_color_button_fn fn,
                                        void *user_data);
 
+/* ---- Font button (1.0.0) ----
+ *
+ * The font chooser dialog's button host (GTK's GtkFontButton /
+ * GtkFontDialogButton posture, FDK's chooser engine): a text button
+ * whose label reads "Family [Style] Size" — the button's current
+ * font description. Pressing it opens the 1.0.0 font chooser dialog
+ * (modal where the backend can grab) seeded with the current
+ * family/style/size; ACCEPTED writes the pick into the button and
+ * fires on_font_set with the new family, style and pixel size —
+ * CANCELLED changes nothing. The application turns the answer into
+ * a font with fdk_font_load_face(result->path, ...) exactly as with
+ * the dialog itself (the button stores the DESCRIPTION, never a
+ * loaded face — fonts are the caller's resource).
+ *
+ * The detached-tree rule is the color button's, verbatim: a press
+ * in a detached tree is a consumed no-op. The programmatic setter
+ * stays silent (the toolkit-wide rule). Sizes follow the dialog's
+ * rule: 0 means 12, everything else clamps to 6..96. A NULL or
+ * empty style reads back as NULL (no style = the family's first
+ * face, the dialog's own selection semantics). */
+
+typedef void (*fdk_font_button_fn)(fdk_widget *button,
+                                   const char *family,
+                                   const char *style, fdk_i32 size,
+                                   void *user_data);
+
+/* Creates the button showing family/style/size. `font` is borrowed
+ * (the label's rendering font, like fdk_toggle's label); family is
+ * copied, style may be NULL; size follows the dialog's rule. */
+fdk_result fdk_font_button_create(fdk_widget *parent, fdk_font *font,
+                                  const char *family, const char *style,
+                                  fdk_i32 size, fdk_widget **out_button);
+/* The current description (borrowed; NULL out of a NULL button or
+ * for "no style"). */
+const char *fdk_font_button_get_family(fdk_widget *button);
+const char *fdk_font_button_get_style(fdk_widget *button);
+fdk_i32 fdk_font_button_get_size(fdk_widget *button);
+/* Sets the description programmatically (repaints; does NOT fire
+ * on_font_set — the gesture callback's rule). */
+fdk_result fdk_font_button_set_font(fdk_widget *button,
+                                    const char *family,
+                                    const char *style, fdk_i32 size);
+/* The chooser's title (copied; NULL restores "Select Font"). */
+fdk_result fdk_font_button_set_title(fdk_widget *button,
+                                     const char *title);
+/* The chooser's preview text (copied; NULL restores the dialog's
+ * quick-brown-fox default). */
+fdk_result fdk_font_button_set_sample(fdk_widget *button,
+                                      const char *text);
+/* Fires after a chooser ACCEPT settles the new description. */
+void fdk_font_button_set_on_font_set(fdk_widget *button,
+                                     fdk_font_button_fn fn,
+                                     void *user_data);
+
 /* ---- Inline color chooser widget (1.0.0) ----
  *
  * The color chooser dialog's engine as an embeddable widget (GTK's

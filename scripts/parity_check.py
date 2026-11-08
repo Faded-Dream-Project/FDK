@@ -184,12 +184,14 @@ MAPPING = [
          fdk=[],
          note="a slider-in-a-popup; every-application apps wire "
               "slider+popover themselves — stated, not hidden"),
-    dict(status="missing",
+    dict(status="parity",
          gtk=["Switch"],
          qt=[],
          fdk=["fdk_toggle_create"],
-         note="the toggle covers the switch's role (binary state, "
-              "live switch feedback); the visual is theme work"),
+         note="the toggle IS the switch: the track+knob visual ships "
+              "(controls.c), live changed feedback, keyboard "
+              "activation, the TOGGLE_BUTTON a11y role with the "
+              "PRESSED state"),
     # -- text / entry ------------------------------------------------------
     dict(status="parity",
          gtk=["Entry", "PasswordEntry", "SearchEntry", "Text",
@@ -293,12 +295,15 @@ MAPPING = [
          qt=["QFontDialog", "QFontComboBox"],
          fdk=["fdk_dialog_choose_font", "fdk_font_chooser_widget_create"],
          note="dialog + inline widget, one engine"),
-    dict(status="missing",
+    dict(status="parity",
          gtk=["FontButton", "FontDialogButton"],
          qt=[],
-         fdk=[],
-         note="the color swatch button has no font twin — the chooser "
-              "widget + dialog cover the role; stated"),
+         fdk=["fdk_font_button_create", "fdk_font_button_set_font",
+              "fdk_font_button_set_on_font_set"],
+         note="the font twin of the color swatch button: the label "
+              "reads the description, the press opens the chooser "
+              "dialog, ACCEPTED settles it — one engine, three hosts "
+              "(dialog, widget, button)"),
     dict(status="missing",
          gtk=["AppChooserDialog", "AppChooserWidget", "AppChooserButton"],
          qt=[],

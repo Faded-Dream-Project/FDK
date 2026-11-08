@@ -685,6 +685,11 @@ int fdk__recent_touch(const char *xbel, const char *path);
 void fdk__colorbutton_apply_result(fdk_widget *button,
                                    const fdk_color_dialog_result *res);
 
+/* FontButton test seam (choosers.c, 1.0.0): the color button's
+ * seam, verbatim, for the font description. */
+void fdk__fontbutton_apply_result(fdk_widget *button,
+                                  const fdk_font_dialog_result *res);
+
 /* Inline chooser widget test seams (choosers.c, 1.0.0): drive the
  * USER change paths exactly as the gestures would — the state moves,
  * the swatch/hex/preview follow, the change callback fires — without

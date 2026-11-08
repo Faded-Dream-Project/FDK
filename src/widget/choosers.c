@@ -2798,3 +2798,481 @@ void fdk__colorbutton_apply_result(fdk_widget *button,
     }
     cbtn_apply_result(button, res);
 }
+
+/* ===================================================================
+ * Font button (1.0.0) — the font chooser dialog's button host
+ * =================================================================== */
+
+#define FB_PAD_X 12     /* label inset inside the face             */
+#define FB_MIN_W 64     /* a bare "Sans 12" still gets a face      */
+#define FB_MIN_H 30     /* the control-row height                  */
+
+typedef struct fdk_fontbutton {
+    fdk_widget base;
+    fdk_font *font;          /* borrowed; the label's rendering font */
+    char *family;            /* owned; never NULL after create       */
+    char *style;             /* owned; NULL = none                   */
+    fdk_i32 size;            /* 6..96 (0 at the door means 12)       */
+    char *title;             /* owned; the chooser's title (or NULL) */
+    char *sample;            /* owned; the chooser's preview (NULL)  */
+    bool pressed;
+    bool hovering;
+    fdk_hover_fade fade;
+    fdk_font_button_fn on_set;
+    void *on_set_data;
+    struct fdk_fb_pending *pending;  /* the live chooser's token     */
+} fdk_fontbutton;
+
+/* The heap token bridging the chooser's done callback and a button
+ * that may die before the chooser answers — the color button's
+ * token, verbatim. */
+typedef struct fdk_fb_pending {
+    fdk_widget *button;  /* NULLed by the button's destroy hook */
+} fdk_fb_pending;
+
+static fdk_fontbutton *fbtn_of(fdk_widget *w) {
+    return (fdk_fontbutton *)(void *)w;
+}
+
+extern const fdk_widget_class fdk_fontbutton_class_def;
+
+/* The size rule (the dialog's, documented in fdk_dialog.h): 0 means
+ * 12, everything else clamps into 6..96. */
+static fdk_i32 fbtn_clamp_size(fdk_i32 size) {
+    if (size == 0) {
+        return 12;
+    }
+    if (size < 6) {
+        return 6;
+    }
+    if (size > 96) {
+        return 96;
+    }
+    return size;
+}
+
+/* "Family Style Size", or "Family Size" with no style — the label
+ * and the a11y value text. Returns a printf-built buffer the caller
+ * (same function scope) owns. */
+static const char *fbtn_desc(const fdk_fontbutton *fb, char *buf,
+                             size_t cap) {
+    if (fb->style != NULL && fb->style[0] != '\0') {
+        (void)snprintf(buf, cap, "%s %s %d", fb->family, fb->style,
+                       (int)fb->size);
+    } else {
+        (void)snprintf(buf, cap, "%s %d", fb->family, (int)fb->size);
+    }
+    return buf;
+}
+
+/* The core acceptance path (the dialog's done callback after the
+ * token check, and the headless test seam). The result's strings
+ * are FDK-owned and valid only during the callback — copies land in
+ * the button before anything else runs. A NULL family is refused
+ * (the dialog always answers one; the seam stays honest). */
+static void fbtn_apply_result(fdk_widget *w,
+                              const fdk_font_dialog_result *res) {
+    fdk_fontbutton *fb = fbtn_of(w);
+    if (res == NULL || res->outcome != FDK_FONT_DIALOG_ACCEPTED ||
+        res->family == NULL) {
+        return; /* CANCELLED or malformed: nothing changes */
+    }
+    char *fam = fdk__strdup(res->family);
+    char *sty = (res->style != NULL && res->style[0] != '\0')
+                    ? fdk__strdup(res->style)
+                    : NULL;
+    if (fam == NULL || (res->style != NULL && res->style[0] != '\0' &&
+                        sty == NULL)) {
+        fdk_free(fam);
+        fdk_free(sty);
+        return; /* OOM: the old description stays (honest) */
+    }
+    fdk_free(fb->family);
+    fdk_free(fb->style);
+    fb->family = fam;
+    fb->style = sty;
+    fb->size = fbtn_clamp_size(res->size);
+    fdk_widget_invalidate(w);
+    fdk__a11y_notify(w, FDK_A11Y_VALUE_CHANGED, 0);
+    if (fb->on_set != NULL) {
+        /* The app callback may destroy the button (or anything
+         * else) — nothing is touched after it returns. */
+        fb->on_set(w, fb->family, fb->style, fb->size, fb->on_set_data);
+    }
+}
+
+static void fbtn_dialog_done(const fdk_font_dialog_result *res,
+                             void *user) {
+    fdk_fb_pending *tok = user;
+    fdk_widget *w = tok->button;
+    if (w != NULL && (w->flags & FDK_WF_DESTROYING) == 0) {
+        fbtn_of(w)->pending = NULL; /* before the app callback */
+        fbtn_apply_result(w, res);
+    }
+    fdk_free(tok);
+}
+
+static void fbtn_open_chooser(fdk_widget *w) {
+    fdk_fontbutton *fb = fbtn_of(w);
+    if (fb->pending != NULL) {
+        return; /* one chooser at a time */
+    }
+    fdk_context *ctx =
+        fdk__window_context(fdk__widget_window_owner(w));
+    if (ctx == NULL) {
+        return; /* detached tree: documented no-op */
+    }
+    fdk_fb_pending *tok = fdk_alloc(sizeof(*tok));
+    if (tok == NULL) {
+        return; /* OOM: no chooser this press (honest) */
+    }
+    tok->button = w;
+    fdk_font_dialog_options opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.title = fb->title;
+    opts.sample = fb->sample;
+    opts.initial_family = fb->family;
+    opts.initial_style = fb->style;
+    opts.initial_size = fb->size;
+    opts.modal = true;
+    opts.parent = fdk__window_of_owner(fdk__widget_window_owner(w));
+    fdk_result r = fdk_dialog_choose_font(ctx, &opts, fbtn_dialog_done,
+                                          tok, NULL);
+    if (!fdk_ok(r)) {
+        fdk_free(tok);
+        return;
+    }
+    fb->pending = tok;
+}
+
+static bool fbtn_handle_event(fdk_widget *w,
+                              const fdk_widget_event *ev) {
+    fdk_fontbutton *fb = fbtn_of(w);
+    switch (ev->type) {
+    case FDK_WIDGET_POINTER_DOWN:
+        if ((w->flags & FDK_WF_ENABLED) == 0 ||
+            ev->pointer.button != FDK_POINTER_BUTTON_LEFT) {
+            return false;
+        }
+        if (!fdk_widget_has_focus(w)) {
+            (void)fdk_widget_focus(w);
+        }
+        fb->pressed = true;
+        fdk_widget_invalidate(w);
+        return true;
+    case FDK_WIDGET_POINTER_UP:
+        if (fb->pressed) {
+            fb->pressed = false;
+            fdk_widget_invalidate(w);
+            /* The classic press-inside-release-inside rule. */
+            fbtn_open_chooser(w);
+        }
+        return true;
+    case FDK_WIDGET_KEY_DOWN:
+        if ((w->flags & FDK_WF_ENABLED) != 0 &&
+            (ev->key.scancode == FDK_KEY_SPACE ||
+             ev->key.scancode == FDK_KEY_ENTER)) {
+            fbtn_open_chooser(w);
+            return true;
+        }
+        return false;
+    case FDK_WIDGET_POINTER_ENTER:
+        fb->hovering = true;
+        fdk__hover_fade_arm(w, &fb->fade, true);
+        fdk_widget_invalidate(w);
+        return false;
+    case FDK_WIDGET_POINTER_LEAVE:
+        fb->hovering = false;
+        fdk__hover_fade_arm(w, &fb->fade, false);
+        fdk_widget_invalidate(w);
+        return false;
+    default:
+        return false;
+    }
+}
+
+static void fbtn_paint(fdk_widget *w, fdk_surface *surface,
+                       fdk_rect bounds, fdk_rect clip) {
+    (void)clip;
+    fdk_fontbutton *fb = fbtn_of(w);
+    if (bounds.width <= 0 || bounds.height <= 0) {
+        return;
+    }
+    /* The face: the color button's control-family paint, verbatim
+     * (the hover blend riding the 1.0.0 machinery, pressed
+     * snapping, the disabled override). */
+    fdk_color face = fdk__pal_control();
+    if (fb->fade.t > 0.0f) {
+        fdk_color hover = fdk__pal_control_hover();
+        face.r = face.r + (hover.r - face.r) * fb->fade.t;
+        face.g = face.g + (hover.g - face.g) * fb->fade.t;
+        face.b = face.b + (hover.b - face.b) * fb->fade.t;
+        face.a = face.a + (hover.a - face.a) * fb->fade.t;
+    }
+    if (fb->pressed) {
+        face = fdk__pal_control_pressed();
+    }
+    if ((w->flags & FDK_WF_ENABLED) == 0) {
+        face = fdk__pal_control_disabled();
+    }
+    fdk_i32 radius =
+        fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS);
+    fdk_surface_fill_rounded_rect_aa(surface, bounds, radius, face);
+    if ((w->flags & FDK_WF_ENABLED) != 0) {
+        fdk_surface_draw_rounded_rect_aa(surface, bounds, radius,
+                                      fdk__pal_border());
+    }
+
+    /* The label: the description, centered, clipped to the face. */
+    if (fb->font == NULL) {
+        return;
+    }
+    char buf[160];
+    (void)fbtn_desc(fb, buf, sizeof(buf));
+    fdk_i32 tw = 0, th = 0;
+    fdk__text_extent(fb->font, buf, &tw, &th);
+    fdk_color ink = ((w->flags & FDK_WF_ENABLED) != 0)
+                        ? fdk__pal_text()
+                        : fdk__pal_text_disabled();
+    if (tw > bounds.width - FB_PAD_X * 2) {
+        /* Wider than the face: clip to the face's inner box (the
+         * surface clip does the honesty; the ellipsis is the
+         * label's job, not the button's). */
+        fdk_surface_push_clip(surface, bounds);
+        fdk__draw_text(surface, fb->font, buf, ink,
+                       bounds.x + FB_PAD_X,
+                       fdk__center_baseline(fb->font, bounds.y,
+                                            bounds.height));
+        fdk_surface_pop_clip(surface);
+        return;
+    }
+    fdk__draw_text(surface, fb->font, buf, ink,
+                   bounds.x + (bounds.width - tw) / 2,
+                   fdk__center_baseline(fb->font, bounds.y,
+                                        bounds.height));
+}
+
+static void fbtn_measure(fdk_widget *w, fdk_size *out) {
+    fdk_fontbutton *fb = fbtn_of(w);
+    fdk_i32 tw = 0, th = 0;
+    if (fb->font != NULL) {
+        char buf[160];
+        (void)fbtn_desc(fb, buf, sizeof(buf));
+        fdk__text_extent(fb->font, buf, &tw, &th);
+    }
+    out->width = tw + FB_PAD_X * 2;
+    if (out->width < FB_MIN_W) {
+        out->width = FB_MIN_W;
+    }
+    out->height = th + 10;
+    if (out->height < FB_MIN_H) {
+        out->height = FB_MIN_H;
+    }
+}
+
+static void fbtn_destroy(fdk_widget *w) {
+    fdk_fontbutton *fb = fbtn_of(w);
+    fdk_free(fb->family);
+    fb->family = NULL;
+    fdk_free(fb->style);
+    fb->style = NULL;
+    fdk_free(fb->title);
+    fb->title = NULL;
+    fdk_free(fb->sample);
+    fb->sample = NULL;
+    if (fb->pending != NULL) {
+        /* The chooser is still up: the token survives until its done
+         * callback frees it, but it must stop pointing here. */
+        fb->pending->button = NULL;
+        fb->pending = NULL;
+    }
+}
+
+/* ---- a11y: a BUTTON whose value is the description ---- */
+
+static void fbtn_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_fontbutton *fb = (const fdk_fontbutton *)(const void *)w;
+    char buf[160];
+    out->value_text = fdk__strdup(fbtn_desc(fb, buf, sizeof(buf)));
+    out->has_value = out->value_text != NULL;
+    out->value_min = 0.0;
+    out->value_max = 0.0;
+    out->value_current = 0.0;
+}
+
+static fdk_a11y_action_set fbtn_a11y_actions(const fdk_widget *w) {
+    (void)w;
+    return (fdk_a11y_action_set)FDK_A11Y_ACTION_ACTIVATE;
+}
+
+static bool fbtn_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                              double value) {
+    (void)value;
+    if (action != FDK_A11Y_ACTION_ACTIVATE) {
+        return false;
+    }
+    fbtn_open_chooser(w);
+    return true;
+}
+
+static const fdk_a11y_class fbtn_a11y = {
+    .role = FDK_A11Y_ROLE_BUTTON,
+    .describe = fbtn_a11y_describe,
+    .actions = fbtn_a11y_actions,
+    .perform = fbtn_a11y_perform,
+};
+
+const fdk_widget_class fdk_fontbutton_class_def = {
+    .size = sizeof(fdk_fontbutton),
+    .name = "fontbutton",
+    .handle_event = fbtn_handle_event,
+    .paint = fbtn_paint,
+    .measure = fbtn_measure,
+    .arrange = NULL,
+    .destroy = fbtn_destroy,
+    .a11y = &fbtn_a11y,
+};
+
+/* ---- public API ---- */
+
+fdk_result fdk_font_button_create(fdk_widget *parent, fdk_font *font,
+                                  const char *family, const char *style,
+                                  fdk_i32 size, fdk_widget **out_button) {
+    if (out_button == NULL || font == NULL || family == NULL ||
+        family[0] == '\0') {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_widget *w = NULL;
+    fdk_result r = fdk_widget_create(parent, &fdk_fontbutton_class_def,
+                                     (fdk_rect){0, 0, 0, 0}, &w);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    fdk_fontbutton *fb = fbtn_of(w);
+    fb->font = font;
+    fb->family = fdk__strdup(family);
+    fb->style = (style != NULL && style[0] != '\0')
+                    ? fdk__strdup(style)
+                    : NULL;
+    fb->size = fbtn_clamp_size(size);
+    if (fb->family == NULL ||
+        (style != NULL && style[0] != '\0' && fb->style == NULL)) {
+        fdk_widget_destroy(w);
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    fdk_widget_set_can_focus(w, true);
+    fdk_widget_child_layout_changed(w->parent);
+    *out_button = w;
+    return FDK_OK;
+}
+
+const char *fdk_font_button_get_family(fdk_widget *button) {
+    if (button == NULL || button->klass != &fdk_fontbutton_class_def) {
+        return NULL;
+    }
+    return fbtn_of(button)->family;
+}
+
+const char *fdk_font_button_get_style(fdk_widget *button) {
+    if (button == NULL || button->klass != &fdk_fontbutton_class_def) {
+        return NULL;
+    }
+    return fbtn_of(button)->style;
+}
+
+fdk_i32 fdk_font_button_get_size(fdk_widget *button) {
+    if (button == NULL || button->klass != &fdk_fontbutton_class_def) {
+        return 0;
+    }
+    return fbtn_of(button)->size;
+}
+
+fdk_result fdk_font_button_set_font(fdk_widget *button,
+                                    const char *family,
+                                    const char *style, fdk_i32 size) {
+    if (button == NULL || button->klass != &fdk_fontbutton_class_def ||
+        family == NULL || family[0] == '\0') {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_fontbutton *fb = fbtn_of(button);
+    fdk_i32 clamped = fbtn_clamp_size(size);
+    char *sty = (style != NULL && style[0] != '\0')
+                    ? fdk__strdup(style)
+                    : NULL;
+    if (style != NULL && style[0] != '\0' && sty == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    if (strcmp(fb->family, family) == 0 &&
+        ((fb->style == NULL && sty == NULL) ||
+         (fb->style != NULL && sty != NULL &&
+          strcmp(fb->style, sty) == 0)) &&
+        fb->size == clamped) {
+        fdk_free(sty);
+        return FDK_OK; /* idempotent */
+    }
+    char *fam = fdk__strdup(family);
+    if (fam == NULL) {
+        fdk_free(sty);
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    fdk_free(fb->family);
+    fdk_free(fb->style);
+    fb->family = fam;
+    fb->style = sty;
+    fb->size = clamped;
+    fdk_widget_invalidate(button);
+    fdk__a11y_notify(button, FDK_A11Y_VALUE_CHANGED, 0);
+    return FDK_OK;
+}
+
+fdk_result fdk_font_button_set_title(fdk_widget *button,
+                                     const char *title) {
+    if (button == NULL || button->klass != &fdk_fontbutton_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_fontbutton *fb = fbtn_of(button);
+    char *copy = (title != NULL) ? fdk__strdup(title) : NULL;
+    if (title != NULL && copy == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    fdk_free(fb->title);
+    fb->title = copy;
+    return FDK_OK;
+}
+
+fdk_result fdk_font_button_set_sample(fdk_widget *button,
+                                      const char *text) {
+    if (button == NULL || button->klass != &fdk_fontbutton_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_fontbutton *fb = fbtn_of(button);
+    char *copy = (text != NULL) ? fdk__strdup(text) : NULL;
+    if (text != NULL && copy == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    fdk_free(fb->sample);
+    fb->sample = copy;
+    return FDK_OK;
+}
+
+void fdk_font_button_set_on_font_set(fdk_widget *button,
+                                     fdk_font_button_fn fn,
+                                     void *user_data) {
+    if (button == NULL || button->klass != &fdk_fontbutton_class_def) {
+        return;
+    }
+    fdk_fontbutton *fb = fbtn_of(button);
+    fb->on_set = fn;
+    fb->on_set_data = user_data;
+}
+
+/* Internal test seam (widgets_internal.h): the color button's seam,
+ * verbatim, for the font description. */
+void fdk__fontbutton_apply_result(fdk_widget *button,
+                                  const fdk_font_dialog_result *res) {
+    if (button == NULL || button->klass != &fdk_fontbutton_class_def) {
+        return;
+    }
+    fbtn_apply_result(button, res);
+}
+

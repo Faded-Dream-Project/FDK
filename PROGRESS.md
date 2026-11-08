@@ -4,12 +4,12 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-08, after round 43)
+## Current state (2026-11-08, after round 44)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
-- **Surface:** 1,032 exported symbols, 34 public headers, 38 widget
-  classes (the two inline chooser widgets joined the catalog);
+- **Surface:** 1,040 exported symbols, 34 public headers, 39 widget
+  classes (the chooser trio's button host joined the catalog);
   extension API v3 (widget hosting); PARITY.md audited against the
   GTK4 4.24 catalog and Qt6 — its gap table now carries zero OPEN
   rows.
@@ -37,6 +37,46 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 44 (2026-11-08) — the parity batch: the font button; bug-rate: 0 new library bugs
+
+The owner's directive: the honest parity tail needs implementing,
+not just stating. The sweep's implementable rows went first (the
+dedup check ran before any code: the chooser engines and the color
+button's pattern exist — nothing here duplicates them):
+
+1. **fdk_font_button** (the GtkFontButton/GtkFontDialogButton row):
+   the color swatch button's font twin, built on the SAME chooser
+   engine the dialog and the inline widget use — one engine, three
+   hosts. The label reads "Family [Style] Size"; the press opens
+   the 1.0.0 font chooser dialog seeded with the current
+   family/style/size; ACCEPTED writes the pick (owned copies — the
+   result strings live only through the callback) and fires
+   on_font_set; CANCELLED changes nothing; a NULL family is
+   refused. The dialog's size rule verbatim (0 = 12, clamp 6..96);
+   NULL/"" style normalizes to NULL (no style = the family's first
+   face); the detached-tree press is the color button's consumed
+   no-op; the programmatic setter stays silent; the a11y contract
+   is the color button's (a BUTTON whose value text is the
+   description). Tests FIRST (test_choosers.c, red before the
+   implementation existed): the create ladder, the silent setter,
+   the style normalization, the size rule, text-bearing natural
+   size, the face+ink paint proof, the ACCEPTED/CANCELLED/NULL
+   seam, the description value text + ACTIVATE action, the
+   detached no-op presses. 8 new exports (1,032 -> 1,040),
+   verify-exports green.
+2. **The GtkSwitch row reclassified** (evidence, not aspiration):
+   the toggle's paint IS the switch visual — track + knob
+   (controls.c), live changed feedback, keyboard activation, the
+   TOGGLE_BUTTON a11y role with the PRESSED state. parity_check's
+   mapping row moves missing -> parity with the evidence in the
+   note; the "visual is theme work" hedge is retired.
+
+The sweep after the batch: CLEAN, missing rows 5 -> 3 (the honest
+tail is now ScaleButton/VolumeButton, Video/MediaControls, and the
+AppChooser/Emoji/Shortcut/Mapper/MDI policy rows). Battery green
+(unit + X11 + threads); gate re-run below. Bug-rate: 0 new library
+bugs.
 
 ## Round 43 (2026-11-08) — the decoupling round: FDK stands alone; bug-rate: 0 new library bugs
 

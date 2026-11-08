@@ -738,6 +738,170 @@ static void test_color_button(void) {
 }
 
 /* ===================================================================
+ * The font button (1.0.0 — the font chooser's button host)
+ * =================================================================== */
+
+static void test_font_button(void); /* defined below */
+
+static int g_font_sets = 0;
+static char g_last_family[64];
+static char g_last_style[64];
+static fdk_i32 g_last_size = 0;
+static void on_font_set(fdk_widget *button, const char *family,
+                        const char *style, fdk_i32 size, void *user) {
+    (void)button;
+    (void)user;
+    g_font_sets++;
+    snprintf(g_last_family, sizeof(g_last_family), "%s",
+             family != NULL ? family : "");
+    snprintf(g_last_style, sizeof(g_last_style), "%s",
+             style != NULL ? style : "");
+    g_last_size = size;
+}
+
+static void test_font_button(void) {
+    if (g_font == NULL) {
+        printf("[skip] font button: no system font\n");
+        return;
+    }
+    fdk_widget *root = fresh_root();
+    fdk_widget *fb = NULL;
+    assert(fdk_font_button_create(root, g_font, "Sans", NULL, 16,
+                                  &fb) == FDK_OK);
+    assert(fdk_font_button_create(NULL, g_font, "Sans", NULL, 16,
+                                  NULL) == FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_font_button_create(root, NULL, "Sans", NULL, 16,
+                                  &fb) == FDK_ERR_INVALID_ARGUMENT);
+
+    /* Getters + the style normalization: NULL and "" both read
+     * back as NULL (no style = the family's first face). */
+    assert(strcmp(fdk_font_button_get_family(fb), "Sans") == 0);
+    assert(fdk_font_button_get_style(fb) == NULL);
+    assert(fdk_font_button_get_size(fb) == 16);
+    assert(fdk_font_button_get_family(NULL) == NULL);
+    assert(fdk_font_button_get_size(NULL) == 0);
+
+    /* set_font: silent (the checked-setter discipline — the
+     * callback belongs to user gestures), idempotent, argument
+     * safety; size 0 = 12 and the 6..96 clamp, the dialog's rule. */
+    g_font_sets = 0;
+    fdk_font_button_set_on_font_set(fb, on_font_set, NULL);
+    assert(fdk_font_button_set_font(fb, "Serif", "Bold", 24) == FDK_OK);
+    assert(strcmp(fdk_font_button_get_family(fb), "Serif") == 0);
+    assert(strcmp(fdk_font_button_get_style(fb), "Bold") == 0);
+    assert(fdk_font_button_get_size(fb) == 24);
+    assert(g_font_sets == 0);
+    assert(fdk_font_button_set_font(fb, "Serif", "Bold", 24) ==
+           FDK_OK); /* idempotent                          */
+    assert(fdk_font_button_set_font(fb, "Serif", "", 24) == FDK_OK);
+    assert(fdk_font_button_get_style(fb) == NULL);
+    assert(fdk_font_button_set_font(fb, "Mono", NULL, 0) == FDK_OK);
+    assert(fdk_font_button_get_size(fb) == 12);
+    assert(fdk_font_button_set_font(fb, "Tiny", NULL, 2) == FDK_OK);
+    assert(fdk_font_button_get_size(fb) == 6);
+    assert(fdk_font_button_set_font(fb, "Huge", NULL, 500) == FDK_OK);
+    assert(fdk_font_button_get_size(fb) == 96);
+    assert(fdk_font_button_set_font(NULL, "x", NULL, 1) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    fdk_font_button_set_on_font_set(NULL, on_font_set, NULL);
+
+    /* Title + sample text (the chooser's window title and the
+     * preview line; NULL restores the defaults). */
+    assert(fdk_font_button_set_title(fb, "Pick a face") == FDK_OK);
+    assert(fdk_font_button_set_title(fb, NULL) == FDK_OK);
+    assert(fdk_font_button_set_sample(fb, "Hamburgefonstiv") == FDK_OK);
+    assert(fdk_font_button_set_sample(fb, NULL) == FDK_OK);
+
+    /* Natural size grows with the label text; focusable. */
+    fdk_size nat = {0, 0};
+    fdk_widget_measure(fb, &nat);
+    assert(nat.width > 40 && nat.height >= 30);
+    assert(fdk_widget_get_can_focus(fb));
+
+    /* Paint: the face is drawn (control face over the window's)
+     * and the label's ink lands inside it. */
+    assert(fdk_font_button_set_font(fb, "Serif", NULL, 16) == FDK_OK);
+    fdk_widget_arrange(fb, (fdk_rect){10, 10, 140, 30});
+    fdk_surface *s = NULL;
+    paint_root(root, &s);
+    fdk_u32 face_px = px_at(s, 14, 14);
+    fdk_u32 bg = px_at(s, 1, 1);
+    assert(face_px != bg); /* the face painted                */
+
+    /* The acceptance seam: an ACCEPTED chooser result writes
+     * family/style/size (owned copies — the result strings are
+     * valid only during the callback) and fires the callback;
+     * CANCELLED changes nothing; a NULL family is refused. */
+    g_font_sets = 0;
+    char fam_buf[] = "DejaVu Sans";   /* the result strings are
+                                       * non-const (FDK-owned) */
+    char sty_buf[] = "Book";
+    char path_buf[] = "/fonts/x.ttf";
+    fdk_font_dialog_result acc = {
+        .outcome = FDK_FONT_DIALOG_ACCEPTED,
+        .family = fam_buf,
+        .style = sty_buf,
+        .path = path_buf,
+        .face_index = 0,
+        .size = 18,
+    };
+    fdk__fontbutton_apply_result(fb, &acc);
+    assert(strcmp(fdk_font_button_get_family(fb), "DejaVu Sans") == 0);
+    assert(strcmp(fdk_font_button_get_style(fb), "Book") == 0);
+    assert(fdk_font_button_get_size(fb) == 18);
+    assert(g_font_sets == 1 && g_last_size == 18 &&
+           strcmp(g_last_family, "DejaVu Sans") == 0 &&
+           strcmp(g_last_style, "Book") == 0);
+    fdk_font_dialog_result can = {
+        .outcome = FDK_FONT_DIALOG_CANCELLED,
+    };
+    fdk__fontbutton_apply_result(fb, &can);
+    assert(g_font_sets == 1 && fdk_font_button_get_size(fb) == 18);
+    fdk_font_dialog_result nul = {
+        .outcome = FDK_FONT_DIALOG_ACCEPTED,
+        .family = NULL,
+        .size = 14,
+    };
+    fdk__fontbutton_apply_result(fb, &nul);
+    assert(strcmp(fdk_font_button_get_family(fb), "DejaVu Sans") == 0);
+    assert(g_font_sets == 1);
+    fdk__fontbutton_apply_result(NULL, &acc); /* argument safety   */
+
+    /* The a11y contract: a BUTTON whose value text is the font
+     * description. */
+    fdk_a11y_info info;
+    memset(&info, 0, sizeof(info));
+    assert(fdk_a11y_describe(fb, &info) == FDK_OK);
+    assert(info.value_text != NULL);
+    assert(strstr(info.value_text, "DejaVu Sans") != NULL);
+    assert(strstr(info.value_text, "18") != NULL);
+    fdk_a11y_info_free(&info);
+    assert(fdk_a11y_actions_of(fb) & FDK_A11Y_ACTION_ACTIVATE);
+
+    /* Presses in a DETACHED tree are a documented no-op (the
+     * color button's contract, verbatim): consumed, nothing
+     * opens, state intact. */
+    g_font_sets = 0;
+    fdk_event_data down =
+        ev_button_at(FDK_EVENT_POINTER_BUTTON_DOWN, 60.0f, 25.0f, 0);
+    fdk_event_data up =
+        ev_button_at(FDK_EVENT_POINTER_BUTTON_UP, 60.0f, 25.0f, 0);
+    assert(fdk_widget_tree_handle_event(root, &down) == true);
+    (void)fdk_widget_tree_handle_event(root, &up);
+    assert(g_font_sets == 0);
+    fdk_event_data sp = ev_key(FDK_EVENT_KEY_DOWN, FDK_KEY_SPACE);
+    assert(fdk_widget_tree_handle_event(root, &sp) == true);
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] font button: create/get/set (silent setter, style "
+           "normalization, the dialog's size rule), title + sample, "
+           "text-bearing natural size, ACCEPTED/CANCELLED/NULL seam, "
+           "description value text + ACTIVATE action, detached "
+           "no-op presses\n");
+}
+
+/* ===================================================================
  * The inline color chooser widget (1.0.0)
  * =================================================================== */
 
@@ -1003,6 +1167,7 @@ int main(void) {
     test_tree_multi_select();
     test_font_enumerate();
     test_color_button();
+    test_font_button();
     test_color_chooser_widget();
     test_font_chooser_widget();
 

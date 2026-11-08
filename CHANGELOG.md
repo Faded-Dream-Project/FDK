@@ -9,6 +9,22 @@ changes; the round-40 release-closing work below landed under the
 same release identity before the tag.
 
 
+### Added (round 44)
+
+- **`fdk_font_button`** (fdk_dialog.h, 8 public functions): the
+  font chooser dialog's button host — the color swatch button's
+  font twin. The label reads "Family [Style] Size"; pressing it
+  opens the font chooser dialog seeded with the current
+  description; ACCEPTED settles the pick and fires on_font_set;
+  CANCELLED changes nothing. The dialog's size rule (0 = 12, clamp
+  6..96), the silent programmatic setter, the detached-tree no-op,
+  and the BUTTON-with-value a11y contract are the color button's,
+  verbatim. 1,040 exported symbols.
+- **PARITY**: the GtkSwitch row reclassified parity (the toggle's
+  track+knob paint IS the switch visual); the font-button row
+  closed. The honest tail: ScaleButton/VolumeButton,
+  Video/MediaControls, and the policy rows.
+
 ### Changed (the decoupling round)
 
 FDK stands alone: the shell add-on (its own repository) is no
