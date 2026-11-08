@@ -78,6 +78,12 @@ or use the rig's probe binary as the item):
    a live `set_label` (the host re-fetches on LayoutUpdated).
 3. Restart the host (or the watcher service) and confirm the
    item re-registers (on_host flips 0 then 1).
+4. Classic X11 bars (tint2's legacy systray, trayer, stalonetray):
+   with NO SNI watcher on the bus the item docks through the older
+   System Tray v0.2 protocol instead (round 48) — set pixels with
+   fdk_tray_item_set_icon_pixmap and the icon appears; kill and
+   restart the bar and confirm the unhost → re-dock. (SNI still
+   wins the moment a watcher appears.)
 
 ## 3. text_demo: complex scripts, bidi, fallback, caret (M-2 — needs your eyes)
 

@@ -19,6 +19,7 @@ static const fdk_platform_ops g_x11_ops = {
     .get_event_fd = fdk_x11_get_event_fd,
     .dispatch_pending = fdk_x11_dispatch_pending,
     .next_wakeup_ms = fdk_x11_next_wakeup_ms,
+    .systray = &fdk__x11_systray_ops, /* the XEmbed fallback (round 48) */
     .window_create = fdk_x11_window_create,
     .window_destroy = fdk_x11_window_destroy,
     .window_show = fdk_x11_window_show,

@@ -94,6 +94,14 @@ struct fdk_tray_item {
     int hosted;
     int registering;
     int tearing_down;
+
+    /* The XEmbed fallback (1.0.0-rc1, round 48): when no SNI watcher
+     * is on the bus and the platform offers the classic X11 systray
+     * (System Tray v0.2), the item docks a real icon WINDOW the bar
+     * embeds — the fallback that makes the tray work on ANY X11 bar.
+     * SNI wins the moment a watcher appears. */
+    void *xembed;      /* the platform systray handle, or NULL      */
+    int xembed_active; /* nonzero while docked/embedding            */
 };
 
 /* Shared string helper (owned copy, NULL-safe). */

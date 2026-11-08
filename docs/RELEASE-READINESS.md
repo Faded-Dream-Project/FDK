@@ -39,7 +39,10 @@ the extension API and the X11 GL path (no numbered section covers
 the X11 GL acceptance yet; the walkthrough's GL sections are the
 Wayland rounds — fold this into the signoff document). The session's
 external connection kill also exercised the fatal-IO graceful-exit
-path in the field: one detail line, clean exit, as designed.
+path in the field: one detail line, clean exit, as designed. The tray check then found
+round 48's bug: SNI-only means invisible on classic X11 bars
+(tint2) — fixed with the System Tray v0.2 fallback; retest on the
+owner's bar pending.
 
 No code remains. These need YOUR hardware because the sandbox
 cannot produce them; TESTING-ON-DESKTOP.md §1–19 is the walkthrough:

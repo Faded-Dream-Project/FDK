@@ -39,6 +39,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <X11/Xlib.h> /* the XEmbed rig's own connection */
+#include <X11/Xatom.h> /* XA_CARDINAL */
 
 /* send() consumes its message on FDK_OK — free it only when the
  * send itself failed (the leak-free discipline). */
@@ -749,6 +751,288 @@ static void host_event(fdk_context *ctx, fdk_dbus_connection *bus,
 
 /* ---- main -------------------------------------------------------------------- */
 
+/* ---- the XEmbed fallback phase (1.0.0-rc1, round 48) ------------------------ *
+ *
+ * The tray item speaks StatusNotifierItem; a classic X11 bar (tint2's
+ * legacy systray, trayer, stalonetray, fvwm) speaks the OLDER System
+ * Tray v0.2 protocol instead — a manager selection (_NET_SYSTEM_TRAY_S0),
+ * a dock-request client message, and the icon as an XEMBED client
+ * window the bar reparents and resizes. The field report (the owner's
+ * X11/tint2 desktop): nm-applet docks, an SNI-only item does not —
+ * nm-applet falls back to exactly this protocol when no SNI watcher is
+ * on the bus. This phase runs a REAL in-test manager of that protocol
+ * (on a watcher-free private bus) and asserts the item docks, survives
+ * the bar's restart (unhost → re-dock through the MANAGER
+ * announcement), and presents the protocol shape on the wire
+ * (_XEMBED_INFO on the icon, the icon a CHILD of the manager).
+ * Protocol-shaped assertions only — pins the behavior on ANY bar.
+ */
+
+typedef struct {
+    Display *dpy;
+    Window root;
+    Window mgr;
+    Atom sel, opcode, manager, xembed, xembed_info;
+    Window icon; /* what docked (None = nothing yet) */
+    int dock_requests;
+} xembed_rig;
+
+static int xembed_rig_start(xembed_rig *rig) {
+    memset(rig, 0, sizeof(*rig));
+    rig->dpy = XOpenDisplay(NULL);
+    if (rig->dpy == NULL) {
+        return 0;
+    }
+    rig->root = DefaultRootWindow(rig->dpy);
+    rig->sel = XInternAtom(rig->dpy, "_NET_SYSTEM_TRAY_S0", False);
+    rig->opcode = XInternAtom(rig->dpy, "_NET_SYSTEM_TRAY_OPCODE", False);
+    rig->manager = XInternAtom(rig->dpy, "MANAGER", False);
+    rig->xembed = XInternAtom(rig->dpy, "XEMBED", False);
+    rig->xembed_info = XInternAtom(rig->dpy, "_XEMBED_INFO", False);
+    rig->mgr = XCreateSimpleWindow(rig->dpy, rig->root, 0, 0, 8, 8, 0, 0, 0);
+    XSetSelectionOwner(rig->dpy, rig->sel, rig->mgr, CurrentTime);
+    if (XGetSelectionOwner(rig->dpy, rig->sel) != rig->mgr) {
+        XDestroyWindow(rig->dpy, rig->mgr);
+        XCloseDisplay(rig->dpy);
+        memset(rig, 0, sizeof(*rig));
+        return 0;
+    }
+    /* The MANAGER announcement (System Tray v0.2): the only signal a
+     * started/restarted bar ever sends. Foreign ClientMessages are
+     * delivered against the sender's event mask — the MANAGER
+     * convention is StructureNotifyMask, which the FDK connection
+     * selects on the root at connect. */
+    XClientMessageEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = ClientMessage;
+    ev.window = rig->root;
+    ev.message_type = rig->manager;
+    ev.format = 32;
+    ev.data.l[0] = CurrentTime;
+    ev.data.l[1] = (long)rig->sel;
+    ev.data.l[2] = (long)rig->mgr;
+    XSendEvent(rig->dpy, rig->root, False, StructureNotifyMask,
+               (XEvent *)&ev);
+    XFlush(rig->dpy);
+    return 1;
+}
+
+static void xembed_rig_stop(xembed_rig *rig) {
+    if (rig->dpy == NULL) {
+        return;
+    }
+    if (rig->mgr != None) {
+        XDestroyWindow(rig->dpy, rig->mgr);
+    }
+    XCloseDisplay(rig->dpy);
+    memset(rig, 0, sizeof(*rig));
+}
+
+/* Drain the rig's events: the dock request arrives as a ClientMessage
+ * on the manager window (an XSendEvent with an empty mask delivers to
+ * the window's CREATOR — the rig). The rig then plays the bar's half
+ * of the embed: reparent + XEMBED_EMBEDDED_NOTIFY + the resize to the
+ * bar's icon size. */
+static void xembed_rig_drain(xembed_rig *rig) {
+    if (rig->dpy == NULL) {
+        return;
+    }
+    while (XPending(rig->dpy) > 0) {
+        XEvent ev;
+        XNextEvent(rig->dpy, &ev);
+        if (ev.type == ClientMessage &&
+            ev.xclient.message_type == rig->opcode &&
+            ev.xclient.format == 32) {
+            rig->icon = (Window)ev.xclient.data.l[2];
+            rig->dock_requests++;
+            XReparentWindow(rig->dpy, rig->icon, rig->mgr, 0, 0);
+            XMoveResizeWindow(rig->dpy, rig->icon, 0, 0, 24, 24);
+            XClientMessageEvent em;
+            memset(&em, 0, sizeof(em));
+            em.type = ClientMessage;
+            em.window = rig->icon;
+            em.message_type = rig->xembed;
+            em.format = 32;
+            em.data.l[1] = 0; /* XEMBED_EMBEDDED_NOTIFY */
+            em.data.l[3] = (long)rig->mgr;
+            em.data.l[4] = 0; /* our XEMBED version */
+            XSendEvent(rig->dpy, rig->icon, False, NoEventMask,
+                       (XEvent *)&em);
+            XFlush(rig->dpy);
+        }
+    }
+}
+
+static int pump_xembed_until(fdk_context *ctx, xembed_rig *rig, int timeout_ms,
+                             void *user, int (*pred)(void *u)) {
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    for (;;) {
+        xembed_rig_drain(rig);
+        (void)fdk_pump_events(ctx, 20);
+        xembed_rig_drain(rig);
+        if (pred(user)) {
+            return 1;
+        }
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long long ms = (now.tv_sec - start.tv_sec) * 1000LL +
+                       (now.tv_nsec - start.tv_nsec) / 1000000LL;
+        if (ms > timeout_ms) {
+            return 0;
+        }
+    }
+}
+
+static int pred_item_hosted(void *u) { return fdk_tray_item_hosted(u); }
+static int pred_item_unhosted(void *u) { return !fdk_tray_item_hosted(u); }
+
+static int xembed_fallback_phase(fdk_context *ctx) {
+    /* Guard: a REAL bar owning the selection would fight the rig. */
+    {
+        Display *dpy = XOpenDisplay(NULL);
+        if (dpy == NULL) {
+            return live_skip("the XEmbed phase needs an X display "
+                             "(run: make test-dbus)");
+        }
+        Atom sel = XInternAtom(dpy, "_NET_SYSTEM_TRAY_S0", False);
+        Window owner = XGetSelectionOwner(dpy, sel);
+        XCloseDisplay(dpy);
+        if (owner != None) {
+            return live_skip("a REAL bar owns the X11 systray selection "
+                             "on this display — the XEmbed phase needs a "
+                             "tray-free display (run: make test-dbus)");
+        }
+    }
+    xembed_rig rig;
+    if (!xembed_rig_start(&rig)) {
+        return live_skip("the XEmbed manager rig could not own the "
+                         "systray selection");
+    }
+
+    fdk_tray_item_options opts = {
+        .id = "fdk-tray-xembed",
+        .title = "XEmbed",
+    };
+    fdk_tray_item_callbacks cb = {
+        .on_host = app_on_host,
+        .user = NULL,
+    };
+    g_app.host_count = 0;
+    g_app.hosted_now = 0;
+    fdk_tray_item *item = fdk_tray_item_open(ctx, &opts, &cb, NULL);
+    assert(item != NULL);
+    /* Pixels REQUIRED for the fallback: an XEmbed icon is a real
+     * window the bar embeds, so it draws actual pixels (ARGB32
+     * network order). 4x4, opaque. */
+    uint8_t px[4 * 4 * 4];
+    for (int i = 0; i < 16; i++) {
+        px[i * 4 + 0] = 0xFF; /* A */
+        px[i * 4 + 1] = (uint8_t)(0x20 + i); /* R */
+        px[i * 4 + 2] = 0x40; /* G */
+        px[i * 4 + 3] = 0x60; /* B */
+    }
+    fdk_tray_item_set_icon_pixmap(item, 4, 4, px, sizeof(px));
+
+    /* 1. dock: the manager must receive the request, embed the icon
+     * window, and the item must report hosted. */
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    int dock_ok = 0;
+    while (!dock_ok) {
+        xembed_rig_drain(&rig);
+        (void)fdk_pump_events(ctx, 20);
+        xembed_rig_drain(&rig);
+        if (rig.dock_requests >= 1 && fdk_tray_item_hosted(item)) {
+            dock_ok = 1;
+            break;
+        }
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long long ms = (now.tv_sec - start.tv_sec) * 1000LL +
+                       (now.tv_nsec - start.tv_nsec) / 1000000LL;
+        if (ms > 5000) {
+            break;
+        }
+    }
+    if (rig.dock_requests == 0) {
+        int hosted_by_sni = fdk_tray_item_hosted(item);
+        fdk_tray_item_close(item);
+        xembed_rig_stop(&rig);
+        if (hosted_by_sni) {
+            return live_skip("a real StatusNotifierWatcher registered the "
+                             "item — the XEmbed phase needs a watcher-free "
+                             "bus (run: make test-dbus)");
+        }
+        fprintf(stderr, "FAIL: XEmbed fallback: no dock request and no SNI "
+                        "registration\n");
+        return 1;
+    }
+    assert(dock_ok);
+    /* The dock contract on the wire: the icon is a CHILD of the
+     * manager and carries _XEMBED_INFO (version 0, MAPPED). */
+    {
+        Window r2, p2, *kids = NULL;
+        unsigned int nk = 0;
+        assert(XQueryTree(rig.dpy, rig.mgr, &r2, &p2, &kids, &nk) != 0);
+        int found = 0;
+        for (unsigned int i = 0; i < nk; i++) {
+            if (kids[i] == rig.icon) {
+                found = 1;
+            }
+        }
+        if (kids != NULL) {
+            XFree(kids);
+        }
+        assert(found);
+        Atom actual = None;
+        int fmt = 0;
+        unsigned long n = 0, bytes = 0;
+        unsigned char *data = NULL;
+        assert(XGetWindowProperty(rig.dpy, rig.icon, rig.xembed_info, 0, 2,
+                                  False, XA_CARDINAL, &actual, &fmt, &n,
+                                  &bytes, &data) == Success);
+        assert(n == 2 && fmt == 32 && data != NULL);
+        /* Format-32 property data comes back as an array of long
+         * (Xlib's rule, 8 bytes per element on LP64). */
+        assert(((const long *)data)[0] == 0);           /* version  */
+        assert(((const long *)data)[1] & 1);            /* MAPPED   */
+        XFree(data);
+    }
+    assert(g_app.host_count == 1 && g_app.hosted_now == 1);
+    printf("[ok] tray XEmbed fallback: docked into a System Tray v0.2 "
+           "manager (icon child of the manager, _XEMBED_INFO set)\n");
+
+    /* 2. the bar dies: the server destroys the manager AND its
+     * embedded children — the item must report unhosted. */
+    XDestroyWindow(rig.dpy, rig.mgr);
+    rig.mgr = None;
+    XFlush(rig.dpy);
+    assert(pump_xembed_until(ctx, &rig, 5000, item, pred_item_unhosted));
+    assert(g_app.host_count == 2 && g_app.hosted_now == 0);
+    xembed_rig_stop(&rig);
+
+    /* 3. the bar restarts: a new manager + the MANAGER announcement —
+     * the item must re-dock (a fresh icon window, since the server
+     * destroyed the old one with the bar). */
+    assert(xembed_rig_start(&rig));
+    assert(pump_xembed_until(ctx, &rig, 5000, item, pred_item_hosted));
+    /* The REPLACEMENT manager received its own dock request (the rig
+     * counter reset at start; the first manager's request was >= 1
+     * by the dock_ok gate above). */
+    assert(rig.dock_requests >= 1);
+    assert(g_app.host_count == 3 && g_app.hosted_now == 1);
+    printf("[ok] tray XEmbed restart: unhosted on the bar's death, "
+           "re-docked via the MANAGER announcement\n");
+
+    fdk_tray_item_close(item);
+    xembed_rig_stop(&rig);
+    /* Phase-scoped counters back to zero for the SNI phases. */
+    g_app.host_count = 0;
+    g_app.hosted_now = 0;
+    return 0;
+}
+
 int main(void) {
     /* Skip discipline (test_dbus_live.c's posture, kept identical):
      * no display backend → skip; no session bus → skip. A user's real
@@ -772,6 +1056,17 @@ int main(void) {
          * skip, not an abort — the environment, not the code, failed. */
         return live_skip("fdk_init found no usable display backend — "
                          "stale DISPLAY? (run: make test-dbus)");
+    }
+
+    /* Phase 0 (1.0.0-rc1, round 48): the XEmbed system-tray fallback —
+     * BEFORE the mock watcher exists, on a watcher-free bus, against
+     * a real in-test System Tray v0.2 manager. */
+    {
+        int phase0 = xembed_fallback_phase(ctx);
+        if (phase0 != 0) {
+            fdk_shutdown(ctx);
+            return phase0;
+        }
     }
 
     /* The mock watcher/host first. */

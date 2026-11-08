@@ -183,6 +183,23 @@ fdk_result fdk__cursor_theme_load(const char *const *names, int nominal,
 extern const char *const
     fdk__cursor_named_names[FDK_PLATFORM_CURSOR_NAMED_COUNT][4];
 
+/* OPTIONAL (1.0.0-rc1, round 48): the XEmbed system-tray fallback
+ * interface — implemented by x11_systray.c on X11, absent (NULL)
+ * on Wayland. `open` creates the icon window and sends the dock
+ * request; the tray confirms by reparenting (reported through
+ * on_event(1)); `set_icon` swaps the ARGB32 pixmap and repaints;
+ * `close` destroys the icon window (the legal XEmbed exit). */
+typedef struct fdk__platform_systray_ops {
+    fdk_result (*open)(fdk_platform_connection *conn,
+                       const uint8_t *argb32, int32_t w, int32_t h,
+                       void *user,
+                       void (*on_event)(void *user, int docked),
+                       void **out_handle);
+    fdk_result (*set_icon)(void *handle, const uint8_t *argb32,
+                           int32_t w, int32_t h);
+    void (*close)(void *handle);
+} fdk__platform_systray_ops;
+
 typedef struct fdk_platform_ops {
     /* Human-readable backend name for logging ("x11", "wayland"). */
     const char *name;
@@ -237,6 +254,20 @@ typedef struct fdk_platform_ops {
      * server-side) leave it NULL. */
     int (*next_wakeup_ms)(fdk_platform_connection *conn,
                           long long *out_ms_until);
+
+    /* OPTIONAL (1.0.0-rc1, round 48): the XEmbed system-tray
+     * fallback (x11_systray.c). The desktop tray item registers
+     * StatusNotifier first; when NO watcher is on the session bus,
+     * an X11 connection offers this so the item can dock into ANY
+     * classic bar's systray (tint2 legacy mode, trayer, stalonetray,
+     * fvwm) — the freedesktop System Tray v0.2 protocol, the one
+     * nm-applet falls back to on such bars. NULL on backends
+     * without the protocol (Wayland — a Wayland bar is an SNI host
+     * by construction). The on_event callback reports the dock
+     * contract: 1 = the tray confirmed the embed (ReparentNotify /
+     * XEMBED_EMBEDDED_NOTIFY), 0 = the manager went away (bar
+     * quit/restart). */
+    const struct fdk__platform_systray_ops *systray;
 
     /* ---- OPTIONAL test seams (1.0.0) ----
      *

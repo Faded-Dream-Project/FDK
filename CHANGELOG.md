@@ -9,6 +9,22 @@ changes; the round-40 release-closing work below landed under the
 same release identity before the tag.
 
 
+### Fixed (round 48)
+
+- **The tray works on ANY X11 bar** — the tray item spoke only
+  StatusNotifierItem, so classic bars (tint2's legacy systray,
+  trayer, stalonetray, fvwm) never showed it: with no SNI watcher
+  on the bus the item is invisible. Found on the owner's X11
+  desktop (nm-applet docks on tint2, FDK's item did not). Fix:
+  the platform's new XEmbed system-tray fallback (System Tray
+  v0.2 — the protocol nm-applet falls back to on such bars): the
+  item docks a real icon window into any classic systray,
+  repaints on the bar's resize, unhosts on the bar's death, and
+  re-docks through the MANAGER announcement of a restarted bar;
+  SNI wins the moment a watcher appears. No per-bar code
+  anywhere; pinned in the suite by a real in-test System Tray
+  v0.2 manager (dock, wire shape, restart re-dock).
+
 ### Fixed (round 46)
 
 - **`fdk_scale_button`: the popup never mapped** — the open path

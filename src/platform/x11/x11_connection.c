@@ -487,16 +487,20 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->xdnd.hover = NULL;
     conn->xdnd.offered = 0;
 
-    /* Root PropertyChangeMask (1.0.0-rc1): _NET_CURRENT_DESKTOP
-     * switches arrive as root PropertyNotify events — the popup
-     * watchdog's desktop-change input. Selected AFTER the EWMH probe
-     * above (order on the wire is irrelevant, but this documents
-     * intent: the mask exists for the watchdog, nothing else reads
-     * root properties). WMs that never write the property simply
-     * never wake the path. */
-    XSelectInput(display, conn->root, PropertyChangeMask);
+    /* Root PropertyChangeMask + StructureNotifyMask (1.0.0-rc1): the
+     * desktop-switch watchdog reads _NET_CURRENT_DESKTOP as a root
+     * PropertyNotify, and the XEmbed systray fallback (round 48)
+     * listens for a restarted bar's MANAGER announcement as a root
+     * ClientMessage (System Tray v0.2) — a foreign ClientMessage is
+     * delivered only when its sender's event mask matches what we
+     * selected, and the MANAGER convention is StructureNotifyMask.
+     * Both arrive only when they happen; a quiet root costs
+     * nothing. */
+    XSelectInput(display, conn->root,
+                 PropertyChangeMask | StructureNotifyMask);
     conn->popup_watchdog_ms = 0;
     conn->desktop_changed = 0;
+    conn->systray = NULL;
 
     /* XSETTINGS live follow (1.0.0): arm on whatever settings
      * daemon is running at connect; the dispatch's throttled
@@ -571,6 +575,7 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
         XCloseIM(conn->xim);
         conn->xim = NULL;
     }
+    fdk__x11_systray_disconnect(conn); /* destroy embedded icons */
     FDK_INFO("disconnecting");
     XCloseDisplay(conn->display);
     /* Round-7: past XCloseDisplay, libGL's GLX extension caches are

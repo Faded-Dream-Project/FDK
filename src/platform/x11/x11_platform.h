@@ -80,6 +80,14 @@ void fdk__x11_randr_monitor_containing(const fdk_platform_connection *conn,
  * the throttled re-arm catches daemons appearing/restarting later. */
 void fdk_x11_xsettings_arm(fdk_platform_connection *conn);
 void fdk_x11_xsettings_rearm_tick(fdk_platform_connection *conn);
+/* The XEmbed system-tray fallback (x11_systray.c, 1.0.0-rc1
+ * round 48): dispatch routes icon/manager/announcement events
+ * BEFORE the window table (the icon window is not an FDK window);
+ * disconnect destroys every embedded icon. The ops table is wired
+ * into g_x11_ops (x11_ops.c) — NULL on Wayland. */
+int fdk__x11_systray_handle(fdk_platform_connection *conn, XEvent *xev);
+void fdk__x11_systray_disconnect(fdk_platform_connection *conn);
+extern const fdk__platform_systray_ops fdk__x11_systray_ops;
 fdk_result fdk_x11_window_get_scale(fdk_platform_window *pwindow,
                                     fdk_f32 *out_scale);
 
@@ -87,6 +95,10 @@ fdk_result fdk_x11_window_get_scale(fdk_platform_window *pwindow,
  * fdk_window_get_render_path() — 1 while this window presents
  * through the GPU lane, 0 on the CPU path. */
 int fdk_x11_window_render_path(fdk_platform_window *pwindow);
+
+/* The XEmbed system-tray fallback handle (x11_systray.c, 1.0.0-rc1
+ * round 48) — one per tray item that docked into a classic bar. */
+typedef struct fdk_x11_systray fdk_x11_systray;
 
 struct fdk_platform_connection {
     /* Application id (fdk_init_options.app_id), duplicated at connect
@@ -203,7 +215,11 @@ struct fdk_platform_connection {
     Window xsettings_owner;
     Atom xsettings_settings;
     uint64_t xsettings_rearm_ms;
-    int ewmh_wm;           /* nonzero: an EWMH WM is running          */
+    /* The XEmbed system-tray fallback (1.0.0-rc1, round 48):
+     * x11_systray.c's handle list — the icon windows embedded into
+     * classic bars' systrays (System Tray v0.2), dispatched BEFORE
+     * the window table like the clipboard helper windows. */
+    struct fdk_x11_systray *systray;    int ewmh_wm;           /* nonzero: an EWMH WM is running          */
     int ewmh_state_ok;     /* nonzero: it advertises _NET_WM_STATE    */
     /* Popup-grab watchdog pacing (1.0.0-rc1): the last watchdog
      * tick (monotonic ms) — the check runs at most every 500 ms

@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-08, after round 47)
+## Current state (2026-11-08, after round 48)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,58 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 48 (2026-11-08) — the tray works on ANY X11 bar now; bug-rate: 1 found, 1 fixed, 0 new after the fix
+
+The walkthrough's second field bug, from the owner's X11 desktop
+(tint2): **the tray item docks on Wayland (waybar) but never appears
+on tint2** — while nm-applet on the same bar does dock. The owner's
+constraint was the right one: no tint2-specific fix, ANY bar.
+
+1. **Root cause (protocol, not tint2)**: the tray item spoke ONLY
+   StatusNotifierItem (the KDE 2009 D-Bus spec + ayatana twin —
+   waybar's protocol). The classic X11 bar world (tint2's legacy
+   systray, trayer, stalonetray, fvwm, xfce4-panel legacy mode)
+   speaks the OLDER freedesktop System Tray v0.2 protocol — a
+   manager selection (_NET_SYSTEM_TRAY_S<screen>), a dock-request
+   client message, and the icon as an XEMBED client window the bar
+   reparents and resizes. With no SNI watcher on the bus the item
+   logged "no StatusNotifierWatcher" and waited forever. nm-applet
+   docks because it falls back to exactly that protocol — the
+   standard cross-desktop tray story every real client plays.
+2. **The fix (protocol-level, any bar)**: `src/platform/x11/
+   x11_systray.c` implements System Tray v0.2 + XEMBED 0.0 as the
+   platform's OPTIONAL systray ops (NULL on Wayland — a Wayland bar
+   is an SNI host by construction). The item registers SNI first;
+   when no watcher is on the bus it docks a real icon WINDOW into
+   the classic tray (the tray's advertised 32-bit ARGB visual when
+   it publishes one), repaints on the bar's resize (nearest-
+   neighbor, LSBFirst ZPixmap), reports unhosted when the bar dies
+   (the server destroys embedded children with it), and re-docks
+   through the MANAGER announcement of a restarted bar. SNI wins
+   the moment a watcher appears — the fallback leaves the classic
+   tray and registers. Pixels REQUIRED for the fallback (an XEmbed
+   icon is a window, not a theme lookup) — set_icon_pixmap both
+   feeds and triggers it, with a loud diagnostic otherwise.
+3. **The suite pins the protocol, not a bar**: test_tray_item's
+   new phase 0 runs a REAL in-test System Tray v0.2 manager on a
+   watcher-free private bus — dock, the wire shape (_XEMBED_INFO
+   version 0 + MAPPED, the icon a CHILD of the manager), unhost on
+   the bar's death, re-dock via the MANAGER announcement. Skips
+   loudly when a real bar owns the selection or a real watcher
+   owns the bus (the mock phases' posture). Both Xlib traps hit
+   and fixed on the way: format-32 property data is LONG arrays on
+   both the write and read side (the int32 write sent zero flags);
+   MANAGER announcements arrive as root ClientMessages against
+   StructureNotifyMask.
+4. **Field evidence for M-9**: waybar (Wayland) = PASS (the owner's
+   report); tint2 (X11) = FAIL → this round's fix; retest on the
+   owner's bar is the pending confirmation (the rig + nm-applet's
+   protocol make the expectation unambiguous: any classic systray
+   hosts the icon now).
+
+Battery: test-dbus ALL PASS (incl. the new phase), core + X11
+suites green under -j2.
 
 ## Round 47 (2026-11-08) — field evidence lands, no code change; bug-rate: 0 new library bugs
 

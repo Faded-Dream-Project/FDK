@@ -32,12 +32,19 @@ static void send_or_free(fdk_dbus_connection *bus, fdk_dbus_message *m) {
 }
 
 #include "core/alloc_internal.h"
+#include "core/context_internal.h" /* ctx->ops / ctx->conn (the XEmbed
+                                    * systray fallback) */
 
 #include <stdlib.h>
 #include <string.h>
 
 #define MAX_PIXMAP_DIM 512
 #define MAX_LABEL_BYTES 4096
+
+/* The XEmbed fallback (round 48) — defined below the registration
+ * section; watcher_event and the setters call it. */
+static void xembed_try(fdk_tray_item *it);
+static void xembed_leave(fdk_tray_item *it);
 
 char *fdk__tray_strdup(const char *s) {
     if (s == NULL) {
@@ -822,7 +829,9 @@ static void watcher_event(fdk_dbus_connection *bus, const char *name,
     const char *watcher = watcher_with_owner(it);
 
     if (watcher == NULL) {
-        /* No watcher anywhere: unhosted (once). */
+        /* No watcher anywhere: unhosted (once), then try the classic
+         * X11 fallback (1.0.0-rc1, round 48) — the reason the tray
+         * works on ANY X11 bar, not just SNI hosts. */
         if (it->hosted || it->registered_to != NULL) {
             it->hosted = 0;
             it->registered_to = NULL;
@@ -831,7 +840,16 @@ static void watcher_event(fdk_dbus_connection *bus, const char *name,
                 it->cb.on_host(it, 0, it->cb_user);
             }
         }
+        xembed_try(it);
         return;
+    }
+    if (it->xembed_active) {
+        /* A watcher appeared while we sat in a classic bar: SNI
+         * wins (the richer protocol — menus, tooltips, attention
+         * states). Leave the XEmbed window and register. */
+        FDK_INFO("tray: a StatusNotifierWatcher appeared — leaving the "
+                 "XEmbed systray for SNI");
+        xembed_leave(it);
     }
     if (it->hosted) {
         /* Still hosted by SOME watcher: nothing to do until that
@@ -844,6 +862,74 @@ static void watcher_event(fdk_dbus_connection *bus, const char *name,
     }
     FDK_INFO("tray: a watcher is on the bus (%s) — registering", watcher);
     register_with(it, watcher);
+}
+
+/* ---- the XEmbed fallback (1.0.0-rc1, round 48) --------------------------------- */
+
+/* The platform systray ops' dock callback: the tray confirmed the
+ * embed (1) or its manager went away (0). */
+static void xembed_event(void *user, int docked) {
+    fdk_tray_item *it = user;
+    if (it == NULL || it->tearing_down) {
+        return;
+    }
+    it->hosted = docked;
+    FDK_INFO("tray: the XEmbed systray %s",
+             docked ? "took the icon" : "went away — unhosted");
+    if (it->cb.on_host != NULL) {
+        it->cb.on_host(it, docked, it->cb_user);
+    }
+}
+
+/* Dock into a classic X11 bar's systray when no StatusNotifierWatcher
+ * is on the bus. Idempotent; a no-op on backends without the protocol
+ * (Wayland's ops->systray is NULL) and until the item has pixmap
+ * pixels to draw — an XEmbed icon is a WINDOW the bar embeds, so it
+ * needs real pixels; an icon NAME alone is only a theme lookup an SNI
+ * host could do. Set pixels and the next event retries. */
+static void xembed_try(fdk_tray_item *it) {
+    const fdk__platform_systray_ops *ops =
+        it->ctx != NULL && it->ctx->ops != NULL ? it->ctx->ops->systray
+                                                : NULL;
+    if (ops == NULL || it->xembed_active || it->tearing_down) {
+        return;
+    }
+    if (it->icon_px.bytes == NULL) {
+        FDK_INFO("tray: no StatusNotifierWatcher and no XEmbed pixels "
+                 "yet — call fdk_tray_item_set_icon_pixmap() and the "
+                 "fallback docks into any classic X11 bar");
+        return;
+    }
+    void *handle = NULL;
+    fdk_result r = ops->open(it->ctx->conn, it->icon_px.bytes,
+                             it->icon_px.w, it->icon_px.h, it, xembed_event,
+                             &handle);
+    if (fdk_ok(r) && handle != NULL) {
+        it->xembed = handle;
+        it->xembed_active = 1;
+        FDK_INFO("tray: dock request sent to the classic X11 systray "
+                 "(System Tray v0.2)");
+    }
+}
+
+/* Leave the XEmbed systray (a watcher appeared, or the item closes).
+ * The handle is detached first: pending dock/loss events for it are
+ * dropped by the dispatcher. */
+static void xembed_leave(fdk_tray_item *it) {
+    void *handle = it->xembed;
+    it->xembed_active = 0;
+    it->xembed = NULL;
+    if (handle == NULL || it->ctx == NULL || it->ctx->ops == NULL ||
+        it->ctx->ops->systray == NULL) {
+        return;
+    }
+    it->ctx->ops->systray->close(handle);
+    if (it->hosted) {
+        it->hosted = 0;
+        if (it->cb.on_host != NULL) {
+            it->cb.on_host(it, 0, it->cb_user);
+        }
+    }
 }
 
 /* ---- public ----------------------------------------------------------------------- */
@@ -889,6 +975,7 @@ void fdk_tray_item_close(fdk_tray_item *item) {
         return;
     }
     item->tearing_down = 1;
+    xembed_leave(item); /* destroy the embedded icon window, if any */
     if (item->menu != NULL) {
         item->menu->item = NULL;
         item->menu = NULL;
@@ -997,6 +1084,23 @@ void fdk_tray_item_set_icon_pixmap(fdk_tray_item *item, int32_t width,
         return;
     }
     set_pixmap(item, width, height, argb_be, len, 0);
+    /* The XEmbed fallback (round 48): with pixels now in hand, a
+     * docked icon repaints and an unhosted one (no SNI watcher,
+     * classic bar) docks. */
+    if (item->xembed_active) {
+        const fdk__platform_systray_ops *ops =
+            item->ctx != NULL && item->ctx->ops != NULL
+                ? item->ctx->ops->systray
+                : NULL;
+        if (ops != NULL && item->xembed != NULL) {
+            ops->set_icon(item->xembed, item->icon_px.bytes,
+                          item->icon_px.w, item->icon_px.h);
+        }
+        return;
+    }
+    if (!item->hosted) {
+        xembed_try(item);
+    }
 }
 
 void fdk_tray_item_set_attention_icon_name(fdk_tray_item *item,

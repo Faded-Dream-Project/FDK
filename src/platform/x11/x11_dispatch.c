@@ -271,6 +271,18 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
+        /* The XEmbed systray fallback (1.0.0-rc1, round 48): dock
+         * confirmations and repaints on the icon window, the tray
+         * manager's death, and a restarted bar's MANAGER announcement
+         * — all routed BEFORE the window-table lookup (the icon
+         * window is deliberately not a registered window, like the
+         * clipboard helper). Consumes events for the systray's own
+         * windows; root MANAGER announcements pass through (the
+         * handler only re-docks and reports). */
+        if (fdk__x11_systray_handle(conn, &xevent)) {
+            continue;
+        }
+
         if (xevent.type == PropertyNotify &&
             xevent.xproperty.window == conn->root &&
             xevent.xproperty.atom == conn->net_current_desktop) {
