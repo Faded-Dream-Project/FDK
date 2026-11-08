@@ -5,7 +5,7 @@ build ANY desktop application with FDK and not feel the toolkit's
 limits — the API surface GTK4 and Qt6 Widgets cover, FDK covers
 too, and where a category is deliberately thinner the reason is
 stated here, not hidden. This audit enumerates what FDK ships
-(797 exported symbols, 36 widget classes, both backends), compares
+(1,032 exported symbols, 38 widget classes, both backends), compares
 it category by category against GTK4 and Qt6 Widgets, and lists
 the gaps with a priority verdict. It was produced by reading
 FDK's headers and sources directly — every "have" claim below is a
@@ -56,7 +56,7 @@ difference every other "different shape" verdict traces back to.
 
 ## 3. Widgets
 
-36 classes: button (4 roles: normal/suggested/destructive/link),
+38 classes: button (4 roles: normal/suggested/destructive/link),
 toggle, checkbox, radio, menu + menu bar + menu button (4 arrow
 variants, check/radio/separator items), entry (+search entry, 7
 built-in icon slots), textview, label (wrap/nowrap/ellipsize),
@@ -70,7 +70,19 @@ tree, iconview, calendar, date picker, time picker, combo, canvas.
 (deliberate policy: OUT), `GtkActionBar` (toolbar + custom
 containers cover the layout), `GtkFixed` (FDK containers position
 explicitly — same role), `GtkScaleButton`, `GtkVolumeButton`,
-`GtkRecentChooser`, `GtkAppChooserWidget`. The chooser pair is
+`GtkAppChooserWidget` (the app decides what "open" means through
+`fdk_desktop_open_uri`), `GtkFontButton`/`GtkFontDialogButton`
+(the chooser dialog + widget cover the role; no swatch-style
+button), `GtkVideo`/`GtkMediaControls` (no media stack), and
+`GtkEmojiChooser` (emoji rides the IME). Two upstream facts the
+2026-11-08 LIVE sweep pinned (scripts/parity_check.py against
+docs.gtk.org): GTK4 has REMOVED `GtkToolbar`, `GtkInputDialog`,
+and the whole RecentChooser family — FDK's own toolbar and
+shortcut registry cover the roles those classes once played;
+and the 4.8–4.22 additions (`GtkInscription`, `GtkDropDown`,
+`GtkColorDialogButton`, `GtkFontDialogButton`, `GtkSvgWidget`)
+all map to shipped FDK APIs (label/combo/color+font
+choosers/picture). The chooser pair is
 CLOSED (this round): `fdk_color_chooser_widget` and
 `fdk_font_chooser_widget` are the inline widget forms of the
 `fdk_dialog_choose_color/font` dialogs, built on the same
@@ -321,6 +333,24 @@ compositor in the sandbox). See its own README and
 fdk-shell-overlay/packaging for the full inventory.
 
 ---
+
+## Machine-verified parity (round 41)
+
+`scripts/parity_check.py` fetches the LIVE catalogs — GTK4's
+gi-docgen index (docs.gtk.org/gtk4/index.json) and Qt6's official
+widget-class list (doc.qt.io/qt-6/widget-classes.html) — and checks
+every live class against the mapping encoded in the tool: a real FDK
+symbol (verified in include/fdk/*.h at run time — a symbol the
+headers no longer declare is an ERROR), a stated different-shape
+verdict, an acknowledged PARTIAL/missing with its reason, or a
+policy-OUT. Drift reports both ways: a live class nothing answers,
+and a mapped class upstream no longer lists. Run it on any network:
+
+    python3 scripts/parity_check.py --fetch --strict
+
+The latest sweep: `docs/parity-sweep-2026-11-08.md` — 272 GTK4
+classes (97 widgets + 175 non-widget) and 153 Qt6 classes, every one
+classified; 0 rot, 0 stale, 0 unclassified.
 
 ## Sources (the §23 round's research — fetched, not remembered)
 

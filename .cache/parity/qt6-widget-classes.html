@@ -1,0 +1,514 @@
+
+  <html lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta content="The primary elements for designing user interfaces in Qt." name="description"/>
+  <title>Widgets Classes | Qt Widgets | Qt 6.12.0</title>
+  <link rel="stylesheet" type="text/css" href="/style/online2.css" />
+  <link rel="stylesheet" href="https://www.qt.io/hubfs/qt-design-system/qt-design-system-1.1.0.css" />
+  <link rel="stylesheet" type="text/css" href="/style/font-awesome.min.css" />
+<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/jstree/3.3.17/themes/default/style.min.css" />
+<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/jstree/3.3.17/themes/default-dark/style.min.css" />
+  <link href="images/htmltabs.css" rel="stylesheet" type="text/css"/>
+  <link rel="shortcut icon" href="//d33sqmjvzgs8hq.cloudfront.net/wp-content/themes/oneqt/assets/images/favicon.ico.gzip" />
+  <link rel="icon" type="image/png" href="//d33sqmjvzgs8hq.cloudfront.net/wp-content/themes/oneqt/assets/images/favicon-32x32.png" />
+  <link rel="icon" type="image/png" href="//d33sqmjvzgs8hq.cloudfront.net/wp-content/themes/oneqt/assets/images/favicon-16x16.png" />
+  <script type="text/javascript" src="//d33sqmjvzgs8hq.cloudfront.net/wp-includes/js/jquery/jquery.js.gzip"></script>
+  <script type="text/javascript" src="//d33sqmjvzgs8hq.cloudfront.net/wp-includes/js/jquery/jquery-migrate.min.js.gzip"></script>
+  <script type="text/javascript" src="//d33sqmjvzgs8hq.cloudfront.net/wp-content/themes/oneqt/js/combo.js.gzip"></script>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/jstree/3.3.17/jstree.min.js"></script>
+  <script type="text/javascript" src="/scripts/popper.min.js"></script>
+  <script type="text/javascript" src="/scripts/tippy.min.js"></script>
+  <script type="text/javascript" src="/scripts/qtds-extras.js"></script>
+  <script type="text/javascript"> wpThemeFolder = 'https://qt.io/wp-content/themes/oneqt'; </script>
+  <script type="text/javascript">
+ $(document).ready(function(){
+   $("input[type=radio]").on("click", function() {
+   var lbl = $(this).next().text();
+   $("input[type=radio]:not(checked)").filter(function() {
+     if ($(this).next().text() == lbl)
+         $(this).prop("checked", true);
+   });
+   });
+ });
+  </script>
+  <script type="text/javascript">
+    $(function () {
+      if (document.documentElement.getAttribute('data-theme') === 'dark')
+        $('input#th-toggle').prop('checked', true);
+      $('input#th-toggle').change(function() {
+        var theme = this.checked ? 'dark' : 'light';
+        localStorage.setItem('theme', theme);
+        document.documentElement.setAttribute('data-theme', theme);
+        $('#sidebar-toctree').jstree(true).set_theme('default' + `${theme === 'dark' ? '-dark' : ''}`);
+      });
+    });
+  </script>
+  <script type="text/javascript" src="/scripts/init-tree.js"></script>
+  <!-- Google Tag Manager -->
+    <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+    new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+    j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+    'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+    })(window,document,'script','dataLayer','GTM-5QQXBTC');</script>
+  <!-- End Google Tag Manager -->
+  <script type="text/javascript" src="/scripts/qt-design-system-1.1.0-doc.js"></script>
+</head>
+<body class="qt-design-system" style="background:var(--content-bg-color)" >
+<div class="qds-page-header" id="qds-page-header">
+<header class="b-header" data-float="true">
+    <div class="b-header__container">
+
+        <div class="b-header__secondary-level">
+            <div class="b-header__secondary-level__back">
+                <a class="c-link c-link--left" href="https://www.qt.io/">Back to Qt.io</a>
+            </div>
+            <div class="b-header__secondary-level__right">
+                <a href="https://www.qt.io/contact-us/" target="_blank">Contact Us</a>
+                <a href="https://blog.qt.io/" target="_blank">Blog</a>
+                <a href="https://www.qt.io/download/" target="_blank" class="c-button c-button--small">Download Q&#116;</a>
+            </div>
+        </div>
+
+        <div class="b-header__primary-level">
+            <div class="b-header__primary-level__left">
+                <a class="b-header__logo" href="/">
+                    <img src="/style/qt-logo-documentation.png" srcset="/style/qt-logo-documentation.png 1x, /style/qt-logo-documentation-2x.png 2x" alt="Qt documentation">
+                </a>
+            </div>
+            <div class="b-header__primary-level__navigation">
+            <ul class="c-navigation-header">
+                <li id="qds-trans" role="menu" class="has-children" style="display: none; margin: 0 20px 5px 0;top:7px">
+                <div class="lang-icon theme-icon"><a></a></div>
+                    <ul id="qds-trans-ul">
+                        <li class="tr-lang active" data-lang="en"><a>English</a></li>
+                    </ul>
+                </li>
+                <li role="menu" style="margin: 0 5px 5px 0;top:7px">
+                  <div title="Toggle light/dark theme" class="theme-switch-wrapper">
+                    <label class="theme-switch" for="th-toggle">
+                        <input type="checkbox" id="th-toggle" />
+                        <div class="theme-icon"></div>
+                    </label>
+                  </div>
+                </li>
+                <li role="menu">
+                    <a href="https://www.qt.io/academy" aria-haspopup="true" aria-expanded="false">Qt Academy</a>
+                </li>
+                <li role="menu">
+                    <a href="/archives" aria-haspopup="true" aria-expanded="false">Archives</a>
+                </li>
+                <li role="menu">
+                    <a href="https://doc-snapshots.qt.io/" aria-haspopup="true" aria-expanded="false">Snapshots</a>
+                </li>
+            </ul>
+            </div>
+            <div class="b-header__primary-level__hamburger">
+                <div class="c-hamburger"></div>
+            </div>
+        </div>
+    </div>
+</header>
+</div>
+<div data-global-resource-path="qt-design-system/components/b-sidebar.html">
+    <div class="b-sidebar b-sidebar--full-width">
+        <aside class="b-sidebar__sidebar">
+            <div id="qds-sbhandle"></div>
+            <div class="b-sidebar__sidebar__mobile-close"><div class="c-mobile-close"></div></div>
+            <div class="b-sidebar__sidebar__mobile-toggle" data-mobile-title="Topics"></div>
+                        <div class="b-sidebar__sidebar__content">
+                <div data-margin-bottom="sm">
+                                        <select id="qds-vdropdown" class="c-form-select c-form-select--dark js-versioncontrol" style="visibility:hidden">
+                                            </select>
+                                    </div>
+                                <div id="qds-filter-container" data-margin-bottom="sm" style="display:none">
+                    <label for="qds-filter-sl">Filter topics</label>
+                    <select id="qds-filter-sl" class="c-form-select c-form-select--dark"></select>
+                    <div id="qds-filter-note" style="display:none">Topic not in active filter<button type="button" id="qds-filter-clear">Clear</button></div>
+                </div>
+                                <div id="qds-ec-toggle" title="Expand/collapse all"></div>
+                <nav>
+                    <div id="sidebar-toctree"></div>
+                    <ul class="c-sidebar-navigation">
+                                                
+                    </ul>
+                </nav>
+            </div>
+        </aside>
+        <div class="b-sidebar__content">
+            <div class="b-sidebar__topbar" data-margin-bottom="sm">
+                <div class="b-topbar">
+                    <div class="b-topbar__search">
+                        <form id="site-search" role="search" style="width: 535px; max-width: 100%" autocomplete="off">
+                            <input accesskey="f" class="c-form-input-field c-form-input-field--search" placeholder="Search" id="search" name="search" onclick="(function(w,d,i){i.removeAttribute('on'+w.event.type);var j=d.createElement('script'),c=d.createElement('link');j.async=true;j.onload=function(){qtSearchInit(i,w.qtSearchNavigation)};j.src='//www.qt.io/hubfs/qt-design-system/qt-search-component-v2/qt-search-component-v2.js';c.rel='stylesheet';c.onload=function(){try{w.qtscs=1;qtSearchStyle(i)}catch(e){}};c.href='//www.qt.io/hubfs/qt-design-system/qt-search-component-v2/qt-search-component-v2.css';d.head.appendChild(c);d.head.appendChild(j)})(window,document,this)" required type="text">
+                            <button type="submit" style="display:none;">Search</button>
+                            <style>.js-qt-search-component{z-index:1000;}</style>
+                        </form>
+                    </div>                    <div class="b-topbar__breadcrump" translate="no">
+                        <ul class="c-breadcrump">
+                            <li><a href="index.html">Qt 6.12</a></li>
+                            <li><a href="qtwidgets-index.html">Qt Widgets</a></li>
+                            <li><a>Widgets Classes</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="b-sidebar__content__wrapper">
+                <article class="b-sidebar__content__left">
+                    <div id="qds-toc-menu">On this page</div>
+                    <div class="context mainContent" style="margin: 0;padding: 0; background: 0;">
+                    
+<link href="gallery.html" rel="next"/>
+<p class="naviNextPrevious headerNavi">
+<a class="" href="gallery.html">Widget Gallery</a>
+</p>
+
+<div class="context">
+<h1 class="title">Widgets Classes</h1>
+<!-- $$$widget-classes.html-description -->
+<div class="descr" id="details">
+<h2 id="the-widget-classes">The Widget Classes<a class="plink" href="#the-widget-classes" title="Direct link to this headline"></a></h2>
+<p>The following sections list the widget classes. See the <a href="gallery.html">Qt Widget Gallery</a> for some examples.</p>
+<h3 id="basic-widget-classes">Basic Widget Classes<a class="plink" href="#basic-widget-classes" title="Direct link to this headline"></a></h3>
+<p>These basic widgets (controls), e.g. buttons, comboboxes and scroll bars, are designed for direct use.</p>
+<div class="table"><table class="generic">
+<tr class="odd" valign="top"><td><p class="centerAlign"><img alt="Label" src="images/fusion-label.png"/></p></td><td><p class="centerAlign"><img alt="Cancel button" src="images/windowsvista-pushbutton.png"/></p></td><td><p class="centerAlign"><img alt="Progress bar" src="images/macos-progressbar.png"/></p></td></tr>
+<tr class="even" valign="top"><td><p class="centerAlign"><img alt="Combo box" src="images/fusion-combobox.png"/></p></td><td><p class="centerAlign"><img alt="Radio box" src="images/windowsvista-radiobutton.png"/></p></td><td><p class="centerAlign"><img alt="Line edit" src="images/macos-lineedit.png"/></p></td></tr>
+</table></div>
+<div class="table"><table class="annotated">
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qcheckbox.html">QCheckBox</a></p></td><td class="tblDescr"><p>Checkbox with a text label</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qcombobox.html">QComboBox</a></p></td><td class="tblDescr"><p>Combines a button with a dropdown list</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qcommandlinkbutton.html">QCommandLinkButton</a></p></td><td class="tblDescr"><p>Vista style command link button</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qdateedit.html">QDateEdit</a></p></td><td class="tblDescr"><p>Widget for editing dates based on the QDateTimeEdit widget</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qdatetimeedit.html">QDateTimeEdit</a></p></td><td class="tblDescr"><p>Widget for editing dates and times</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qdial.html">QDial</a></p></td><td class="tblDescr"><p>Rounded range control (like a speedometer or potentiometer)</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qdoublespinbox.html">QDoubleSpinBox</a></p></td><td class="tblDescr"><p>Spin box widget that takes doubles</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qfocusframe.html">QFocusFrame</a></p></td><td class="tblDescr"><p>Focus frame which can be outside of a widget's normal paintable area</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qfontcombobox.html">QFontComboBox</a></p></td><td class="tblDescr"><p>Combobox that lets the user select a font family</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qlcdnumber.html">QLCDNumber</a></p></td><td class="tblDescr"><p>Displays a number with LCD-like digits</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qlabel.html">QLabel</a></p></td><td class="tblDescr"><p>Text or image display</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qlineedit.html">QLineEdit</a></p></td><td class="tblDescr"><p>One-line text editor</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qmenu.html">QMenu</a></p></td><td class="tblDescr"><p>Menu widget for use in menu bars, context menus, and other popup menus</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qprogressbar.html">QProgressBar</a></p></td><td class="tblDescr"><p>Horizontal or vertical progress bar</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qpushbutton.html">QPushButton</a></p></td><td class="tblDescr"><p>Command button</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qradiobutton.html">QRadioButton</a></p></td><td class="tblDescr"><p>Radio button with a text label</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qscrollarea.html">QScrollArea</a></p></td><td class="tblDescr"><p>Scrolling view onto another widget</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qscrollbar.html">QScrollBar</a></p></td><td class="tblDescr"><p>Vertical or horizontal scroll bar</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qsizegrip.html">QSizeGrip</a></p></td><td class="tblDescr"><p>Resize handle for resizing top-level windows</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qslider.html">QSlider</a></p></td><td class="tblDescr"><p>Vertical or horizontal slider</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qspinbox.html">QSpinBox</a></p></td><td class="tblDescr"><p>Spin box widget</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qtabbar.html">QTabBar</a></p></td><td class="tblDescr"><p>Tab bar, e.g. for use in tabbed dialogs</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qtabwidget.html">QTabWidget</a></p></td><td class="tblDescr"><p>Stack of tabbed widgets</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qtimeedit.html">QTimeEdit</a></p></td><td class="tblDescr"><p>Widget for editing times based on the QDateTimeEdit widget</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qtoolbox.html">QToolBox</a></p></td><td class="tblDescr"><p>Column of tabbed widget items</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qtoolbutton.html">QToolButton</a></p></td><td class="tblDescr"><p>Quick-access button to commands or options, usually used inside a QToolBar</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qwidget.html">QWidget</a></p></td><td class="tblDescr"><p>The base class of all user interface objects</p></td></tr>
+</table></div>
+<h3 id="advanced-widget-classes">Advanced Widget Classes<a class="plink" href="#advanced-widget-classes" title="Direct link to this headline"></a></h3>
+<p>Advanced GUI widgets, e.g. tab widgets and progress bars, provide more complex user interface controls.</p>
+<div class="table"><table class="generic">
+<tr class="odd" valign="top"><td><p class="centerAlign"><img alt="Directory widget showing the contents using a tree view" src="images/fusion-treeview.png"/></p></td><td><p class="centerAlign"><img alt="Calendar widget showing the month, year, and a selected day" src="images/fusion-calendarwidget.png"/></p></td><td><p class="centerAlign"><img alt="Undo stack showing list of commands" src="images/qundoview.png"/></p></td></tr>
+</table></div>
+<div class="table"><table class="annotated">
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qcalendarwidget.html">QCalendarWidget</a></p></td><td class="tblDescr"><p>Monthly based calendar widget allowing the user to select a date</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qcolumnview.html">QColumnView</a></p></td><td class="tblDescr"><p>Model/view implementation of a column view</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qdatawidgetmapper.html">QDataWidgetMapper</a></p></td><td class="tblDescr"><p>Mapping between a section of a data model to widgets</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qlistview.html">QListView</a></p></td><td class="tblDescr"><p>List or icon view onto a model</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qtableview.html">QTableView</a></p></td><td class="tblDescr"><p>Default model/view implementation of a table view</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qtreeview.html">QTreeView</a></p></td><td class="tblDescr"><p>Default model/view implementation of a tree view</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qundoview.html">QUndoView</a></p></td><td class="tblDescr"><p>Displays the contents of a QUndoStack</p></td></tr>
+</table></div>
+<h3 id="abstract-widget-classes">Abstract Widget Classes<a class="plink" href="#abstract-widget-classes" title="Direct link to this headline"></a></h3>
+<p>The abstract widget classes are base classes. They are not usable as standalone classes but provide functionality when they are subclassed.</p>
+<div class="table"><table class="annotated">
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qabstractbutton.html">QAbstractButton</a></p></td><td class="tblDescr"><p>The abstract base class of button widgets, providing functionality common to buttons</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qabstractscrollarea.html">QAbstractScrollArea</a></p></td><td class="tblDescr"><p>Scrolling area with on-demand scroll bars</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qabstractslider.html">QAbstractSlider</a></p></td><td class="tblDescr"><p>Integer value within a range</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qabstractspinbox.html">QAbstractSpinBox</a></p></td><td class="tblDescr"><p>Spinbox and a line edit to display values</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qdialog.html">QDialog</a></p></td><td class="tblDescr"><p>The base class of dialog windows</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qframe.html">QFrame</a></p></td><td class="tblDescr"><p>The base class of widgets that can have a frame</p></td></tr>
+</table></div>
+<h3 id="organizer-widget-classes">Organizer Widget Classes<a class="plink" href="#organizer-widget-classes" title="Direct link to this headline"></a></h3>
+<p>Classes like splitters, tab bars, button groups, etc are used for organizing and grouping GUI primitives into more complex applications and dialogs.</p>
+<div class="table"><table class="annotated">
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qbuttongroup.html">QButtonGroup</a></p></td><td class="tblDescr"><p>Container to organize groups of button widgets</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgroupbox.html">QGroupBox</a></p></td><td class="tblDescr"><p>Group box frame with a title</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qsplitter.html">QSplitter</a></p></td><td class="tblDescr"><p>Implements a splitter widget</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qsplitterhandle.html">QSplitterHandle</a></p></td><td class="tblDescr"><p>Handle functionality for the splitter</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qstackedwidget.html">QStackedWidget</a></p></td><td class="tblDescr"><p>Stack of widgets where only one widget is visible at a time</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qtabwidget.html">QTabWidget</a></p></td><td class="tblDescr"><p>Stack of tabbed widgets</p></td></tr>
+</table></div>
+<h3 id="graphics-view-classes">Graphics View Classes<a class="plink" href="#graphics-view-classes" title="Direct link to this headline"></a></h3>
+<div class="table"><table class="annotated">
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qabstractgraphicsshapeitem.html">QAbstractGraphicsShapeItem</a></p></td><td class="tblDescr"><p>Common base for all path items</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsanchor.html">QGraphicsAnchor</a></p></td><td class="tblDescr"><p>Represents an anchor between two items in a QGraphicsAnchorLayout</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsanchorlayout.html">QGraphicsAnchorLayout</a></p></td><td class="tblDescr"><p>Layout where one can anchor widgets together in Graphics View</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicseffect.html">QGraphicsEffect</a></p></td><td class="tblDescr"><p>The base class for all graphics effects</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsellipseitem.html">QGraphicsEllipseItem</a></p></td><td class="tblDescr"><p>Ellipse item that you can add to a QGraphicsScene</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsgridlayout.html">QGraphicsGridLayout</a></p></td><td class="tblDescr"><p>Grid layout for managing widgets in Graphics View</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsitem.html">QGraphicsItem</a></p></td><td class="tblDescr"><p>The base class for all graphical items in a QGraphicsScene</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsitemgroup.html">QGraphicsItemGroup</a></p></td><td class="tblDescr"><p>Container that treats a group of items as a single item</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicslayout.html">QGraphicsLayout</a></p></td><td class="tblDescr"><p>The base class for all layouts in Graphics View</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicslayoutitem.html">QGraphicsLayoutItem</a></p></td><td class="tblDescr"><p>Can be inherited to allow your custom items to be managed by layouts</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicslineitem.html">QGraphicsLineItem</a></p></td><td class="tblDescr"><p>Line item that you can add to a QGraphicsScene</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicslinearlayout.html">QGraphicsLinearLayout</a></p></td><td class="tblDescr"><p>Horizontal or vertical layout for managing widgets in Graphics View</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsobject.html">QGraphicsObject</a></p></td><td class="tblDescr"><p>Base class for all graphics items that require signals, slots and properties</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicspathitem.html">QGraphicsPathItem</a></p></td><td class="tblDescr"><p>Path item that you can add to a QGraphicsScene</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicspixmapitem.html">QGraphicsPixmapItem</a></p></td><td class="tblDescr"><p>Pixmap item that you can add to a QGraphicsScene</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicspolygonitem.html">QGraphicsPolygonItem</a></p></td><td class="tblDescr"><p>Polygon item that you can add to a QGraphicsScene</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsproxywidget.html">QGraphicsProxyWidget</a></p></td><td class="tblDescr"><p>Proxy layer for embedding a QWidget in a QGraphicsScene</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsrectitem.html">QGraphicsRectItem</a></p></td><td class="tblDescr"><p>Rectangle item that you can add to a QGraphicsScene</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsscene.html">QGraphicsScene</a></p></td><td class="tblDescr"><p>Surface for managing a large number of 2D graphical items</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsscenecontextmenuevent.html">QGraphicsSceneContextMenuEvent</a></p></td><td class="tblDescr"><p>Context menu events in the graphics view framework</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsscenedragdropevent.html">QGraphicsSceneDragDropEvent</a></p></td><td class="tblDescr"><p>Events for drag and drop in the graphics view framework</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicssceneevent.html">QGraphicsSceneEvent</a></p></td><td class="tblDescr"><p>Base class for all graphics view related events</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsscenehelpevent.html">QGraphicsSceneHelpEvent</a></p></td><td class="tblDescr"><p>Events when a tooltip is requested</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsscenehoverevent.html">QGraphicsSceneHoverEvent</a></p></td><td class="tblDescr"><p>Hover events in the graphics view framework</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsscenemouseevent.html">QGraphicsSceneMouseEvent</a></p></td><td class="tblDescr"><p>Mouse events in the graphics view framework</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsscenemoveevent.html">QGraphicsSceneMoveEvent</a></p></td><td class="tblDescr"><p>Events for widget moving in the graphics view framework</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicssceneresizeevent.html">QGraphicsSceneResizeEvent</a></p></td><td class="tblDescr"><p>Events for widget resizing in the graphics view framework</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsscenewheelevent.html">QGraphicsSceneWheelEvent</a></p></td><td class="tblDescr"><p>Wheel events in the graphics view framework</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicssimpletextitem.html">QGraphicsSimpleTextItem</a></p></td><td class="tblDescr"><p>Simple text item that you can add to a QGraphicsScene</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicssvgitem.html">QGraphicsSvgItem</a></p></td><td class="tblDescr"><p>QGraphicsItem that can be used to render the contents of SVG files</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicstextitem.html">QGraphicsTextItem</a></p></td><td class="tblDescr"><p>Text item that you can add to a QGraphicsScene to display formatted text</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicstransform.html">QGraphicsTransform</a></p></td><td class="tblDescr"><p>Abstract base class for building advanced transformations on QGraphicsItems</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsview.html">QGraphicsView</a></p></td><td class="tblDescr"><p>Widget for displaying the contents of a QGraphicsScene</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicswidget.html">QGraphicsWidget</a></p></td><td class="tblDescr"><p>The base class for all widget items in a QGraphicsScene</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qstyleoptiongraphicsitem.html">QStyleOptionGraphicsItem</a></p></td><td class="tblDescr"><p>Used to describe the parameters needed to draw a QGraphicsItem</p></td></tr>
+</table></div>
+<h3 id="model-view-classes">Model/View Classes<a class="plink" href="#model-view-classes" title="Direct link to this headline"></a></h3>
+<div class="table"><table class="annotated">
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qabstractitemdelegate.html">QAbstractItemDelegate</a></p></td><td class="tblDescr"><p>Used to display and edit data items from a model</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qabstractitemmodel.html">QAbstractItemModel</a></p></td><td class="tblDescr"><p>The abstract interface for item model classes</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qabstractitemview.html">QAbstractItemView</a></p></td><td class="tblDescr"><p>The basic functionality for item view classes</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qabstractlistmodel.html">QAbstractListModel</a></p></td><td class="tblDescr"><p>Abstract model that can be subclassed to create one-dimensional list models</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qabstractproxymodel.html">QAbstractProxyModel</a></p></td><td class="tblDescr"><p>Base class for proxy item models that can do sorting, filtering or other data processing tasks</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qabstracttablemodel.html">QAbstractTableModel</a></p></td><td class="tblDescr"><p>Abstract model that can be subclassed to create table models</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qcolumnview.html">QColumnView</a></p></td><td class="tblDescr"><p>Model/view implementation of a column view</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qconcatenatetablesproxymodel.html">QConcatenateTablesProxyModel</a></p></td><td class="tblDescr"><p>Proxies multiple source models, concatenating their rows</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qdatawidgetmapper.html">QDataWidgetMapper</a></p></td><td class="tblDescr"><p>Mapping between a section of a data model to widgets</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qfilesystemmodel.html">QFileSystemModel</a></p></td><td class="tblDescr"><p>Data model for the local filesystem</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qheaderview.html">QHeaderView</a></p></td><td class="tblDescr"><p>Header row or header column for item views</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qidentityproxymodel.html">QIdentityProxyModel</a></p></td><td class="tblDescr"><p>Proxies its source model unmodified</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qitemdelegate.html">QItemDelegate</a></p></td><td class="tblDescr"><p>Display and editing facilities for data items from a model</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qitemeditorcreator.html">QItemEditorCreator</a></p></td><td class="tblDescr"><p>Makes it possible to create item editor creator bases without subclassing QItemEditorCreatorBase</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qitemeditorcreatorbase.html">QItemEditorCreatorBase</a></p></td><td class="tblDescr"><p>Abstract base class that must be subclassed when implementing new item editor creators</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qitemeditorfactory.html">QItemEditorFactory</a></p></td><td class="tblDescr"><p>Widgets for editing item data in views and delegates</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qitemselection.html">QItemSelection</a></p></td><td class="tblDescr"><p>Manages information about selected items in a model</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qitemselectionmodel.html">QItemSelectionModel</a></p></td><td class="tblDescr"><p>Keeps track of a view's selected items</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qitemselectionrange.html">QItemSelectionRange</a></p></td><td class="tblDescr"><p>Manages information about a range of selected items in a model</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qlistview.html">QListView</a></p></td><td class="tblDescr"><p>List or icon view onto a model</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qlistwidget.html">QListWidget</a></p></td><td class="tblDescr"><p>Item-based list widget</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qlistwidgetitem.html">QListWidgetItem</a></p></td><td class="tblDescr"><p>Item for use with the QListWidget item view class</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qmodelindex.html">QModelIndex</a></p></td><td class="tblDescr"><p>Used to locate data in a data model</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qmodelroledata.html">QModelRoleData</a></p></td><td class="tblDescr"><p>Holds a role and the data associated to that role</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qmodelroledataspan.html">QModelRoleDataSpan</a></p></td><td class="tblDescr"><p>Span over QModelRoleData objects</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qpersistentmodelindex.html">QPersistentModelIndex</a></p></td><td class="tblDescr"><p>Used to locate data in a data model</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qrangemodel.html">QRangeModel</a></p></td><td class="tblDescr"><p>Implements QAbstractItemModel for any C++ range</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qrangemodel-itemaccess.html">QRangeModel::ItemAccess</a></p></td><td class="tblDescr"><p>Template provides a customization point to control how QRangeModel accesses role data of individual items</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qrangemodel-rowoptions.html">QRangeModel::RowOptions</a></p></td><td class="tblDescr"><p>Template provides a customization point to control how QRangeModel represents types used as rows</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qrangemodeladapter.html">QRangeModelAdapter</a></p></td><td class="tblDescr"><p>QAbstractItemModel-compliant access to any C++ range</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qrangemodeladapter-columniterator.html">QRangeModelAdapter::ColumnIterator</a></p></td><td class="tblDescr"><p>Provides an STL-style non-const iterator over the columns in a model row</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qrangemodeladapter-constcolumniterator.html">QRangeModelAdapter::ConstColumnIterator</a></p></td><td class="tblDescr"><p>Provides an STL-style non-const iterator over the columns in a model row</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qrangemodeladapter-constrowiterator.html">QRangeModelAdapter::ConstRowIterator</a></p></td><td class="tblDescr"><p>Provides an STL-style const iterator over the rows of a model</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qrangemodeladapter-constrowreference.html">QRangeModelAdapter::ConstRowReference</a></p></td><td class="tblDescr"><p>Reference wrapper around a const row in a QRangeModel</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qrangemodeladapter-datareference.html">QRangeModelAdapter::DataReference</a></p></td><td class="tblDescr"><p>Reference wrapper around an item in a QRangeModel</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qrangemodeladapter-rowiterator.html">QRangeModelAdapter::RowIterator</a></p></td><td class="tblDescr"><p>Provides an STL-style non-const iterator over the rows of a model</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qrangemodeladapter-rowreference.html">QRangeModelAdapter::RowReference</a></p></td><td class="tblDescr"><p>Reference wrapper around a row in a QRangeModel</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qrangemodeladapter-rowreferencebase.html">QRangeModelAdapter::RowReferenceBase</a></p></td><td class="tblDescr"><p>Common API for RowReference and ConstRowReference</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qsortfilterproxymodel.html">QSortFilterProxyModel</a></p></td><td class="tblDescr"><p>Support for sorting and filtering data passed between another model and a view</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qstandarditem.html">QStandardItem</a></p></td><td class="tblDescr"><p>Item for use with the QStandardItemModel class</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qstandarditemeditorcreator.html">QStandardItemEditorCreator</a></p></td><td class="tblDescr"><p>The possibility to register widgets without having to subclass QItemEditorCreatorBase</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qstandarditemmodel.html">QStandardItemModel</a></p></td><td class="tblDescr"><p>Generic model for storing custom data</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qstringlistmodel.html">QStringListModel</a></p></td><td class="tblDescr"><p>Model that supplies strings to views</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qstyleditemdelegate.html">QStyledItemDelegate</a></p></td><td class="tblDescr"><p>Display and editing facilities for data items from a model</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qtableview.html">QTableView</a></p></td><td class="tblDescr"><p>Default model/view implementation of a table view</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qtablewidget.html">QTableWidget</a></p></td><td class="tblDescr"><p>Item-based table view with a default model</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qtablewidgetitem.html">QTableWidgetItem</a></p></td><td class="tblDescr"><p>Item for use with the QTableWidget class</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qtablewidgetselectionrange.html">QTableWidgetSelectionRange</a></p></td><td class="tblDescr"><p>Way to interact with selection in a model without using model indexes and a selection model</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qtreeview.html">QTreeView</a></p></td><td class="tblDescr"><p>Default model/view implementation of a tree view</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qtreewidget.html">QTreeWidget</a></p></td><td class="tblDescr"><p>Tree view that uses a predefined tree model</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qtreewidgetitem.html">QTreeWidgetItem</a></p></td><td class="tblDescr"><p>Item for use with the QTreeWidget convenience class</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qtreewidgetitemiterator.html">QTreeWidgetItemIterator</a></p></td><td class="tblDescr"><p>Way to iterate over the items in a QTreeWidget instance</p></td></tr>
+</table></div>
+<h3 id="main-window-and-related-classes">Main Window and Related Classes<a class="plink" href="#main-window-and-related-classes" title="Direct link to this headline"></a></h3>
+<div class="table"><table class="annotated">
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qdockwidget.html">QDockWidget</a></p></td><td class="tblDescr"><p>Widget that can be docked inside a QMainWindow or floated as a top-level window on the desktop</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qmainwindow.html">QMainWindow</a></p></td><td class="tblDescr"><p>Main application window</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qmdiarea.html">QMdiArea</a></p></td><td class="tblDescr"><p>Area in which MDI windows are displayed</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qmdisubwindow.html">QMdiSubWindow</a></p></td><td class="tblDescr"><p>Subwindow class for QMdiArea</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qmenu.html">QMenu</a></p></td><td class="tblDescr"><p>Menu widget for use in menu bars, context menus, and other popup menus</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qmenubar.html">QMenuBar</a></p></td><td class="tblDescr"><p>Horizontal menu bar</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qsizegrip.html">QSizeGrip</a></p></td><td class="tblDescr"><p>Resize handle for resizing top-level windows</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qstatusbar.html">QStatusBar</a></p></td><td class="tblDescr"><p>Horizontal bar suitable for presenting status information</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qtoolbar.html">QToolBar</a></p></td><td class="tblDescr"><p>Movable panel that contains a set of controls</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qwidgetaction.html">QWidgetAction</a></p></td><td class="tblDescr"><p>Extends QAction by an interface for inserting custom widgets into action based containers, such as toolbars</p></td></tr>
+</table></div>
+<h3 id="widget-appearance-and-style-related-classes">Widget Appearance and Style-Related Classes<a class="plink" href="#widget-appearance-and-style-related-classes" title="Direct link to this headline"></a></h3>
+<p>Classes used for customizing UI appearance and style.</p>
+<div class="table"><table class="annotated">
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qcolor.html">QColor</a></p></td><td class="tblDescr"><p>Colors based on RGB, HSV or CMYK values</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qcolorspace.html">QColorSpace</a></p></td><td class="tblDescr"><p>Color space abstraction</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qcolortransform.html">QColorTransform</a></p></td><td class="tblDescr"><p>Transformation between color spaces</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qcommonstyle.html">QCommonStyle</a></p></td><td class="tblDescr"><p>Encapsulates the common Look and Feel of a GUI</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qcursor.html">QCursor</a></p></td><td class="tblDescr"><p>Mouse cursor with an arbitrary shape</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qfont.html">QFont</a></p></td><td class="tblDescr"><p>Specifies a query for a font used for drawing text</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qfontdatabase.html">QFontDatabase</a></p></td><td class="tblDescr"><p>Information about the fonts available in the underlying window system</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qfontinfo.html">QFontInfo</a></p></td><td class="tblDescr"><p>General information about fonts</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsanchor.html">QGraphicsAnchor</a></p></td><td class="tblDescr"><p>Represents an anchor between two items in a QGraphicsAnchorLayout</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsanchorlayout.html">QGraphicsAnchorLayout</a></p></td><td class="tblDescr"><p>Layout where one can anchor widgets together in Graphics View</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qpalette.html">QPalette</a></p></td><td class="tblDescr"><p>Contains color groups for each widget state</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qstyle.html">QStyle</a></p></td><td class="tblDescr"><p>Abstract base class that encapsulates the look and feel of a GUI</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qstylefactory.html">QStyleFactory</a></p></td><td class="tblDescr"><p>Creates QStyle objects</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qstylehintreturn.html">QStyleHintReturn</a></p></td><td class="tblDescr"><p>Style hints that return more than basic data types</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qstylehintreturnmask.html">QStyleHintReturnMask</a></p></td><td class="tblDescr"><p>Style hints that return a QRegion</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qstylehintreturnvariant.html">QStyleHintReturnVariant</a></p></td><td class="tblDescr"><p>Style hints that return a QVariant</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qstylekitstyle.html">QStyleKitStyle</a></p></td><td class="tblDescr"><p>Applies a Qt Labs StyleKit style to Qt Widgets</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qstyleoption.html">QStyleOption</a></p></td><td class="tblDescr"><p>Stores the parameters used by QStyle functions</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qstylepainter.html">QStylePainter</a></p></td><td class="tblDescr"><p>Convenience class for drawing QStyle elements inside a widget</p></td></tr>
+</table></div>
+<h3 id="layout-classes">Layout Classes<a class="plink" href="#layout-classes" title="Direct link to this headline"></a></h3>
+<div class="table"><table class="annotated">
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qboxlayout.html">QBoxLayout</a></p></td><td class="tblDescr"><p>Lines up child widgets horizontally or vertically</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qbuttongroup.html">QButtonGroup</a></p></td><td class="tblDescr"><p>Container to organize groups of button widgets</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qformlayout.html">QFormLayout</a></p></td><td class="tblDescr"><p>Manages forms of input widgets and their associated labels</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsanchor.html">QGraphicsAnchor</a></p></td><td class="tblDescr"><p>Represents an anchor between two items in a QGraphicsAnchorLayout</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgraphicsanchorlayout.html">QGraphicsAnchorLayout</a></p></td><td class="tblDescr"><p>Layout where one can anchor widgets together in Graphics View</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qgridlayout.html">QGridLayout</a></p></td><td class="tblDescr"><p>Lays out widgets in a grid</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qgroupbox.html">QGroupBox</a></p></td><td class="tblDescr"><p>Group box frame with a title</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qhboxlayout.html">QHBoxLayout</a></p></td><td class="tblDescr"><p>Lines up widgets horizontally</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qlayout.html">QLayout</a></p></td><td class="tblDescr"><p>The base class of geometry managers</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qlayoutitem.html">QLayoutItem</a></p></td><td class="tblDescr"><p>Abstract item that a QLayout manipulates</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qsizepolicy.html">QSizePolicy</a></p></td><td class="tblDescr"><p>Layout attribute describing horizontal and vertical resizing policy</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qspaceritem.html">QSpacerItem</a></p></td><td class="tblDescr"><p>Blank space in a layout</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qstackedlayout.html">QStackedLayout</a></p></td><td class="tblDescr"><p>Stack of widgets where only one widget is visible at a time</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qstackedwidget.html">QStackedWidget</a></p></td><td class="tblDescr"><p>Stack of widgets where only one widget is visible at a time</p></td></tr>
+<tr class="odd topAlign"><td class="tblName" translate="no"><p><a href="qvboxlayout.html">QVBoxLayout</a></p></td><td class="tblDescr"><p>Lines up widgets vertically</p></td></tr>
+<tr class="even topAlign"><td class="tblName" translate="no"><p><a href="qwidgetitem.html">QWidgetItem</a></p></td><td class="tblDescr"><p>Layout item that represents a widget</p></td></tr>
+</table></div>
+</div>
+<!-- @@@widget-classes.html -->
+<p class="naviNextPrevious footerNavi">
+<a class="nextPage" href="gallery.html">Widget Gallery</a>
+</p>
+</div>
+<p class="copy-notice">
+<abbr title="Copyright">©</abbr> 2026 The Qt Company Ltd.
+   Documentation contributions included herein are the copyrights of
+   their respective owners.     The documentation provided herein is licensed under the terms of the    <a href="http://www.gnu.org/licenses/fdl.html">GNU Free Documentation    License version 1.3</a> as published by the Free Software Foundation.     Qt and respective logos are <a href="https://doc.qt.io/qt/trademarks.html">    trademarks</a> of The Qt Company Ltd. in Finland and/or other countries
+   worldwide. All other trademarks are property of their respective owners. </p>
+
+                    </div>
+                </article>
+                <aside class="b-sidebar__content__right">
+                    <div class="h-wysiwyg-html" data-scheme>
+                                                <h6><strong>Contents</strong></h6>
+                        <nav>
+                            <ul class="c-tableofcontents js-c-tableofcontents" data-tableofcontents-id="wrapperid" data-margin-top="sm">
+<li class="level1"><p><a href="#the-widget-classes">The Widget Classes</a></p></li>
+<li class="level2"><p><a href="#basic-widget-classes">Basic Widget Classes</a></p></li>
+<li class="level2"><p><a href="#advanced-widget-classes">Advanced Widget Classes</a></p></li>
+<li class="level2"><p><a href="#abstract-widget-classes">Abstract Widget Classes</a></p></li>
+<li class="level2"><p><a href="#organizer-widget-classes">Organizer Widget Classes</a></p></li>
+<li class="level2"><p><a href="#graphics-view-classes">Graphics View Classes</a></p></li>
+<li class="level2"><p><a href="#model-view-classes">Model/View Classes</a></p></li>
+<li class="level2"><p><a href="#main-window-and-related-classes">Main Window and Related Classes</a></p></li>
+<li class="level2"><p><a href="#widget-appearance-and-style-related-classes">Widget Appearance and Style-Related Classes</a></p></li>
+<li class="level2"><p><a href="#layout-classes">Layout Classes</a></p></li>
+</ul>
+                        </nav>
+                                            </div>
+                                        <div class="h-wysiwyg-html" data-margin-top="md">
+                                                <h6><strong>Next</strong></h6>
+                        <nav>
+                            <ul class="c-tableofcontents js-c-tableofcontents" data-tableofcontents-id="wrapperid" data-margin-top="sm"><li class="level1"><p><a class="" href="gallery.html">Widget Gallery</a></p></li></ul>
+                        </nav>
+                                            </div>
+                                    </aside>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="footer">
+<div class="l-footer">
+    <div class="l-footer__container">
+        <div class="l-footer__row l-footer__row--no-padding-bottom">
+            <div class="l-footer__column l-footer__company">
+                <div class="l-footer__logo">
+                    <a href="https://www.qt.io/?hsLang=en" class="c-logo-footer">
+                    <img src="/images/qtgroup.svg">
+                    </a>
+                </div>
+                <div class="c-social-media-links">
+                    <a href="https://twitter.com/qtproject" target="_blank" rel="noopener" class="fm_button fm_twitter"><span></span></a>
+                    <a href="https://www.facebook.com/qt/" target="_blank" rel="noopener" class="fm_button fm_facebook"><span></span></a>
+                    <a href="https://www.youtube.com/user/QtStudios" target="_blank" rel="noopener" class="fm_button fm_youtube"><span></span></a>
+                    <a href="https://www.linkedin.com/company/qtgroup/" target="_blank" rel="noopener" class="fm_button fm_linkedin"><span></span></a>
+                </div>
+                <div class="l-footer__contact">
+                        <a class="c-btn " href="https://www.qt.io/contact-us?hsLang=en">Contact Us</a>
+                </div>
+
+            </div>
+            <div class="l-footer__column l-footer__navigation">
+                <div class="c-footer-navigation">
+
+                        <span><div class="hs-menu-wrapper" role="navigation" aria-label="Navigation Menu">
+<ul role="menu">
+  <li class="hs-menu-item hs-menu-depth-1 hs-item-has-children" role="none"><a href="javascript:;" aria-haspopup="true" aria-expanded="false" role="menuitem">Qt Group</a>
+   <ul role="menu" class="hs-menu-children-wrapper">
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/group" role="menuitem">Our Story</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/brand" role="menuitem">Brand</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/newsroom" role="menuitem">News</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/careers" role="menuitem">Careers</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/investors" role="menuitem">Investors</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/product" role="menuitem">Qt Products</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/product/quality-assurance" role="menuitem">Software Quality Products</a></li>
+   </ul></li>
+  <li class="hs-menu-item hs-menu-depth-1 hs-item-has-children" role="none"><a href="javascript:;" aria-haspopup="true" aria-expanded="false" role="menuitem">Licensing</a>
+   <ul role="menu" class="hs-menu-children-wrapper">
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/terms-conditions" role="menuitem">License Agreement</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/licensing/open-source-lgpl-obligations" role="menuitem">Open Source</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/pricing" role="menuitem">Plans and pricing</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/download" role="menuitem">Download</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/faq/overview" role="menuitem">FAQ</a></li>
+   </ul></li>
+  <li class="hs-menu-item hs-menu-depth-1 hs-item-has-children" role="none"><a href="javascript:;" aria-haspopup="true" aria-expanded="false" role="menuitem">Learn Qt</a>
+   <ul role="menu" class="hs-menu-children-wrapper">
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/academy" role="menuitem">For Learners</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/qt-educational-license" role="menuitem">For Students and Teachers</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://doc.qt.io/" role="menuitem" target="_blank" rel="noopener">Qt Documentation</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://forum.qt.io/" role="menuitem" target="_blank" rel="noopener">Qt Forum</a></li>
+   </ul></li>
+  <li class="hs-menu-item hs-menu-depth-1 hs-item-has-children" role="none"><a href="javascript:;" aria-haspopup="true" aria-expanded="false" role="menuitem">Support &amp; Services</a>
+   <ul role="menu" class="hs-menu-children-wrapper">
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/qt-professional-services" role="menuitem">Professional Services</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/customer-success" role="menuitem">Customer Success</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/qt-support/" role="menuitem">Support Services</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/contact-us/partners" role="menuitem">Partners</a></li>
+    <li class="hs-menu-item hs-menu-depth-2" role="none"><a href="https://www.qt.io/qt-world" role="menuitem" target="_blank" rel="noopener">Qt World</a></li>
+   </ul></li>
+ </ul>
+</div></span>
+      </div>
+   </div>
+</div>
+        <div class="l-footer__row">
+            <div class="l-footer__column l-footer__legal">
+                <div class="c-footer-secondary-navigation">
+                    <span><div class="hs-menu-wrapper" role="navigation"  aria-label="Navigation Menu">
+ <ul role="menu">
+  <li class="hs-menu-item hs-menu-depth-1" role="none"><a href="javascript:;" role="menuitem">© 2026 The Qt Company</a></li>
+  <li class="hs-menu-item hs-menu-depth-1" role="none"><a href="mailto:feedback@qt.io?Subject=Feedback%20about%20doc.qt.io%20site">Feedback</a></li>
+ </ul>
+</div></span>
+                    <p class="c-footer-secondary-navigation__group-notice">Qt Group includes The Qt Company Oy and its global subsidiaries and affiliates.</p>
+                </div>
+            </div>
+            <div class="l-footer__column l-footer__some-links">
+            </div>
+        </div>
+    </div>
+</div>
+</div></body></html>
