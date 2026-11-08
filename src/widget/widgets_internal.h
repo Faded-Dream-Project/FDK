@@ -685,6 +685,15 @@ int fdk__recent_touch(const char *xbel, const char *path);
 void fdk__colorbutton_apply_result(fdk_widget *button,
                                    const fdk_color_dialog_result *res);
 
+/* Inline chooser widget test seams (choosers.c, 1.0.0): drive the
+ * USER change paths exactly as the gestures would — the state moves,
+ * the swatch/hex/preview follow, the change callback fires — without
+ * a live pointer. Tests only. */
+void fdk__colorchooser_test_pick(fdk_widget *chooser, fdk_f32 local_x,
+                                 fdk_f32 local_y, bool ring);
+void fdk__fontchooser_test_select(fdk_widget *chooser, size_t row,
+                                  fdk_i32 size);
+
 #endif /* FDK_WIDGETS_INTERNAL_H */
 
 /* ---- IME context queries (1.0.0, M-1) ----------------------------------

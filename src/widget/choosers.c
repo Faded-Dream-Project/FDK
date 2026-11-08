@@ -592,9 +592,19 @@ fail:
 #define FC_MIN_SIZE 6
 #define FC_MAX_SIZE 96
 
-typedef struct fdk_font_chooser {
-    fdk_window *window;
-    fdk_widget *body;
+/* ---- the shared engine ---------------------------------------------------
+ *
+ * The enumeration, the selection state, the size spinner, and the
+ * live preview live in fdk_fc_core; the 1.0.0 dialog and the inline
+ * fdk_font_chooser_widget both embed it by value and every fc_*
+ * helper speaks in the core — one enumeration path, one preview
+ * reload, one selection matcher for both hosts. `owner` is the
+ * arrange container (the dialog's body, the widget itself); the
+ * change callback is the widget form's. `silent` gates the callback
+ * while a programmatic selection is applied (the FDK setter rule:
+ * the callback belongs to user gestures). */
+
+typedef struct fdk_fc_core {
     fdk_font *font;          /* UI font, owned system default  */
     fdk_font_info *infos;    /* enumerated faces, owned        */
     size_t info_count;
@@ -606,6 +616,16 @@ typedef struct fdk_font_chooser {
     fdk_widget *size_label;  /* "Size:" static text            */
     fdk_widget *spin;        /* the size spinner               */
     fdk_widget *preview;     /* the live sample (a label)      */
+    fdk_widget *owner;       /* the arrange container          */
+    bool silent;             /* programmatic selection in flight */
+    void (*on_changed)(fdk_widget *w, void *user);
+    void *on_changed_user;
+} fdk_fc_core;
+
+typedef struct fdk_font_chooser {
+    fdk_fc_core core;        /* the shared engine                 */
+    fdk_window *window;
+    fdk_widget *body;
     fdk_font_dialog_fn on_done;
     void *user_data;
     bool modal;
@@ -633,14 +653,15 @@ static void fc_respond(fdk_font_chooser *fc,
         memset(&result, 0, sizeof(result));
         result.outcome = outcome;
         if (outcome == FDK_FONT_DIALOG_ACCEPTED &&
-            fc->selected != (size_t)-1 &&
-            fc->selected < fc->info_count) {
-            const fdk_font_info *info = &fc->infos[fc->selected];
+            fc->core.selected != (size_t)-1 &&
+            fc->core.selected < fc->core.info_count) {
+            const fdk_font_info *info =
+                &fc->core.infos[fc->core.selected];
             result.family = info->family;   /* FDK-owned, valid  */
             result.style = info->style;     /* during the call   */
             result.path = info->path;
             result.face_index = info->face_index;
-            result.size = fc->size;
+            result.size = fc->core.size;
         }
         fc->on_done(&result, fc->user_data);
     }
@@ -680,7 +701,7 @@ static void fc_destroyed(fdk_window *window, void *user) {
 /* Rebuilds the preview label at the CURRENT face + size. The label
  * is destroyed and recreated because labels borrow their font at
  * creation — the only honest way to change it. */
-static void fc_reload_preview(fdk_font_chooser *fc) {
+static void fc_reload_preview(fdk_fc_core *fc) {
     if (fc->preview != NULL) {
         fdk_widget_destroy(fc->preview);
         fc->preview = NULL;
@@ -695,7 +716,7 @@ static void fc_reload_preview(fdk_font_chooser *fc) {
         pf = fdk_font_load_face(info->path, info->face_index, fc->size);
     }
     fc->preview_font = pf;
-    fdk_widget *parent = fc->body;
+    fdk_widget *parent = fc->owner;
     if (pf != NULL) {
         (void)fdk_label_create(parent, pf, fc->sample, &fc->preview);
     } else {
@@ -709,26 +730,42 @@ static void fc_reload_preview(fdk_font_chooser *fc) {
     if (fc->preview != NULL) {
         fdk_label_set_mode(fc->preview, FDK_LABEL_WRAP);
     }
-    /* The body re-arranges (the preview slot follows). */
-    if (fc->body != NULL) {
-        fdk_widget_invalidate(fc->body);
-        fdk_widget_child_layout_changed(fc->body->parent);
+    /* The container re-arranges (the preview slot follows). */
+    if (fc->owner != NULL) {
+        fdk_widget_invalidate(fc->owner);
+        fdk_widget_child_layout_changed(fc->owner->parent);
     }
+}
+
+/* The inline widget's change callback (the dialog has no owner and
+ * never lands here). The user-gesture point: a list row picked or a
+ * size spun. The callback may destroy the widget — the watch token
+ * is the programmatic-callback guard; nothing is touched after the
+ * call returns either way. */
+static void fc_fire_changed(fdk_fc_core *fc) {
+    if (fc->silent || fc->on_changed == NULL || fc->owner == NULL) {
+        return;
+    }
+    fdk_widget_watch watch;
+    fdk__widget_watch(&watch, fc->owner);
+    fc->on_changed(fc->owner, fc->on_changed_user);
+    fdk__widget_unwatch(&watch); /* always, also when dead */
 }
 
 static void fc_list_changed(fdk_widget *list, void *user) {
     (void)list;
-    fdk_font_chooser *fc = user;
+    fdk_fc_core *fc = user;
     fdk_i64 active = fdk_list_get_selected(list);
     if (active < 0 || (size_t)active >= fc->info_count) {
         return;
     }
     fc->selected = (size_t)active;
     fc_reload_preview(fc);
+    fc_fire_changed(fc);
 }
 
 static void fc_spin_changed(fdk_widget *spin, void *user) {
-    fdk_font_chooser *fc = user;
+    fdk_fc_core *fc = user;
     double v = fdk_spin_get_value(spin);
     fdk_i32 want = (fdk_i32)(v + 0.5);
     if (want < FC_MIN_SIZE) {
@@ -742,6 +779,7 @@ static void fc_spin_changed(fdk_widget *spin, void *user) {
     }
     fc->size = want;
     fc_reload_preview(fc);
+    fc_fire_changed(fc);
 }
 
 static void fc_ok_clicked(fdk_widget *button, void *user) {
@@ -804,8 +842,8 @@ static void fc_body_arrange(fdk_widget *w, fdk_rect assigned) {
     if (bottom < top + 40) {
         bottom = top + 40;
     }
-    if (fc->list != NULL) {
-        fdk_widget_set_bounds(fc->list,
+    if (fc->core.list != NULL) {
+        fdk_widget_set_bounds(fc->core.list,
                               (fdk_rect){CHOOSE_PAD,
                                          top, FC_LIST_W,
                                          bottom - top});
@@ -818,26 +856,26 @@ static void fc_body_arrange(fdk_widget *w, fdk_rect assigned) {
     }
     fdk_size lab_n = {0, 0};
     fdk_i32 sy = top;
-    if (fc->size_label != NULL) {
-        fdk_widget_measure(fc->size_label, &lab_n);
+    if (fc->core.size_label != NULL) {
+        fdk_widget_measure(fc->core.size_label, &lab_n);
         fdk_i32 spin_w = 84;
-        fdk_widget_set_bounds(fc->size_label,
+        fdk_widget_set_bounds(fc->core.size_label,
                               (fdk_rect){rx, sy + 4, lab_n.width,
                                          lab_n.height});
-        if (fc->spin != NULL) {
+        if (fc->core.spin != NULL) {
             fdk_widget_set_bounds(
-                fc->spin,
+                fc->core.spin,
                 (fdk_rect){rx + lab_n.width + 10, sy, spin_w,
                            lab_n.height + 4});
         }
         sy += lab_n.height + 4 + CHOOSE_PAD;
     }
-    if (fc->preview != NULL) {
+    if (fc->core.preview != NULL) {
         fdk_i32 ph = bottom - sy;
         if (ph < FC_PREVIEW_H) {
             ph = FC_PREVIEW_H;
         }
-        fdk_widget_set_bounds(fc->preview,
+        fdk_widget_set_bounds(fc->core.preview,
                               (fdk_rect){rx, sy, rw, ph});
     }
 }
@@ -848,13 +886,13 @@ static void fc_body_destroy(fdk_widget *w) {
         return;
     }
     ((fdk_fc_body *)(void *)w)->fc = NULL;
-    if (fc->preview_font != NULL) {
-        fdk_font_destroy(fc->preview_font);
+    if (fc->core.preview_font != NULL) {
+        fdk_font_destroy(fc->core.preview_font);
     }
-    fdk_font_info_list_free(fc->infos, fc->info_count);
-    fdk_free(fc->sample);
-    if (fc->font != NULL) {
-        fdk_font_destroy(fc->font);
+    fdk_font_info_list_free(fc->core.infos, fc->core.info_count);
+    fdk_free(fc->core.sample);
+    if (fc->core.font != NULL) {
+        fdk_font_destroy(fc->core.font);
     }
     fdk_free(fc);
 }
@@ -906,15 +944,16 @@ fdk_result fdk_dialog_choose_font(fdk_context *ctx,
     fc->on_done = on_done;
     fc->user_data = user_data;
     fc->modal = modal;
-    fc->selected = (size_t)-1;
-    fc->size = (init_size >= FC_MIN_SIZE && init_size <= FC_MAX_SIZE)
+    fc->core.selected = (size_t)-1;
+    fc->core.size = (init_size >= FC_MIN_SIZE && init_size <= FC_MAX_SIZE)
         ? init_size
         : 12;
-    fc->font = fdk_font_load_system_default(fdk__ui_derived_px(CHOOSE_FONT_PX));
-    fc->sample = fdk__strdup(sample);
-    if (fc->sample == NULL) {
-        if (fc->font != NULL) {
-            fdk_font_destroy(fc->font);
+    fc->core.font =
+        fdk_font_load_system_default(fdk__ui_derived_px(CHOOSE_FONT_PX));
+    fc->core.sample = fdk__strdup(sample);
+    if (fc->core.sample == NULL) {
+        if (fc->core.font != NULL) {
+            fdk_font_destroy(fc->core.font);
         }
         fdk_free(fc);
         return FDK_ERR_OUT_OF_MEMORY;
@@ -923,11 +962,12 @@ fdk_result fdk_dialog_choose_font(fdk_context *ctx,
     /* The enumeration drives everything; an empty list still shows
      * the dialog (preview dimmed, OK refused) — an honest empty
      * beats an error box. */
-    fdk_result r = fdk_font_enumerate(&fc->infos, &fc->info_count);
+    fdk_result r = fdk_font_enumerate(&fc->core.infos,
+                                      &fc->core.info_count);
     if (!fdk_ok(r)) {
-        fdk_free(fc->sample);
-        if (fc->font != NULL) {
-            fdk_font_destroy(fc->font);
+        fdk_free(fc->core.sample);
+        if (fc->core.font != NULL) {
+            fdk_font_destroy(fc->core.font);
         }
         fdk_free(fc);
         return r;
@@ -967,6 +1007,7 @@ fdk_result fdk_dialog_choose_font(fdk_context *ctx,
     }
     ((fdk_fc_body *)(void *)body)->fc = fc;
     fc->body = body;
+    fc->core.owner = body;
     fdk_widget_set_accessible_name(body, title);
     fdk_widget_set_background(
         body, fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND));
@@ -974,59 +1015,61 @@ fdk_result fdk_dialog_choose_font(fdk_context *ctx,
     /* The face list: single selection, one row per face. The List
      * carries its OWN scrollview (the self-contained rule) — placing
      * it directly in the body. */
-    r = fdk_list_create(body, fc->font, &fc->list);
+    r = fdk_list_create(body, fc->core.font, &fc->core.list);
     if (!fdk_ok(r)) {
         goto fail;
     }
-    fdk_list_set_selection_mode(fc->list, FDK_LIST_SELECTION_SINGLE);
-    fdk_list_set_on_selection_changed(fc->list, fc_list_changed, fc);
+    fdk_list_set_selection_mode(fc->core.list, FDK_LIST_SELECTION_SINGLE);
+    fdk_list_set_on_selection_changed(fc->core.list, fc_list_changed,
+                                      &fc->core);
     size_t initial = (size_t)-1;
-    for (size_t i = 0; i < fc->info_count; i++) {
+    for (size_t i = 0; i < fc->core.info_count; i++) {
         char row[256];
-        snprintf(row, sizeof(row), "%s %s", fc->infos[i].family,
-                 fc->infos[i].style);
+        snprintf(row, sizeof(row), "%s %s", fc->core.infos[i].family,
+                 fc->core.infos[i].style);
         if (initial == (size_t)-1 && init_family != NULL &&
-            strcmp(fc->infos[i].family, init_family) == 0 &&
+            strcmp(fc->core.infos[i].family, init_family) == 0 &&
             (init_style == NULL ||
-             strcmp(fc->infos[i].style, init_style) == 0)) {
+             strcmp(fc->core.infos[i].style, init_style) == 0)) {
             initial = i;
         }
-        (void)fdk_list_append(fc->list, row, NULL);
+        (void)fdk_list_append(fc->core.list, row, NULL);
     }
     if (initial == (size_t)-1) {
         initial = 0; /* the first face, when nothing matches */
     }
-    if (fc->info_count > 0) {
-        (void)fdk_list_select(fc->list, initial);
-        fc->selected = initial;
+    if (fc->core.info_count > 0) {
+        (void)fdk_list_select(fc->core.list, initial);
+        fc->core.selected = initial;
     }
 
     /* The size row. */
-    r = fdk_label_create(body, fc->font, "Size:", &fc->size_label);
+    r = fdk_label_create(body, fc->core.font, "Size:",
+                         &fc->core.size_label);
     if (!fdk_ok(r)) {
         goto fail;
     }
-    r = fdk_spin_create(body, fc->font, FC_MIN_SIZE, FC_MAX_SIZE,
-                        (double)fc->size, &fc->spin);
+    r = fdk_spin_create(body, fc->core.font, FC_MIN_SIZE, FC_MAX_SIZE,
+                        (double)fc->core.size, &fc->core.spin);
     if (!fdk_ok(r)) {
         goto fail;
     }
-    fdk_spin_set_step(fc->spin, 1.0);
-    fdk_spin_set_on_changed(fc->spin, fc_spin_changed, fc);
+    fdk_spin_set_step(fc->core.spin, 1.0);
+    fdk_spin_set_on_changed(fc->core.spin, fc_spin_changed, &fc->core);
 
     /* The preview (created via the reload path so the initial face
      * loads through the same code every change takes). */
-    fc_reload_preview(fc);
+    fc_reload_preview(&fc->core);
 
     fdk_widget *ok_btn = NULL;
     fdk_widget *cancel_btn = NULL;
-    r = fdk_button_create(body, fc->font, "OK", &ok_btn);
+    r = fdk_button_create(body, fc->core.font, "OK", &ok_btn);
     if (!fdk_ok(r)) {
         goto fail;
     }
     fdk_button_set_role(ok_btn, FDK_BUTTON_ROLE_SUGGESTED);
     fdk_button_set_on_activate(ok_btn, fc_ok_clicked, fc);
-    r = fdk_button_create(body, fc->font, "Cancel", &cancel_btn);
+    r = fdk_button_create(body, fc->core.font, "Cancel", &cancel_btn);
     if (!fdk_ok(r)) {
         goto fail;
     }
@@ -1038,8 +1081,8 @@ fdk_result fdk_dialog_choose_font(fdk_context *ctx,
     if (modal) {
         (void)fdk__window_set_modal(win, true);
     }
-    if (fc->list != NULL) {
-        fdk_widget_focus(fc->list);
+    if (fc->core.list != NULL) {
+        fdk_widget_focus(fc->core.list);
     }
     if (out_window != NULL) {
         *out_window = win;
@@ -1048,15 +1091,348 @@ fdk_result fdk_dialog_choose_font(fdk_context *ctx,
 
 fail:
     if (fc->body == NULL) {
-        fdk_font_info_list_free(fc->infos, fc->info_count);
-        fdk_free(fc->sample);
-        if (fc->font != NULL) {
-            fdk_font_destroy(fc->font);
+        fdk_font_info_list_free(fc->core.infos, fc->core.info_count);
+        fdk_free(fc->core.sample);
+        if (fc->core.font != NULL) {
+            fdk_font_destroy(fc->core.font);
         }
         fdk_free(fc);
     }
     fdk_window_destroy(win);
     return r;
+}
+
+/* ===================================================================
+ * Inline font chooser widget (1.0.0)
+ *
+ * The dialog's engine as an embeddable widget: the scrolling
+ * family/style list, the size row, and the live preview, laid out by
+ * the widget's own arrange (no buttons — there is nothing to accept;
+ * the selection is live). The change callback fires for every USER
+ * gesture (a list row picked, a size spun); the programmatic
+ * selection setter stays silent, the FDK rule everywhere. An empty
+ * enumeration is honest: the widget builds with an empty list and a
+ * dimmed preview, exactly like the dialog.
+ * =================================================================== */
+
+#define FC_WIDGET_W 600
+#define FC_WIDGET_H 320
+
+typedef struct fdk_fc_widget {
+    fdk_widget base;
+    fdk_fc_core core;        /* owned (fonts + enumeration die)   */
+} fdk_fc_widget;
+
+static fdk_fc_widget *fcw_of(fdk_widget *w) {
+    return (fdk_fc_widget *)(void *)w;
+}
+
+/* The dialog body's geometry minus the button row: list on the
+ * left, size row + preview down the right column. */
+static void fcw_arrange(fdk_widget *w, fdk_rect assigned) {
+    fdk_widget_set_bounds(w, assigned);
+    fdk_fc_widget *fw = fcw_of(w);
+    fdk_fc_core *fc = &fw->core;
+    fdk_i32 top = CHOOSE_PAD;
+    fdk_i32 bottom = assigned.height - CHOOSE_PAD;
+    if (bottom < top + 40) {
+        bottom = top + 40;
+    }
+    if (fc->list != NULL) {
+        fdk_widget_set_bounds(fc->list,
+                              (fdk_rect){CHOOSE_PAD, top, FC_LIST_W,
+                                         bottom - top});
+    }
+    fdk_i32 rx = CHOOSE_PAD + FC_LIST_W + CHOOSE_PAD;
+    fdk_i32 rw = assigned.width - CHOOSE_PAD - rx;
+    if (rw < 60) {
+        rw = 60;
+    }
+    fdk_size lab_n = {0, 0};
+    fdk_i32 sy = top;
+    if (fc->size_label != NULL) {
+        fdk_widget_measure(fc->size_label, &lab_n);
+        fdk_i32 spin_w = 84;
+        fdk_widget_set_bounds(fc->size_label,
+                              (fdk_rect){rx, sy + 4, lab_n.width,
+                                         lab_n.height});
+        if (fc->spin != NULL) {
+            fdk_widget_set_bounds(
+                fc->spin,
+                (fdk_rect){rx + lab_n.width + 10, sy, spin_w,
+                           lab_n.height + 4});
+        }
+        sy += lab_n.height + 4 + CHOOSE_PAD;
+    }
+    if (fc->preview != NULL) {
+        fdk_i32 ph = bottom - sy;
+        if (ph < FC_PREVIEW_H) {
+            ph = FC_PREVIEW_H;
+        }
+        fdk_widget_set_bounds(fc->preview,
+                              (fdk_rect){rx, sy, rw, ph});
+    }
+}
+
+static void fcw_destroy(fdk_widget *w) {
+    fdk_fc_widget *fw = fcw_of(w);
+    if (fw->core.preview_font != NULL) {
+        fdk_font_destroy(fw->core.preview_font);
+        fw->core.preview_font = NULL;
+    }
+    fdk_font_info_list_free(fw->core.infos, fw->core.info_count);
+    fw->core.infos = NULL;
+    fw->core.info_count = 0;
+    fdk_free(fw->core.sample);
+    fw->core.sample = NULL;
+    if (fw->core.font != NULL) {
+        fdk_font_destroy(fw->core.font);
+        fw->core.font = NULL;
+    }
+}
+
+static const fdk_a11y_class fcw_a11y = {
+    .role = FDK_A11Y_ROLE_FONT_CHOOSER,
+    .describe = NULL,
+    .actions = NULL,
+    .perform = NULL,
+};
+
+static const fdk_widget_class fdk_fcw_class = {
+    .size = sizeof(fdk_fc_widget),
+    .name = "font-chooser-widget",
+    .handle_event = NULL,
+    .paint = NULL,
+    .arrange = fcw_arrange,
+    .destroy = fcw_destroy,
+    .a11y = &fcw_a11y,
+};
+
+fdk_result fdk_font_chooser_widget_create(fdk_widget *parent,
+                                          fdk_widget **out_widget) {
+    if (parent == NULL || out_widget == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_widget *w = NULL;
+    fdk_result r = fdk_widget_create(parent, &fdk_fcw_class,
+                                     (fdk_rect){0, 0, FC_WIDGET_W,
+                                                FC_WIDGET_H},
+                                     &w);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    fdk_fc_widget *fw = fcw_of(w); /* subclass fields start zeroed */
+    fw->core.owner = w;
+    fw->core.selected = (size_t)-1;
+    fw->core.size = 12;
+    fw->core.font =
+        fdk_font_load_system_default(fdk__ui_derived_px(CHOOSE_FONT_PX));
+    fw->core.sample = fdk__strdup(
+        "The quick brown fox jumps over the lazy dog "
+        "— 0123456789");
+    if (fw->core.sample == NULL) {
+        fdk_widget_destroy(w);
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    r = fdk_font_enumerate(&fw->core.infos, &fw->core.info_count);
+    if (!fdk_ok(r)) {
+        fdk_widget_destroy(w);
+        return r;
+    }
+
+    r = fdk_list_create(w, fw->core.font, &fw->core.list);
+    if (!fdk_ok(r)) {
+        fdk_widget_destroy(w);
+        return r;
+    }
+    fdk_list_set_selection_mode(fw->core.list, FDK_LIST_SELECTION_SINGLE);
+    fdk_list_set_on_selection_changed(fw->core.list, fc_list_changed,
+                                      &fw->core);
+    for (size_t i = 0; i < fw->core.info_count; i++) {
+        char row[256];
+        snprintf(row, sizeof(row), "%s %s", fw->core.infos[i].family,
+                 fw->core.infos[i].style);
+        (void)fdk_list_append(fw->core.list, row, NULL);
+    }
+    if (fw->core.info_count > 0) {
+        /* The dialog's contract, mirrored: the first face starts
+         * selected when the application names no initial one. */
+        (void)fdk_list_select(fw->core.list, 0);
+        fw->core.selected = 0;
+    }
+
+    r = fdk_label_create(w, fw->core.font, "Size:",
+                         &fw->core.size_label);
+    if (!fdk_ok(r)) {
+        fdk_widget_destroy(w);
+        return r;
+    }
+    r = fdk_spin_create(w, fw->core.font, FC_MIN_SIZE, FC_MAX_SIZE,
+                        (double)fw->core.size, &fw->core.spin);
+    if (!fdk_ok(r)) {
+        fdk_widget_destroy(w);
+        return r;
+    }
+    fdk_spin_set_step(fw->core.spin, 1.0);
+    fdk_spin_set_on_changed(fw->core.spin, fc_spin_changed, &fw->core);
+
+    /* The preview via the reload path — the one code every change
+     * takes (the dialog's rule). */
+    fc_reload_preview(&fw->core);
+
+    fdk_widget_set_natural_size(w, FC_WIDGET_W, FC_WIDGET_H);
+    fdk_widget_child_layout_changed(w->parent);
+    *out_widget = w;
+    return FDK_OK;
+}
+
+fdk_result fdk_font_chooser_widget_set_sample(fdk_widget *w,
+                                              const char *sample) {
+    if (w == NULL || w->klass != &fdk_fcw_class || sample == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_fc_widget *fw = fcw_of(w);
+    char *copy = fdk__strdup(sample);
+    if (copy == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    fdk_free(fw->core.sample);
+    fw->core.sample = copy;
+    fc_reload_preview(&fw->core);
+    return FDK_OK;
+}
+
+/* The dialog's matching semantics, mirrored: `family` must match an
+ * enumerated face (style matches first when given, size clamped to
+ * 6..96); a family the enumeration does not know selects the FIRST
+ * face rather than failing — the same honest fallback the dialog's
+ * initial_family has. Silent: no change callback (the setter rule). */
+fdk_result fdk_font_chooser_widget_set_selection(fdk_widget *w,
+                                                 const char *family,
+                                                 const char *style,
+                                                 fdk_i32 size) {
+    if (w == NULL || w->klass != &fdk_fcw_class || family == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_fc_widget *fw = fcw_of(w);
+    fdk_fc_core *fc = &fw->core;
+    size_t pick = (fc->info_count > 0) ? 0 : (size_t)-1;
+    for (size_t i = 0; i < fc->info_count; i++) {
+        if (strcmp(fc->infos[i].family, family) == 0 &&
+            (style == NULL ||
+             strcmp(fc->infos[i].style, style) == 0)) {
+            pick = i;
+            break;
+        }
+    }
+    if (pick == (size_t)-1) {
+        return FDK_OK; /* nothing enumerated: nothing to select */
+    }
+    fdk_i32 want = (size >= FC_MIN_SIZE && size <= FC_MAX_SIZE)
+        ? size
+        : 12;
+    fc->silent = true;
+    if (fc->spin != NULL && want != fc->size) {
+        fdk_spin_set_value(fc->spin, (double)want);
+    }
+    if (fc->list != NULL) {
+        (void)fdk_list_select(fc->list, pick);
+    }
+    fc->size = want;
+    fc->selected = pick;
+    fc_reload_preview(fc);
+    fc->silent = false;
+    return FDK_OK;
+}
+
+/* The current selection as OWNED copies (free each non-NULL with
+ * fdk_free). No face selected (an empty enumeration) leaves the out
+ * strings NULL and still answers FDK_OK — an honest empty, the
+ * dialog's posture. A NULL out pointer skips that field. */
+fdk_result fdk_font_chooser_widget_get_selection(
+    fdk_widget *w, char **out_family, char **out_style,
+    char **out_path, fdk_i32 *out_face_index, fdk_i32 *out_size) {
+    if (w == NULL || w->klass != &fdk_fcw_class) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (out_family != NULL) {
+        *out_family = NULL;
+    }
+    if (out_style != NULL) {
+        *out_style = NULL;
+    }
+    if (out_path != NULL) {
+        *out_path = NULL;
+    }
+    if (out_face_index != NULL) {
+        *out_face_index = 0;
+    }
+    if (out_size != NULL) {
+        *out_size = 0;
+    }
+    fdk_fc_widget *fw = fcw_of(w);
+    fdk_fc_core *fc = &fw->core;
+    if (fc->selected == (size_t)-1 || fc->selected >= fc->info_count) {
+        return FDK_OK;
+    }
+    const fdk_font_info *info = &fc->infos[fc->selected];
+    if (out_family != NULL) {
+        *out_family = fdk__strdup(info->family);
+        if (*out_family == NULL) {
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+    }
+    if (out_style != NULL) {
+        *out_style = fdk__strdup(info->style);
+        if (*out_style == NULL) {
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+    }
+    if (out_path != NULL) {
+        *out_path = fdk__strdup(info->path);
+        if (*out_path == NULL) {
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+    }
+    if (out_face_index != NULL) {
+        *out_face_index = info->face_index;
+    }
+    if (out_size != NULL) {
+        *out_size = fc->size;
+    }
+    return FDK_OK;
+}
+
+void fdk_font_chooser_widget_set_on_changed(
+    fdk_widget *w, fdk_font_chooser_widget_fn fn, void *user_data) {
+    if (w == NULL || w->klass != &fdk_fcw_class) {
+        return;
+    }
+    fdk_fc_widget *fw = fcw_of(w);
+    fw->core.on_changed = fn;
+    fw->core.on_changed_user = user_data;
+}
+
+/* The headless test seam (the color button's apply_result pattern):
+ * drives the USER change paths exactly as a click and a spin would —
+ * the real handlers run, the preview reloads, the change callback
+ * fires. Runs OUTSIDE any dispatch (the same watch guard the color
+ * seam takes). Tests only. */
+void fdk__fontchooser_test_select(fdk_widget *w, size_t row,
+                                  fdk_i32 size) {
+    if (w == NULL || w->klass != &fdk_fcw_class) {
+        return;
+    }
+    fdk_fc_widget *fw = fcw_of(w);
+    fdk_widget_watch watch;
+    fdk__widget_watch(&watch, w);
+    if (fw->core.list != NULL) {
+        (void)fdk_list_select(fw->core.list, row);
+    }
+    if (fdk__watch_alive(&watch) && fw->core.spin != NULL) {
+        fdk_spin_set_value(fw->core.spin, (double)size);
+    }
+    fdk__widget_unwatch(&watch); /* always, also when dead */
 }
 
 /* ===================================================================
@@ -1068,20 +1444,41 @@ fail:
 #define CC_RING_IN 82         /* the hue ring's inner radius      */
 #define CC_TRI_R 74           /* the SV triangle's circumradius   */
 
-typedef struct fdk_color_chooser {
-    fdk_window *window;
-    fdk_widget *body;
+/* ---- the shared engine ---------------------------------------------------
+ *
+ * The HSV state and the interactive pieces (the wheel canvas, the
+ * current-color swatch, the hex entry) live in fdk_cc_core; the 1.0.0
+ * dialog and the inline fdk_color_chooser_widget both embed it by
+ * value and every cc_* helper below speaks in the core, so there is
+ * exactly one wheel rasterizer, one drag policy, and one hex parser
+ * for both hosts. `owner` is the widget form's widget (its change
+ * callback target); the dialog leaves it NULL. */
+
+typedef struct fdk_cc_core {
     fdk_font *font;          /* owned system default              */
     double h;                /* hue, degrees [0,360)              */
     double s;                /* saturation [0,1]                  */
     double v;                /* value [0,1]                       */
-    fdk_color initial;       /* the options' starting color       */
+    fdk_color initial;       /* the starting color                */
     fdk_widget *wheel;       /* the canvas                        */
     fdk_widget *swatch_cur;  /* background widget                 */
-    fdk_widget *swatch_init; /* background widget                 */
+    fdk_widget *swatch_init; /* background widget (dialog only)   */
     fdk_widget *hex_entry;   /* NULL when !show_hex               */
     bool dragging;           /* a wheel drag holds the grab       */
     bool dragging_ring;      /* ring (vs triangle) region         */
+    /* The inline widget's user-change callback (NULL in the
+     * dialog): fired AFTER the state moved, for every USER gesture
+     * that changed the color (wheel press/drag, hex Enter) — never
+     * from the silent setter. */
+    void (*on_color_changed)(fdk_widget *w, fdk_color color, void *user);
+    void *on_changed_user;
+    fdk_widget *owner;       /* the inline widget; NULL in dialog */
+} fdk_cc_core;
+
+typedef struct fdk_color_chooser {
+    fdk_cc_core core;        /* the shared engine                 */
+    fdk_window *window;
+    fdk_widget *body;
     fdk_color_dialog_fn on_done;
     void *user_data;
     bool modal;
@@ -1151,7 +1548,7 @@ static void cc_rgb_to_hsv(fdk_color c, double *out_h, double *out_s,
     *out_v = max;
 }
 
-static fdk_color cc_current_color(const fdk_color_chooser *cc) {
+static fdk_color cc_current_color(const fdk_cc_core *cc) {
     return cc_hsv_to_rgb(cc->h, cc->s, cc->v);
 }
 
@@ -1198,7 +1595,7 @@ static bool cc_tri_weights(double px, double py, double *wa,
 }
 
 /* State -> the SV marker's local position. */
-static void cc_sv_pos(const fdk_color_chooser *cc, double *out_x,
+static void cc_sv_pos(const fdk_cc_core *cc, double *out_x,
                       double *out_y) {
     double ax, ay, bx, by, cx, cy;
     cc_tri_vertices(&ax, &ay, &bx, &by, &cx, &cy);
@@ -1210,7 +1607,7 @@ static void cc_sv_pos(const fdk_color_chooser *cc, double *out_x,
 }
 
 /* The hue marker's local position (on the ring's mid-radius). */
-static void cc_hue_pos(const fdk_color_chooser *cc, double *out_x,
+static void cc_hue_pos(const fdk_cc_core *cc, double *out_x,
                        double *out_y) {
     double c = CC_WHEEL / 2.0;
     double r = (CC_RING_IN + CC_RING_OUT) / 2.0;
@@ -1225,7 +1622,7 @@ static void cc_wheel_paint(fdk_widget *canvas, fdk_surface *surface,
                            fdk_rect bounds, fdk_rect clip,
                            void *user) {
     (void)canvas;
-    fdk_color_chooser *cc = user;
+    fdk_cc_core *cc = user;
     fdk_surface_info info;
     if (!fdk_ok(fdk_surface_get_info(surface, &info)) ||
         info.pixels == NULL) {
@@ -1330,7 +1727,25 @@ static void cc_wheel_paint(fdk_widget *canvas, fdk_surface *surface,
 
 /* ---- the wheel's input ---- */
 
-static void cc_apply_wheel_point(fdk_color_chooser *cc, fdk_f32 lx,
+/* Fires the inline widget's user-change callback (the dialog has no
+ * owner and never lands here). The callback may destroy the chooser
+ * widget — the watch token is the programmatic-callback guard, and a
+ * dead target means the caller stops touching the chooser entirely
+ * (its teardown is underway). Returns false when the chooser died. */
+static bool cc_fire_changed(fdk_cc_core *cc) {
+    if (cc->on_color_changed == NULL || cc->owner == NULL) {
+        return true;
+    }
+    fdk_color c = cc_current_color(cc);
+    fdk_widget_watch watch;
+    fdk__widget_watch(&watch, cc->owner);
+    cc->on_color_changed(cc->owner, c, cc->on_changed_user);
+    bool alive = fdk__watch_alive(&watch);
+    fdk__widget_unwatch(&watch); /* always, also when dead */
+    return alive;
+}
+
+static void cc_apply_wheel_point(fdk_cc_core *cc, fdk_f32 lx,
                                  fdk_f32 ly) {
     double ctr = CC_WHEEL / 2.0;
     double dx = (double)lx - ctr;
@@ -1352,7 +1767,12 @@ static void cc_apply_wheel_point(fdk_color_chooser *cc, fdk_f32 lx,
             cc->v = vv;
         }
     }
-    /* The swatch + hex row follow the state. */
+    /* The state moved — the inline widget hears it first (it may
+     * destroy the chooser; then nothing below may run). The swatch +
+     * hex row + wheel markers follow the state. */
+    if (!cc_fire_changed(cc)) {
+        return;
+    }
     if (cc->swatch_cur != NULL) {
         fdk_widget_set_background(cc->swatch_cur, cc_current_color(cc));
     }
@@ -1372,7 +1792,7 @@ static void cc_apply_wheel_point(fdk_color_chooser *cc, fdk_f32 lx,
 
 static bool cc_wheel_event(fdk_widget *w, const fdk_widget_event *ev,
                            void *user) {
-    fdk_color_chooser *cc = user;
+    fdk_cc_core *cc = user;
     switch (ev->type) {
     case FDK_WIDGET_POINTER_DOWN: {
         if (ev->pointer.button != FDK_POINTER_BUTTON_LEFT) {
@@ -1413,7 +1833,7 @@ static bool cc_wheel_event(fdk_widget *w, const fdk_widget_event *ev,
 
 static void cc_hex_activated(fdk_widget *entry, void *user) {
     (void)entry;
-    fdk_color_chooser *cc = user;
+    fdk_cc_core *cc = user;
     if (cc->hex_entry == NULL) {
         return;
     }
@@ -1440,6 +1860,9 @@ static void cc_hex_activated(fdk_widget *entry, void *user) {
         (fdk_f32)((double)((rv >> 8) & 0xFF) / 255.0),
         (fdk_f32)((double)(rv & 0xFF) / 255.0), 1.0f};
     cc_rgb_to_hsv(c, &cc->h, &cc->s, &cc->v);
+    if (!cc_fire_changed(cc)) {
+        return;
+    }
     if (cc->swatch_cur != NULL) {
         fdk_widget_set_background(cc->swatch_cur, c);
     }
@@ -1460,8 +1883,8 @@ static void cc_respond(fdk_color_chooser *cc,
         fdk_color_dialog_result result;
         result.outcome = outcome;
         result.color = (outcome == FDK_COLOR_DIALOG_ACCEPTED)
-            ? cc_current_color(cc)
-            : cc->initial;
+            ? cc_current_color(&cc->core)
+            : cc->core.initial;
         cc->on_done(&result, cc->user_data);
     }
     if (cc->window != NULL) {
@@ -1492,7 +1915,7 @@ static void cc_destroyed(fdk_window *window, void *user) {
     if (cc->on_done != NULL) {
         fdk_color_dialog_result result;
         result.outcome = FDK_COLOR_DIALOG_CANCELLED;
-        result.color = cc->initial;
+        result.color = cc->core.initial;
         cc->on_done(&result, cc->user_data);
     }
 }
@@ -1552,9 +1975,9 @@ static void cc_body_arrange(fdk_widget *w, fdk_rect assigned) {
 
     /* The wheel on the left; the side column on the right. */
     fdk_i32 top = CHOOSE_PAD;
-    if (cc->wheel != NULL) {
+    if (cc->core.wheel != NULL) {
         fdk_widget_set_bounds(
-            cc->wheel,
+            cc->core.wheel,
             (fdk_rect){CHOOSE_PAD, top, CC_WHEEL,
                        CC_WHEEL});
     }
@@ -1565,20 +1988,20 @@ static void cc_body_arrange(fdk_widget *w, fdk_rect assigned) {
     }
     fdk_i32 sy = top;
     fdk_i32 sw_h = 44;
-    if (cc->swatch_cur != NULL) {
-        fdk_widget_set_bounds(cc->swatch_cur,
+    if (cc->core.swatch_cur != NULL) {
+        fdk_widget_set_bounds(cc->core.swatch_cur,
                               (fdk_rect){rx, sy, rw, sw_h});
         sy += sw_h + 6;
     }
-    if (cc->swatch_init != NULL) {
-        fdk_widget_set_bounds(cc->swatch_init,
+    if (cc->core.swatch_init != NULL) {
+        fdk_widget_set_bounds(cc->core.swatch_init,
                               (fdk_rect){rx, sy, rw, sw_h / 2});
         sy += sw_h / 2 + 10;
     }
-    if (cc->hex_entry != NULL) {
+    if (cc->core.hex_entry != NULL) {
         fdk_size en = {0, 0};
-        fdk_widget_measure(cc->hex_entry, &en);
-        fdk_widget_set_bounds(cc->hex_entry,
+        fdk_widget_measure(cc->core.hex_entry, &en);
+        fdk_widget_set_bounds(cc->core.hex_entry,
                               (fdk_rect){rx, sy, rw, en.height});
         sy += en.height + 8;
     }
@@ -1590,8 +2013,8 @@ static void cc_body_destroy(fdk_widget *w) {
         return;
     }
     ((fdk_cc_body *)(void *)w)->cc = NULL;
-    if (cc->font != NULL) {
-        fdk_font_destroy(cc->font);
+    if (cc->core.font != NULL) {
+        fdk_font_destroy(cc->core.font);
     }
     fdk_free(cc);
 }
@@ -1640,9 +2063,10 @@ fdk_result fdk_dialog_choose_color(fdk_context *ctx,
     cc->on_done = on_done;
     cc->user_data = user_data;
     cc->modal = modal;
-    cc->initial = initial;
-    cc->font = fdk_font_load_system_default(fdk__ui_derived_px(CHOOSE_FONT_PX));
-    cc_rgb_to_hsv(initial, &cc->h, &cc->s, &cc->v);
+    cc->core.initial = initial;
+    cc->core.font =
+        fdk_font_load_system_default(fdk__ui_derived_px(CHOOSE_FONT_PX));
+    cc_rgb_to_hsv(initial, &cc->core.h, &cc->core.s, &cc->core.v);
 
     fdk_i32 width = CHOOSE_PAD * 2 + CC_WHEEL + 140;
     fdk_i32 height = CHOOSE_PAD * 2 + CC_WHEEL + 52;
@@ -1656,8 +2080,8 @@ fdk_result fdk_dialog_choose_color(fdk_context *ctx,
     fdk_window *win = NULL;
     fdk_result r = fdk_window_create(ctx, &wopts, &win);
     if (!fdk_ok(r)) {
-        if (cc->font != NULL) {
-            fdk_font_destroy(cc->font);
+        if (cc->core.font != NULL) {
+            fdk_font_destroy(cc->core.font);
         }
         fdk_free(cc);
         return r;
@@ -1687,56 +2111,63 @@ fdk_result fdk_dialog_choose_color(fdk_context *ctx,
         body, fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND));
 
     /* The wheel canvas with its raster paint + drag input. */
-    r = fdk_canvas_create(body, cc_wheel_paint, cc, &cc->wheel);
+    r = fdk_canvas_create(body, cc_wheel_paint, &cc->core,
+                          &cc->core.wheel);
     if (!fdk_ok(r)) {
         goto fail;
     }
-    fdk_widget_set_natural_size(cc->wheel, CC_WHEEL, CC_WHEEL);
-    fdk_widget_set_event_callback(cc->wheel, cc_wheel_event, cc);
+    fdk_widget_set_natural_size(cc->core.wheel, CC_WHEEL, CC_WHEEL);
+    fdk_widget_set_event_callback(cc->core.wheel, cc_wheel_event,
+                                  &cc->core);
 
     /* The swatches: plain background widgets (the current state and
      * the initial color side by side for comparison). */
     r = fdk_widget_create(body, NULL, (fdk_rect){0, 0, 90, 44},
-                          &cc->swatch_cur);
+                          &cc->core.swatch_cur);
     if (!fdk_ok(r)) {
         goto fail;
     }
-    fdk_widget_set_background(cc->swatch_cur, cc_current_color(cc));
-    fdk_widget_set_corner_radius(cc->swatch_cur, 6);
-    fdk_widget_set_accessible_name(cc->swatch_cur, "Current color");
+    fdk_widget_set_background(cc->core.swatch_cur,
+                              cc_current_color(&cc->core));
+    fdk_widget_set_corner_radius(cc->core.swatch_cur, 6);
+    fdk_widget_set_accessible_name(cc->core.swatch_cur,
+                                   "Current color");
     r = fdk_widget_create(body, NULL, (fdk_rect){0, 0, 90, 22},
-                          &cc->swatch_init);
+                          &cc->core.swatch_init);
     if (!fdk_ok(r)) {
         goto fail;
     }
-    fdk_widget_set_background(cc->swatch_init, initial);
-    fdk_widget_set_corner_radius(cc->swatch_init, 6);
-    fdk_widget_set_accessible_name(cc->swatch_init, "Initial color");
+    fdk_widget_set_background(cc->core.swatch_init, initial);
+    fdk_widget_set_corner_radius(cc->core.swatch_init, 6);
+    fdk_widget_set_accessible_name(cc->core.swatch_init,
+                                   "Initial color");
 
     if (show_hex) {
-        r = fdk_entry_create(body, cc->font, "", &cc->hex_entry);
+        r = fdk_entry_create(body, cc->core.font, "",
+                             &cc->core.hex_entry);
         if (!fdk_ok(r)) {
             goto fail;
         }
-        fdk_entry_set_on_activate(cc->hex_entry, cc_hex_activated, cc);
-        fdk_color c = cc_current_color(cc);
+        fdk_entry_set_on_activate(cc->core.hex_entry,
+                                  cc_hex_activated, &cc->core);
+        fdk_color c = cc_current_color(&cc->core);
         char hex[10];
         snprintf(hex, sizeof(hex), "#%02x%02x%02x",
                  (unsigned)(c.r * 255.0f + 0.5f) & 0xFFu,
                  (unsigned)(c.g * 255.0f + 0.5f) & 0xFFu,
                  (unsigned)(c.b * 255.0f + 0.5f) & 0xFFu);
-        (void)fdk_entry_set_text(cc->hex_entry, hex);
+        (void)fdk_entry_set_text(cc->core.hex_entry, hex);
     }
 
     fdk_widget *ok_btn = NULL;
     fdk_widget *cancel_btn = NULL;
-    r = fdk_button_create(body, cc->font, "OK", &ok_btn);
+    r = fdk_button_create(body, cc->core.font, "OK", &ok_btn);
     if (!fdk_ok(r)) {
         goto fail;
     }
     fdk_button_set_role(ok_btn, FDK_BUTTON_ROLE_SUGGESTED);
     fdk_button_set_on_activate(ok_btn, cc_ok_clicked, cc);
-    r = fdk_button_create(body, cc->font, "Cancel", &cancel_btn);
+    r = fdk_button_create(body, cc->core.font, "Cancel", &cancel_btn);
     if (!fdk_ok(r)) {
         goto fail;
     }
@@ -1758,13 +2189,232 @@ fdk_result fdk_dialog_choose_color(fdk_context *ctx,
 
 fail:
     if (cc->body == NULL) {
-        if (cc->font != NULL) {
-            fdk_font_destroy(cc->font);
+        if (cc->core.font != NULL) {
+            fdk_font_destroy(cc->core.font);
         }
         fdk_free(cc);
     }
     fdk_window_destroy(win);
     return r;
+}
+
+/* ===================================================================
+ * Inline color chooser widget (1.0.0)
+ *
+ * The dialog's engine as an embeddable widget: the same HSV wheel
+ * canvas, the current-color swatch, and the hex entry, laid out by
+ * the widget's own arrange (no buttons — there is nothing to accept
+ * or cancel; the color is live). The change callback fires for every
+ * USER gesture (wheel press/drag, hex Enter) with the new color; the
+ * setter stays silent, the FDK rule everywhere.
+ * =================================================================== */
+
+#define CC_WHEEL_SIDE 150   /* the inline widget's side column      */
+
+typedef struct fdk_cc_widget {
+    fdk_widget base;
+    fdk_cc_core core;        /* owned (the font dies with it)      */
+} fdk_cc_widget;
+
+static fdk_cc_widget *ccw_of(fdk_widget *w) {
+    return (fdk_cc_widget *)(void *)w;
+}
+
+/* The dialog body's geometry minus the button row: wheel on the
+ * left, the current swatch + hex entry down the right column. */
+static void ccw_arrange(fdk_widget *w, fdk_rect assigned) {
+    fdk_widget_set_bounds(w, assigned);
+    fdk_cc_widget *cw = ccw_of(w);
+    fdk_cc_core *cc = &cw->core;
+    fdk_i32 top = CHOOSE_PAD;
+    if (cc->wheel != NULL) {
+        fdk_widget_set_bounds(
+            cc->wheel,
+            (fdk_rect){CHOOSE_PAD, top, CC_WHEEL, CC_WHEEL});
+    }
+    fdk_i32 rx = CHOOSE_PAD + CC_WHEEL + CHOOSE_PAD;
+    fdk_i32 rw = assigned.width - CHOOSE_PAD - rx;
+    if (rw < 90) {
+        rw = 90;
+    }
+    fdk_i32 sy = top;
+    fdk_i32 sw_h = 44;
+    if (cc->swatch_cur != NULL) {
+        fdk_widget_set_bounds(cc->swatch_cur,
+                              (fdk_rect){rx, sy, rw, sw_h});
+        sy += sw_h + 10;
+    }
+    if (cc->hex_entry != NULL) {
+        fdk_size en = {0, 0};
+        fdk_widget_measure(cc->hex_entry, &en);
+        fdk_widget_set_bounds(cc->hex_entry,
+                              (fdk_rect){rx, sy, rw, en.height});
+    }
+}
+
+static void ccw_destroy(fdk_widget *w) {
+    fdk_cc_widget *cw = ccw_of(w);
+    if (cw->core.font != NULL) {
+        fdk_font_destroy(cw->core.font);
+        cw->core.font = NULL;
+    }
+}
+
+static const fdk_a11y_class ccw_a11y = {
+    .role = FDK_A11Y_ROLE_COLOR_CHOOSER,
+    .describe = NULL,
+    .actions = NULL,
+    .perform = NULL,
+};
+
+static const fdk_widget_class fdk_ccw_class = {
+    .size = sizeof(fdk_cc_widget),
+    .name = "color-chooser-widget",
+    .handle_event = NULL,
+    .paint = NULL,
+    .arrange = ccw_arrange,
+    .destroy = ccw_destroy,
+    .a11y = &ccw_a11y,
+};
+
+fdk_result fdk_color_chooser_widget_create(fdk_widget *parent,
+                                           fdk_color initial,
+                                           fdk_widget **out_widget) {
+    if (parent == NULL || out_widget == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (initial.a <= 0.0f) {
+        initial.a = 1.0f; /* a color chooser's colors are opaque */
+    }
+    fdk_i32 width = CHOOSE_PAD * 2 + CC_WHEEL + CHOOSE_PAD +
+                    CC_WHEEL_SIDE;
+    fdk_i32 height = CHOOSE_PAD * 2 + CC_WHEEL;
+    fdk_widget *w = NULL;
+    fdk_result r = fdk_widget_create(parent, &fdk_ccw_class,
+                                     (fdk_rect){0, 0, width, height},
+                                     &w);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    fdk_cc_widget *cw = ccw_of(w); /* subclass fields start zeroed */
+    cw->core.initial = initial;
+    cw->core.owner = w;
+    cw->core.font =
+        fdk_font_load_system_default(fdk__ui_derived_px(CHOOSE_FONT_PX));
+    cc_rgb_to_hsv(initial, &cw->core.h, &cw->core.s, &cw->core.v);
+
+    /* The engine's pieces, created exactly as the dialog's are. */
+    r = fdk_canvas_create(w, cc_wheel_paint, &cw->core,
+                          &cw->core.wheel);
+    if (!fdk_ok(r)) {
+        fdk_widget_destroy(w);
+        return r;
+    }
+    fdk_widget_set_natural_size(cw->core.wheel, CC_WHEEL, CC_WHEEL);
+    fdk_widget_set_event_callback(cw->core.wheel, cc_wheel_event,
+                                  &cw->core);
+
+    r = fdk_widget_create(w, NULL, (fdk_rect){0, 0, 90, 44},
+                          &cw->core.swatch_cur);
+    if (!fdk_ok(r)) {
+        fdk_widget_destroy(w);
+        return r;
+    }
+    fdk_widget_set_background(cw->core.swatch_cur,
+                              cc_current_color(&cw->core));
+    fdk_widget_set_corner_radius(cw->core.swatch_cur, 6);
+    fdk_widget_set_accessible_name(cw->core.swatch_cur,
+                                   "Current color");
+
+    r = fdk_entry_create(w, cw->core.font, "", &cw->core.hex_entry);
+    if (!fdk_ok(r)) {
+        fdk_widget_destroy(w);
+        return r;
+    }
+    fdk_entry_set_on_activate(cw->core.hex_entry, cc_hex_activated,
+                              &cw->core);
+    fdk_color c = cc_current_color(&cw->core);
+    char hex[10];
+    snprintf(hex, sizeof(hex), "#%02x%02x%02x",
+             (unsigned)(c.r * 255.0f + 0.5f) & 0xFFu,
+             (unsigned)(c.g * 255.0f + 0.5f) & 0xFFu,
+             (unsigned)(c.b * 255.0f + 0.5f) & 0xFFu);
+    (void)fdk_entry_set_text(cw->core.hex_entry, hex);
+
+    fdk_widget_set_natural_size(w, width, height);
+    *out_widget = w;
+    return FDK_OK;
+}
+
+fdk_color fdk_color_chooser_widget_get_color(fdk_widget *w) {
+    if (w == NULL || w->klass != &fdk_ccw_class) {
+        return (fdk_color){0, 0, 0, 0};
+    }
+    fdk_cc_widget *cw = ccw_of(w);
+    return cc_current_color(&cw->core);
+}
+
+fdk_result fdk_color_chooser_widget_set_color(fdk_widget *w,
+                                              fdk_color color) {
+    if (w == NULL || w->klass != &fdk_ccw_class) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (color.a <= 0.0f) {
+        color.a = 1.0f;
+    }
+    fdk_cc_widget *cw = ccw_of(w);
+    cc_rgb_to_hsv(color, &cw->core.h, &cw->core.s, &cw->core.v);
+    /* The silent setter (the color button's rule): no change
+     * callback — the wheel, the swatch, and the hex row follow. */
+    if (cw->core.swatch_cur != NULL) {
+        fdk_widget_set_background(cw->core.swatch_cur, color);
+    }
+    if (cw->core.hex_entry != NULL) {
+        char hex[10];
+        snprintf(hex, sizeof(hex), "#%02x%02x%02x",
+                 (unsigned)(color.r * 255.0f + 0.5f) & 0xFFu,
+                 (unsigned)(color.g * 255.0f + 0.5f) & 0xFFu,
+                 (unsigned)(color.b * 255.0f + 0.5f) & 0xFFu);
+        (void)fdk_entry_set_text(cw->core.hex_entry, hex);
+    }
+    if (cw->core.wheel != NULL) {
+        fdk_canvas_invalidate(cw->core.wheel);
+    }
+    fdk__a11y_notify(w, FDK_A11Y_VALUE_CHANGED, 0);
+    return FDK_OK;
+}
+
+void fdk_color_chooser_widget_set_on_color_changed(
+    fdk_widget *w, fdk_color_chooser_widget_fn fn, void *user_data) {
+    if (w == NULL || w->klass != &fdk_ccw_class) {
+        return;
+    }
+    fdk_cc_widget *cw = ccw_of(w);
+    cw->core.on_color_changed = fn;
+    cw->core.on_changed_user = user_data;
+}
+
+/* The headless test seam (the color button's apply_result pattern):
+ * drives a wheel pick exactly as the drag would — the state moves,
+ * the swatch and hex follow, the change callback fires. Runs OUTSIDE
+ * any dispatch, so the callback's destroy frees immediately — the
+ * watch token guards the post-call state writes. Tests only. */
+void fdk__colorchooser_test_pick(fdk_widget *w, fdk_f32 local_x,
+                                 fdk_f32 local_y, bool ring) {
+    if (w == NULL || w->klass != &fdk_ccw_class) {
+        return;
+    }
+    fdk_cc_widget *cw = ccw_of(w);
+    fdk_widget_watch watch;
+    fdk__widget_watch(&watch, w);
+    cw->core.dragging = true;
+    cw->core.dragging_ring = ring;
+    cc_apply_wheel_point(&cw->core, local_x, local_y);
+    if (fdk__watch_alive(&watch)) {
+        cw->core.dragging = false;
+        cw->core.dragging_ring = false;
+    }
+    fdk__widget_unwatch(&watch); /* always, also when dead */
 }
 
 /* ===================================================================

@@ -18,8 +18,12 @@ partial=$(grep -m1 -oE "DONE [0-9]+ . PARTIAL [0-9]+ . IN PROGRESS [0-9]+( \(M-[
 pcount=$(echo "$partial" | grep -oE "PARTIAL [0-9]+" | grep -oE "[0-9]+" || echo 1)
 mcount=$(echo "$partial" | grep -oE "MISSING [0-9]+" | grep -oE "[0-9]+" || echo 1)
 inprog=$(echo "$partial" | grep -oE "IN PROGRESS [0-9]+" | grep -oE "[0-9]+" || echo 9)
-parity_open=$(grep -cE "^\| [0-9]+ \|.*\| OPEN" docs/PARITY.md 2>/dev/null || echo 0)
-if [ "${pcount:-1}" = "0" ] && [ "${mcount:-1}" = "0" ] && [ "${inprog:-9}" = "1" ] && [ "${parity_open:-1}" = "0" ]; then
+# grep -c prints 0 AND exits 1 on no match — the `|| echo 0` here
+# appended a SECOND "0" once PARITY was fully closed, making this
+# pass-branch's string comparison unreachable (round 40 found it).
+parity_open=$(grep -cE "^\| [0-9]+ \|.*\| OPEN" docs/PARITY.md 2>/dev/null)
+parity_open=${parity_open:-0}
+if [ "${pcount:-1}" = "0" ] && [ "${mcount:-1}" = "0" ] && [ "${inprog:-9}" = "1" ] && [ "$parity_open" = "0" ]; then
     ok 1 "register: $partial; PARITY open gaps: $parity_open"
 else
     bad 1 "register: $partial; PARITY.md OPEN gap rows: $parity_open (close or policy-out each)"
@@ -37,10 +41,13 @@ fi
 
 # ---------- G3 bug-rate plateau ----------
 rates=$(grep -oE "bug-rate: [0-9]+ new library bugs?" PROGRESS.md | tail -2)
-n=$(printf '%s\n' $rates | grep -c "bug-rate: 0" || true)
+# $rates is quoted on purpose: unquoted, "bug-rate: 0" word-splits and
+# no line contains the full phrase any more (round 40 found it — G3
+# could never print PASS even with two zero-bug rounds on record).
+n=$(printf '%s\n' "$rates" | grep -c "bug-rate: 0" || true)
 rounds=$(printf '%s\n' "$rates" | grep -c "bug-rate:" || true)
 if [ "$rounds" -ge 2 ] && [ "$n" -ge 2 ]; then
-    ok 3 "last two rounds: $rates"
+    ok 3 "last two recorded rates, both zero: $rates"
 else
     bad 3 "need two consecutive zero-bug rounds in different environments (have: ${rates:-none})"
 fi

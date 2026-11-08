@@ -769,6 +769,87 @@ composite over the parent). 855 exports, +7.
 
 ---
 
+## 19. Widget hosting — the catalog on an extension surface (1.0.0, extension API v3)
+
+The "text on extension surfaces" gap, closed the structural way: an
+extension surface is an `fdk_window` internally, and the window layer
+already owns the whole widget-hosting machinery — so v3 exposes it in
+one function:
+
+```c
+fdk_widget *root = NULL;
+if (fdk_ok(fdk_ext_surface_host_widgets(surface, &root))) {
+    fdk_widget *label = NULL;
+    fdk_label_create(root, ui_font, "12:04", &label);
+    fdk_widget_set_bounds(label, (fdk_rect){8, 8, 120, 20});
+    /* …buttons, boxes, entries — the whole catalog… */
+}
+```
+
+`fdk_ext_surface_host_widgets()` builds the surface's WINDOW-OWNED
+root (exactly the root `fdk_window_get_root` hands out for
+application windows — theme-background default, a11y, the owner
+back-edge) and flips the toolkit-owned repaint the dialogs run on.
+From the call on, the surface behaves like a toolkit dialog's
+window:
+
+- **Configure** resizes and re-arranges the tree automatically —
+  X11's real ConfigureNotify, or the add-on's
+  `fdk_ext_surface_notify_configure()` reports on Wayland. The root
+  follows the surface's size; nothing to subscribe to.
+- **Pointer, keyboard, scroll** dispatch into the tree with the
+  standard widget semantics — hit-testing, the implicit grab, focus,
+  child-local coordinates. Keyboard reaches the tree when the
+  surface itself has keyboard focus: on Wayland a layer surface
+  needs the add-on's own protocol negotiation (the layer's keyboard
+  interactivity) to grant it — FDK cannot vouch for that half.
+- **Damage repaints and presents** at the frame pacing every
+  toolkit window gets (`fdk_surface_frame_ready`'s gate) — hover
+  motion cannot out-commit the compositor, the same bound
+  auto-paint gives dialogs.
+
+**The contract, stated once:**
+
+- The tree OWNS the surface's pixels while hosted. Every frame the
+  root's background fills first (the theme window-background token;
+  `fdk_widget_set_background` on the root overrides), then the
+  widgets draw. Custom chrome is widget work (a Canvas, styled
+  widgets) — mixing direct `fdk_surface_*` writes and presents with
+  a hosted tree is an application race, not a supported mode.
+- The add-on's own `set_event_callback` keeps running under the
+  standard `fdk_window_get_root` rule: window-level events
+  (configure, expose, close) always reach it; INPUT events a widget
+  of the tree consumed do not — a button press belongs to the
+  button. Events no widget handled still arrive.
+- The root is window-owned: destroyed with the surface
+  (`fdk_widget_destroy` refuses it, the `FDK_WF_WINDOW_ROOT` rule).
+  Hosting twice returns the SAME root.
+- `fdk_ext_surface_destroy()` while widgets are alive is safe — the
+  tree dies with the internal window, after the kind's role teardown
+  and before the native surface's.
+
+Popups and subsurfaces compose with it unchanged (an ext surface
+hosting widgets can still parent `fdk_ext_popup_create` dropdowns —
+the menu machinery works from a widget-tree press like from any
+window's).
+
+**Test coverage**: tests/test_x11_integration.c
+(`test_ext_widget_hosting_x11`: the window-owned root and its
+idempotence, a Label + Button built into an adopted X window,
+server-side pixel readback proving the theme background and the
+label's glyph ink, a real press+release activating the button while
+the tree consumes the pair — the add-on's callback correctly seeing
+neither — and a press over no widget reaching the add-on's callback,
+a real XResizeWindow re-arranging the root, and the teardown taking
+the tree with the surface) and the argument ladder in
+tests/test_extend.c. The suite also pins the destroy-less kind
+teardown (a kind whose ops omit the optional `destroy` — the NULL
+call the hosting test's first run exposed, fixed with the guard the
+header always promised). 1032 exports, +10 of them this feature and
+the chooser widgets below.
+
+---
+
 ## The reference consumer: fdk-layer-shell (its own repository)
 
 The model this document describes has its proof: the

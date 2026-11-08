@@ -89,7 +89,9 @@ static void ext_destroy_notify(fdk_window *window, void *user) {
     }
     if (ext->kind != NULL) {
         fdk_ext_surface_kind *kind = ext->kind;
-        kind->ops.destroy(ext, kind->user);
+        if (kind->ops.destroy != NULL) {
+            kind->ops.destroy(ext, kind->user);
+        }
         if (kind->live_surfaces > 0) {
             kind->live_surfaces--;
         }
@@ -504,6 +506,41 @@ void fdk_ext_surface_set_event_callback(fdk_ext_surface *surface,
     }
     surface->event_cb = callback;
     surface->event_cb_user = user;
+}
+
+/* ---- widget hosting (extension API v3, 1.0.0) ----------------------------
+ *
+ * The structural rule earns its keep here: an extension surface IS
+ * an fdk_window internally, and the window layer already owns the
+ * whole widget-hosting machinery — fdk_window_get_root builds the
+ * window-owned root (theme-background default, a11y, the opaque
+ * owner back-edge), the dispatch tail routes events into the tree,
+ * the configure path resizes it, and fdk__window_set_auto_paint
+ * gives the frame-paced repaint+present toolkit windows run on.
+ * Hosting is therefore one honest bridge, zero new rendering code:
+ * build the root and flip the same auto-paint bit the dialogs flip.
+ * The add-on's event callback keeps firing (the trampoline is the
+ * window's callback; the tree dispatch is independent of it), so
+ * the documented "the application still sees every event" contract
+ * holds without a second routing path. */
+fdk_result fdk_ext_surface_host_widgets(fdk_ext_surface *surface,
+                                        fdk_widget **out_root) {
+    if (surface == NULL || out_root == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (surface->window == NULL) {
+        return FDK_ERR_INVALID_STATE; /* inside kind->create */
+    }
+    fdk_widget *root = NULL;
+    fdk_result r = fdk_window_get_root(surface->window, &root);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    /* The toolkit-owned repaint tail: events, damage, frame pacing —
+     * the dialogs' machinery (window.c's auto_paint block). */
+    fdk__window_set_auto_paint(surface->window, true);
+    *out_root = root;
+    return FDK_OK;
 }
 
 /* ---- popups --------------------------------------------------------------- */

@@ -79,7 +79,8 @@ suite (`docs/testing.md`).
   entries (password / read-only / max-length), TextView editor, List,
   Tree, IconView, Notebook with drag-reorderable tabs, menus and
   submenus, toolbar, Canvas, dialogs (including a real file dialog
-  with list/icon browsing), Font and Color choosers, Picture, sliders,
+  with list/icon browsing), Font and Color choosers in both forms —
+  dialogs and inline widgets sharing one engine — Picture, sliders,
   spinners, level bars, revealers, and more.
 - **Desktop icon themes in the file dialogs** — the pickers resolve
   their icons through an internal freedesktop icon-theme engine: the

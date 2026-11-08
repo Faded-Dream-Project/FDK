@@ -19,6 +19,7 @@
 
 #include "widget/widgets_internal.h" /* internal state + helpers   */
 #include "widget/widget_internal.h"  /* paint alpha + the clock    */
+#include "core/alloc_internal.h"     /* fdk_free (owned strings)   */
 
 #include <assert.h>
 #include <stdio.h>
@@ -736,6 +737,257 @@ static void test_color_button(void) {
            "ACTIVATE action, detached no-op presses\n");
 }
 
+/* ===================================================================
+ * The inline color chooser widget (1.0.0)
+ * =================================================================== */
+
+static int g_ccw_changes = 0;
+static fdk_color g_ccw_last = {0, 0, 0, 0};
+static void on_ccw_changed(fdk_widget *chooser, fdk_color color,
+                           void *user) {
+    (void)chooser;
+    (void)user;
+    g_ccw_changes++;
+    g_ccw_last = color;
+}
+
+/* The destroy-from-callback case: the change callback owns the
+ * gesture and may tear the chooser down — the watch discipline must
+ * absorb it (ASan referees the lifetime). */
+static void on_ccw_destroying(fdk_widget *chooser, fdk_color color,
+                              void *user) {
+    (void)color;
+    (void)user;
+    fdk_widget_destroy(chooser);
+}
+
+static void test_color_chooser_widget(void) {
+    if (g_font == NULL) {
+        printf("[skip] color chooser widget: no system font\n");
+        return;
+    }
+    fdk_widget *root = fresh_root();
+    fdk_widget *cc = NULL;
+    fdk_color red = {0.90f, 0.10f, 0.10f, 1.0f};
+    assert(fdk_color_chooser_widget_create(root, red, &cc) == FDK_OK);
+    assert(fdk_color_chooser_widget_create(NULL, red, &cc) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_color_chooser_widget_create(root, red, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    /* The initial state; the getter's NULL / wrong-class answers. */
+    fdk_color got = fdk_color_chooser_widget_get_color(cc);
+    assert(got.r > 0.85f && got.g < 0.15f && got.b < 0.15f);
+    assert(fdk_color_chooser_widget_get_color(NULL).a == 0.0f);
+    assert(fdk_color_chooser_widget_get_color(root).a == 0.0f);
+
+    /* The silent setter: state moves, the gesture callback does not
+     * fire (the color button's contract, verbatim). */
+    fdk_color_chooser_widget_set_on_color_changed(cc, on_ccw_changed,
+                                                  NULL);
+    fdk_color blue = {0.10f, 0.20f, 0.90f, 1.0f};
+    g_ccw_changes = 0;
+    assert(fdk_color_chooser_widget_set_color(cc, blue) == FDK_OK);
+    got = fdk_color_chooser_widget_get_color(cc);
+    assert(got.b > 0.8f && got.r < 0.2f);
+    assert(g_ccw_changes == 0);
+    assert(fdk_color_chooser_widget_set_color(NULL, blue) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    fdk_color_chooser_widget_set_on_color_changed(NULL,
+                                                  on_ccw_changed, NULL);
+
+    /* Natural size + the arrange laying the engine's pieces out. */
+    fdk_size nat = {0, 0};
+    fdk_widget_measure(cc, &nat);
+    assert(nat.width == 426 && nat.height == 256);
+    fdk_widget_arrange(cc, (fdk_rect){0, 0, 426, 256});
+
+    /* Paint: the wheel's rasterization is real (a ring pixel at the
+     * 120-degree position is saturated GREEN) and the swatch holds
+     * the current blue. */
+    fdk_surface *s = NULL;
+    paint_root(root, &s);
+    fdk_u32 ring = px_at(s, 20 + 61, 20 + 27); /* local (61, 27)  */
+    fdk_u32 swatch = px_at(s, 256 + 75, 20 + 22);
+    assert(((ring >> 16) & 0xFF) < 0x40);          /* red low     */
+    assert(((ring >> 8) & 0xFF) > 0xB0);           /* green high  */
+    fdk_u32 expect_blue =
+        ((fdk_u32)(0.10f * 255.0f + 0.5f) << 16) |
+        ((fdk_u32)(0.20f * 255.0f + 0.5f) << 8) |
+        (fdk_u32)(0.90f * 255.0f + 0.5f);
+    assert(swatch == expect_blue);
+    fdk_surface_destroy(s);
+
+    /* The user path (the seam drives the real drag handler): the
+     * ring pick at the 120-degree position moves the state to green
+     * and fires the change callback ONCE with the new color. */
+    g_ccw_changes = 0;
+    fdk__colorchooser_test_pick(cc, 61.0f, 27.0f, true);
+    assert(g_ccw_changes == 1);
+    assert(g_ccw_last.a == 1.0f);
+    got = fdk_color_chooser_widget_get_color(cc);
+    assert(got.g > 0.8f && got.r < 0.2f && got.b < 0.2f);
+
+    /* A triangle pick (the inscribed SV triangle) moves saturation
+     * /value and fires again. */
+    g_ccw_changes = 0;
+    fdk__colorchooser_test_pick(cc, 108.0f, 118.0f, false);
+    assert(g_ccw_changes == 1);
+    got = fdk_color_chooser_widget_get_color(cc);
+    assert(got.a == 1.0f);
+
+    /* The change callback may destroy the chooser — nothing after
+     * the fire touches it (ASan referees the lifetime). */
+    fdk_widget *cc2 = NULL;
+    assert(fdk_color_chooser_widget_create(root, red, &cc2) == FDK_OK);
+    fdk_color_chooser_widget_set_on_color_changed(cc2, on_ccw_destroying,
+                                                  NULL);
+    fdk__colorchooser_test_pick(cc2, 128.0f, 35.0f, true);
+    fdk_widget_invalidate_all(root); /* the tree absorbed the destroy */
+
+    fdk_widget_destroy(root);
+    printf("[ok] color chooser widget: create ladder, initial state, "
+           "silent setter, 426x256 natural, wheel+swatch pixel "
+           "proofs, ring/triangle picks fire on_color_changed, "
+           "destroy-from-callback survivable\n");
+}
+
+/* ===================================================================
+ * The inline font chooser widget (1.0.0)
+ * =================================================================== */
+
+static int g_fcw_changes = 0;
+static void on_fcw_changed(fdk_widget *chooser, void *user) {
+    (void)chooser;
+    (void)user;
+    g_fcw_changes++;
+}
+
+static void test_font_chooser_widget(void) {
+    if (g_font == NULL) {
+        printf("[skip] font chooser widget: no system font\n");
+        return;
+    }
+    fdk_widget *root = fresh_root();
+    fdk_widget *fc = NULL;
+    assert(fdk_font_chooser_widget_create(root, &fc) == FDK_OK);
+    assert(fdk_font_chooser_widget_create(NULL, &fc) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_font_chooser_widget_create(root, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    /* Argument ladders + wrong-class refusals. */
+    assert(fdk_font_chooser_widget_set_sample(NULL, "x") ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_font_chooser_widget_set_sample(root, "x") ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_font_chooser_widget_set_selection(NULL, "x", NULL, 0) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_font_chooser_widget_set_selection(root, "x", NULL, 0) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    fdk_font_chooser_widget_set_on_changed(NULL, on_fcw_changed, NULL);
+
+    /* The selection round trip. How many faces the sandbox
+     * enumerates decides which half runs; both halves are honest. */
+    size_t count = 0;
+    {
+        fdk_font_info *infos = NULL;
+        assert(fdk_font_enumerate(&infos, &count) == FDK_OK);
+        fdk_font_info_list_free(infos, count);
+    }
+    char *family = NULL, *style = NULL, *path = NULL;
+    fdk_i32 face_index = 0, size = 0;
+    assert(fdk_font_chooser_widget_get_selection(
+               fc, &family, &style, &path, &face_index, &size) ==
+           FDK_OK);
+    if (count == 0) {
+        /* The honest empty: nothing selected, FDK_OK, NULLs out. */
+        assert(family == NULL && style == NULL && path == NULL);
+        printf("[ok] font chooser widget: honest-empty enumeration "
+               "path\n");
+        fdk_widget_destroy(root);
+        return;
+    }
+    assert(family != NULL && style != NULL && path != NULL);
+    assert(size == 12); /* the create-time default */
+    char *first_family = family; /* keep for the fallback check */
+    family = NULL;
+    fdk_free(style);
+    style = NULL;
+    fdk_free(path);
+    path = NULL;
+
+    /* The programmatic selection: family + style + size, silent. */
+    fdk_font_chooser_widget_set_on_changed(fc, on_fcw_changed, NULL);
+    g_fcw_changes = 0;
+    assert(fdk_font_chooser_widget_set_sample(fc, "FdK 123") == FDK_OK);
+    assert(fdk_font_chooser_widget_set_selection(
+               fc, first_family, NULL, 24) == FDK_OK);
+    assert(fdk_font_chooser_widget_get_selection(
+               fc, &family, &style, &path, &face_index, &size) ==
+           FDK_OK);
+    assert(family != NULL && strcmp(family, first_family) == 0);
+    assert(size == 24);
+    assert(g_fcw_changes == 0); /* the setter rule            */
+    fdk_free(family);
+    fdk_free(style);
+    fdk_free(path);
+    family = style = path = NULL;
+
+    /* An unknown family falls back to the FIRST face (the dialog's
+     * initial_family semantics) and stays silent. */
+    assert(fdk_font_chooser_widget_set_selection(
+               fc, "No Such Family 0xDEAD", NULL, 0) == FDK_OK);
+    assert(fdk_font_chooser_widget_get_selection(
+               fc, &family, NULL, NULL, NULL, &size) == FDK_OK);
+    assert(family != NULL && strcmp(family, first_family) == 0);
+    assert(size == 12); /* 0/invalid clamps to the default      */
+    fdk_free(family);
+    family = NULL;
+    fdk_free(first_family);
+
+    /* The USER path (the seam drives the real list/spin handlers):
+     * the change callback fires with the pipeline live. */
+    g_fcw_changes = 0;
+    fdk__fontchooser_test_select(fc, 0, 30);
+    assert(g_fcw_changes >= 1);
+    assert(fdk_font_chooser_widget_get_selection(
+               fc, NULL, NULL, NULL, NULL, &size) == FDK_OK);
+    assert(size == 30);
+
+    /* Paint: the list and the preview strips carry real pixels
+     * (text rendered, the arrange applied). */
+    fdk_widget_arrange(fc, (fdk_rect){0, 0, 600, 320});
+    fdk_widget_set_bounds(root, (fdk_rect){0, 0, 600, 320});
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(600, 320, &s)));
+    fdk_widget_invalidate_all(root);
+    fdk_widget_tree_paint(root, s);
+    int lit_list = 0, lit_preview = 0;
+    for (int y = 24; y < 100; y++) {
+        for (int x = 22; x < 266; x++) {
+            if (px_at(s, x, y) != 0) {
+                lit_list++;
+            }
+        }
+    }
+    for (int y = 80; y < 300; y++) {
+        for (int x = 292; x < 590; x++) {
+            if (px_at(s, x, y) != 0) {
+                lit_preview++;
+            }
+        }
+    }
+    assert(lit_list > 20);    /* row text in the list strip       */
+    assert(lit_preview > 20); /* the sample in the preview strip  */
+    fdk_surface_destroy(s);
+
+    fdk_widget_destroy(root);
+    printf("[ok] font chooser widget: create ladder, selection round "
+           "trip (silent), unknown-family fallback, user-path change "
+           "callback, list+preview paint proofs\n");
+}
+
 int main(void) {
     g_font = fdk_font_load_system_default(14);
     if (g_font == NULL) {
@@ -751,6 +1003,8 @@ int main(void) {
     test_tree_multi_select();
     test_font_enumerate();
     test_color_button();
+    test_color_chooser_widget();
+    test_font_chooser_widget();
 
     if (g_font != NULL) {
         fdk_font_destroy(g_font);

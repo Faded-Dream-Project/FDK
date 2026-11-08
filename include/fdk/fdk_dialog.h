@@ -609,6 +609,100 @@ void fdk_color_button_set_on_color_set(fdk_widget *button,
                                        fdk_color_button_fn fn,
                                        void *user_data);
 
+/* ---- Inline color chooser widget (1.0.0) ----
+ *
+ * The color chooser dialog's engine as an embeddable widget (GTK's
+ * GtkColorChooserWidget posture, FDK's engine): the same per-pixel
+ * HSV wheel, the current-color swatch, and the #rrggbb entry, laid
+ * out inside whatever container the application packs it into — no
+ * window, no OK/Cancel, nothing to accept: the color is LIVE, and
+ * get_color always answers the current state.
+ *
+ * The change callback fires for every USER gesture that moves the
+ * color (a wheel press, a drag, a hex Enter) — during a drag it
+ * fires continuously, matching the dialog's live recomputation. The
+ * programmatic setter stays silent, the toolkit-wide rule (the
+ * color button's set_color contract, verbatim).
+ *
+ * The widget paints no background of its own (every catalog widget
+ * paints transparently over its parent); pack it into a Frame/Box
+ * whose background suits the surface it lives on. */
+
+/* Fired on every user gesture that changes the color. `color` is
+ * the chooser's new current color (by value). */
+typedef void (*fdk_color_chooser_widget_fn)(fdk_widget *chooser,
+                                            fdk_color color,
+                                            void *user_data);
+
+/* Creates the inline chooser showing `initial` (a <= 0 is clamped
+ * opaque, the dialog's rule). Natural size ~406x256. */
+fdk_result fdk_color_chooser_widget_create(fdk_widget *parent,
+                                           fdk_color initial,
+                                           fdk_widget **out_widget);
+/* The current color (the wheel state, resolved to RGB). */
+fdk_color fdk_color_chooser_widget_get_color(fdk_widget *chooser);
+/* Sets the color programmatically: the wheel, the swatch, and the
+ * hex entry all follow; on_color_changed does NOT fire (it belongs
+ * to user gestures). */
+fdk_result fdk_color_chooser_widget_set_color(fdk_widget *chooser,
+                                              fdk_color color);
+/* Fires on every user gesture that changes the color. */
+void fdk_color_chooser_widget_set_on_color_changed(
+    fdk_widget *chooser, fdk_color_chooser_widget_fn fn,
+    void *user_data);
+
+/* ---- Inline font chooser widget (1.0.0) ----
+ *
+ * The font chooser dialog's engine as an embeddable widget (the
+ * GtkFontChooserWidget posture): the scrolling family/style list,
+ * the size spinner (6..96), and the live preview label rendering
+ * the sample text in the selected face — laid out inside whatever
+ * container packs it, no buttons, the selection live.
+ *
+ * An empty enumeration is honest, exactly like the dialog: the
+ * widget builds with an empty list and a dimmed preview; a selection
+ * taken from it reports the honest empty (get_selection answers
+ * FDK_OK with NULL strings). The change callback fires for every
+ * USER gesture (a list row picked, a size spun); the programmatic
+ * selection setter stays silent. */
+
+/* Fired on every user gesture that changes the selection (family,
+ * style, or size). Read the current choice with get_selection. */
+typedef void (*fdk_font_chooser_widget_fn)(fdk_widget *chooser,
+                                           void *user_data);
+
+/* Creates the inline chooser over the system's enumerated faces
+ * (the first face starts selected, the dialog's contract). Natural
+ * size 600x320. */
+fdk_result fdk_font_chooser_widget_create(fdk_widget *parent,
+                                          fdk_widget **out_widget);
+/* Sets the preview text (copied; NULL refuses). The preview
+ * reloads at the current face + size. */
+fdk_result fdk_font_chooser_widget_set_sample(fdk_widget *chooser,
+                                              const char *sample);
+/* Selects a face programmatically: `family` must match an
+ * enumerated face (style matches first when given, the dialog's
+ * initial_family semantics); a family the enumeration does not
+ * know selects the FIRST face — the same honest fallback. `size`
+ * is clamped to 6..96 (0/invalid = 12). Silent: on_changed does
+ * NOT fire. */
+fdk_result fdk_font_chooser_widget_set_selection(fdk_widget *chooser,
+                                                 const char *family,
+                                                 const char *style,
+                                                 fdk_i32 size);
+/* The current selection as OWNED copies — free each returned
+ * non-NULL string with fdk_free. A NULL out pointer skips that
+ * field. No face selected (an empty enumeration): the strings stay
+ * NULL and the call still answers FDK_OK. The application turns
+ * path+face_index+size into a font with fdk_font_load_face. */
+fdk_result fdk_font_chooser_widget_get_selection(
+    fdk_widget *chooser, char **out_family, char **out_style,
+    char **out_path, fdk_i32 *out_face_index, fdk_i32 *out_size);
+/* Fires on every user gesture that changes the selection. */
+void fdk_font_chooser_widget_set_on_changed(fdk_widget *chooser,
+                                            fdk_font_chooser_widget_fn fn,
+                                            void *user_data);
+
 #ifdef __cplusplus
 }
 #endif

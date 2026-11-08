@@ -4,9 +4,44 @@ The project owner set the first release to **1.0.0**
 (docs/versioning.md, 2026-11-08): the 1.0.0-rcN candidate numbering
 is retired, the pre-release suffix is dropped, and the cycle labels
 across the tree (code comments, docs, packaging, this changelog's
-candidate entries) read 1.0.0. No code changes ride this entry
-beyond the version identity itself — the tree's state at the time
-of the decision ships as-is.
+candidate entries) read 1.0.0. The decision itself carried no code
+changes; the round-40 release-closing work below landed under the
+same release identity before the tag.
+
+### Added (round 40)
+
+- **Inline chooser widgets** — the PARITY honest tail closed:
+  `fdk_color_chooser_widget` (the dialog's per-pixel HSV wheel, the
+  current-color swatch, and the #rrggbb entry as an embeddable
+  widget — the color is live, no OK/Cancel) and
+  `fdk_font_chooser_widget` (the scrolling family/style list, the
+  size spinner, and the live preview as an embeddable widget). Both
+  share the dialogs' engines by construction (one wheel rasterizer,
+  one hex parser, one enumeration path, one preview reload — the
+  dialog and the widget are two hosts of one `fdk_cc_core` /
+  `fdk_fc_core`); user gestures fire the new change callbacks,
+  programmatic setters stay silent (the color button's rule). 10
+  new public functions in fdk_dialog.h (1010 → 1032 exports with
+  the extension entry points below). Headless tests: create
+  ladders, the silent-setter contract, wheel+swatch pixel proofs,
+  ring/triangle picks, the unknown-family fallback, the honest
+  empty enumeration, destroy-from-callback survival
+  (tests/test_choosers.c).
+- **Widget hosting on extension surfaces (extension API v3)** —
+  `FDK_EXT_API_VERSION` 2 → 3 and
+  `fdk_ext_surface_host_widgets()`: the whole widget catalog (text
+  included) on any extension surface, through the window layer's
+  own root machinery — a window-owned root, configure-driven
+  re-layout, standard input dispatch, and the frame-paced
+  auto-paint tail the dialogs run on. The add-on's event callback
+  keeps the standard `fdk_window_get_root` rule (window-level
+  events always; widget-consumed input does not). The X11
+  integration test pins the root's idempotence, server-side pixel
+  proofs, a real click activating a button, a real XResizeWindow
+  re-arranging the tree, and teardown. Fixed alongside it: a
+  destroy-less kind (ops.destroy == NULL, documented optional)
+  crashed the teardown — the NULL guard the header always promised
+  is now in the destroy path.
 
 
 ### Fixed (round 22)

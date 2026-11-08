@@ -13182,6 +13182,174 @@ static void test_ext_notify_configure(void) {
            "render resize\n");
 }
 
+/* ---- extension API v3: widget hosting on an extension surface -------
+ *
+ * The "text on extension surfaces" contract, against a live X
+ * server: host_widgets builds the window-owned root, the ordinary
+ * catalog (a Label + a Button) renders into the adopted window
+ * through the auto-paint tail, a real click activates the button,
+ * the add-on's own event callback keeps seeing the stream beside
+ * the tree's dispatch, a real X resize re-arranges the root, and
+ * the teardown takes the tree with the surface. */
+
+/* The hosting test's kind create: a plain UNMAPPED 200x100 window
+ * (no dock properties — the tree owns the pixels, chrome-free). */
+static fdk_result ext_widget_host_create(fdk_ext_surface *surface,
+                                         fdk_ext_native_handle *out_native,
+                                         void *user) {
+    (void)user;
+    fdk_context *ctx = fdk_ext_surface_context(surface);
+    assert(ctx != NULL);
+    fdk_ext_native_display nd;
+    if (!fdk_ok(fdk_ext_get_native_display(ctx, &nd))) {
+        return FDK_ERR_NOT_INITIALIZED;
+    }
+    Display *dpy = (Display *)nd.display;
+    Window xw = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
+                                    12, 34, 200, 100, 0,
+                                    BlackPixel(dpy, DefaultScreen(dpy)),
+                                    WhitePixel(dpy, DefaultScreen(dpy)));
+    if (xw == None) {
+        return FDK_ERR_WINDOW_CREATE;
+    }
+    XFlush(dpy);
+    out_native->backend = FDK_EXT_BACKEND_X11;
+    out_native->xid = (fdk_u64)xw;
+    return FDK_OK;
+}
+
+static int g_host_activates;
+static void host_button_activated(fdk_widget *button, void *user) {
+    (void)button;
+    (void)user;
+    g_host_activates++;
+}
+
+static void test_ext_widget_hosting_x11(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_ext_surface_ops ops;
+    memset(&ops, 0, sizeof(ops));
+    ops.struct_size = sizeof(ops);
+    ops.create = ext_widget_host_create;
+    fdk_ext_surface_kind *kind = NULL;
+    assert(fdk_ok(fdk_ext_register_kind(ctx, "test.host", &ops, NULL,
+                                        &kind)));
+
+    fdk_ext_surface *surf = NULL;
+    assert(fdk_ok(fdk_ext_surface_create(kind, &surf)));
+    fdk_ext_surface_show(surf);
+    (void)fdk_pump_events(ctx, 100);
+
+    /* Argument ladder, then the host itself (idempotent root). */
+    fdk_widget *root = NULL;
+    assert(fdk_ext_surface_host_widgets(NULL, &root) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_ok(fdk_ext_surface_host_widgets(surf, &root)));
+    assert(root != NULL);
+    fdk_widget *root2 = NULL;
+    assert(fdk_ok(fdk_ext_surface_host_widgets(surf, &root2)));
+    assert(root2 == root); /* the same window-owned root */
+
+    /* The ordinary catalog builds into it: text ON the extension
+     * surface, the point of the feature. */
+    fdk_font *ui = fdk_font_load_system_default(14);
+    assert(ui != NULL);
+    fdk_widget *label = NULL;
+    assert(fdk_ok(fdk_label_create(root, ui, "ext surface text",
+                                   &label)));
+    fdk_widget_set_bounds(label, (fdk_rect){8, 8, 180, 20});
+    fdk_widget *btn = NULL;
+    assert(fdk_ok(fdk_button_create(root, ui, "Hit", &btn)));
+    fdk_widget_set_bounds(btn, (fdk_rect){8, 36, 80, 30});
+    fdk_button_set_on_activate(btn, host_button_activated, NULL);
+
+    /* A real X configure re-arranges the root and the auto-paint
+     * tail presents the frame (200x100 -> 240x120, a real event). */
+    Display *own_dpy = XOpenDisplay(NULL);
+    assert(own_dpy != NULL);
+    fdk_ext_native_handle nh;
+    assert(fdk_ok(fdk_ext_surface_native(surf, &nh)));
+    XResizeWindow(own_dpy, (Window)nh.xid, 240, 120);
+    XFlush(own_dpy);
+    x11_frame_settle(ctx);
+
+    fdk_rect rb = fdk_widget_get_bounds(root);
+    assert(rb.width == 240 && rb.height == 120);
+
+    /* Server-side pixel proof (second connection): the root's
+     * theme background fills the surface — the white create-time
+     * pixel is gone everywhere FDK paints. */
+    fdk_color bgc = fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
+    fdk_u32 expect_bg =
+        ((fdk_u32)(bgc.r * 255.0f + 0.5f) << 16) |
+        ((fdk_u32)(bgc.g * 255.0f + 0.5f) << 8) |
+        (fdk_u32)(bgc.b * 255.0f + 0.5f);
+    unsigned long corner =
+        x11_readback_pixel(&own_dpy, nh.xid, 235, 115);
+    assert((corner & 0xFFFFFFu) == expect_bg);
+
+    /* The add-on's own callback keeps running under the standard
+     * fdk_window_get_root rule: window-level events always reach it;
+     * input events a widget CONSUMED do not. */
+    g_ext_events = 0;
+    g_ext_last_event = 0;
+    fdk_ext_surface_set_event_callback(surf, ext_test_event, NULL);
+
+    /* A real press+release on the button (window-local 48, 51) —
+     * the tree hit-tests, the implicit grab pairs the click, the
+     * activation fires once, and the tree CONSUMES the pair (the
+     * add-on's callback correctly sees neither). */
+    g_host_activates = 0;
+    x11_send_pointer_event(own_dpy, nh.xid, ButtonPress,
+                           ButtonPressMask, 48, 51, 1);
+    x11_send_pointer_event(own_dpy, nh.xid, ButtonRelease,
+                           ButtonReleaseMask, 48, 51, 1);
+    XFlush(own_dpy);
+    x11_frame_settle(ctx);
+    assert(g_host_activates == 1);
+    assert(g_ext_events == 0); /* consumed by the tree, the contract */
+
+    /* A press over NO widget: nothing consumes it — the add-on's
+     * callback sees the raw event exactly like an application's
+     * window callback would. */
+    x11_send_pointer_event(own_dpy, nh.xid, ButtonPress,
+                           ButtonPressMask, 220, 112, 1);
+    x11_send_pointer_event(own_dpy, nh.xid, ButtonRelease,
+                           ButtonReleaseMask, 220, 112, 1);
+    XFlush(own_dpy);
+    x11_frame_settle(ctx);
+    assert(g_ext_events >= 2);
+    assert(g_ext_last_event == FDK_EVENT_POINTER_BUTTON_UP);
+
+    /* Text ink on the surface: the label's glyphs are real pixels
+     * distinct from the background (a scan of the label's band). */
+    int ink = 0;
+    for (int y = 10; y < 26 && ink < 3; y++) {
+        for (int x = 10; x < 180 && ink < 3; x++) {
+            if ((x11_readback_pixel(&own_dpy, nh.xid, x, y) &
+                 0xFFFFFFu) != expect_bg) {
+                ink++;
+            }
+        }
+    }
+    assert(ink >= 3); /* glyph pixels over the background fill     */
+
+    XCloseDisplay(own_dpy);
+    fdk_font_destroy(ui);
+
+    /* Teardown: the tree dies with the surface (window-owned root),
+     * the kind is free after, shutdown is clean (ASan referees). */
+    fdk_ext_surface_destroy(surf);
+    assert(fdk_ext_kind_destroy(kind) == FDK_OK);
+    fdk_shutdown(ctx);
+    printf("[ok] ext widget hosting: window-owned root, catalog on "
+           "the surface, pixel + click + resize proofs, add-on "
+           "callback still live, teardown clean\n");
+}
+
 /* Popup-on-ext-parent close-request recorder. */
 static int g_ext_popup_closes;
 static void ext_popup_event(fdk_ext_surface *surface,
@@ -15217,6 +15385,7 @@ int main(void) {
     test_ext_surface_lifecycle();
     test_ext_notify_configure();
     test_ext_popup_x11();
+    test_ext_widget_hosting_x11();
     test_ext_fd_sources();
     test_ext_subsurface_x11();
     test_xi2_tablet();

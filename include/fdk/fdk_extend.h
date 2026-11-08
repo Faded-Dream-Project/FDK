@@ -56,6 +56,7 @@
 #include "fdk_event.h"
 #include "fdk_types.h"
 #include "fdk_version.h"
+#include "fdk_widget.h" /* v3: the widget-hosting root (fdk_widget) */
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,9 +81,12 @@ extern "C" {
  * grows. Version history: v1 (FDK 1.0.0-rc1) — kinds, surfaces,
  * popups, fd sources; v2 (FDK 1.0.0, D-2) — subsurfaces: the
  * FDK-owned child-surface primitive and its position/stacking/mode
- * operations (see the Subsurfaces section below).
+ * operations (see the Subsurfaces section below); v3 (FDK 1.0.0) —
+ * widget hosting: fdk_ext_surface_host_widgets() puts the ordinary
+ * widget catalog on any extension surface (see the Widget hosting
+ * section below).
  */
-#define FDK_EXT_API_VERSION 2
+#define FDK_EXT_API_VERSION 3
 
 /* Returns the RUNTIME extension-API version of the loaded FDK
  * library (>= 1). Add-ons call this once at startup and compare
@@ -429,6 +433,62 @@ fdk_result fdk_ext_surface_notify_configure(fdk_ext_surface *surface,
 void fdk_ext_surface_set_event_callback(fdk_ext_surface *surface,
                                         fdk_ext_event_fn callback,
                                         void *user);
+
+/* ---- Widget hosting (extension API v3, FDK 1.0.0) ------------------------
+ *
+ * The whole widget catalog — labels, entries, buttons, boxes, the
+ * choosers, everything in fdk_widgets.h — on an extension surface.
+ * This is the "text on extension surfaces" gap closed: a label is
+ * one fdk_label_create away on a layer-shell bar, a notification
+ * card, a dock.
+ *
+ * fdk_ext_surface_host_widgets() creates the surface's WINDOW-OWNED
+ * widget root (exactly the root fdk_window_get_root hands out for
+ * application windows) and turns on the toolkit-owned repaint: from
+ * then on the surface behaves like a toolkit dialog's window —
+ *   - configure events resize and re-arrange the tree (X11's real
+ *     ConfigureNotify; Wayland's fdk_ext_surface_notify_configure
+ *     reports — the root follows both automatically),
+ *   - pointer, keyboard, and scroll events dispatch into the tree
+ *     (hit-testing, implicit grab, focus — the standard widget
+ *     semantics, child-local coordinates),
+ *   - damaged regions repaint through the ordinary paint walk and
+ *     present at the frame pacing every toolkit window gets
+ *     (fdk_surface_frame_ready's gate — hover motion cannot
+ *     out-commit the compositor).
+ *
+ * The contract, stated once:
+ *   - The tree OWNS the surface's pixels while hosted: every frame
+ *     the root's background fills first (the theme window-background
+ *     token by default; fdk_widget_set_background on the root
+ *     overrides it), then the widgets draw. Draw custom chrome with
+ *     widget primitives (a Canvas, styled widgets), not by writing
+ *     the fdk_surface directly — the same posture every auto-paint
+ *     window has. Mixing direct present() calls with a hosted tree
+ *     is an application race, not a supported mode.
+ *   - The add-on's OWN event callback (set_event_callback) keeps
+ *     running, under the same rule every application window has
+ *     (the documented fdk_window_get_root contract): window-level
+ *     events (configure, expose, close) always reach it; INPUT
+ *     events a widget of the tree consumed do NOT — a button press
+ *     belongs to the button. Events no widget handled still arrive.
+ *   - The root is window-owned: destroyed with the surface
+ *     (fdk_widget_destroy refuses it, the FDK_WF_WINDOW_ROOT rule);
+ *     build the tree into it with the ordinary create calls.
+ *   - Keyboard focus follows the surface's own focus exactly like
+ *     the raw event stream does — on Wayland a layer surface needs
+ *     its keyboard-interactivity set by the add-on's protocol
+ *     negotiation before entries and text views can take focus.
+ *   - Hosting twice returns the SAME root (idempotent, like
+ *     fdk_window_get_root); a NULL surface/out_root fails
+ *     FDK_ERR_INVALID_ARGUMENT; OOM propagates.
+ *
+ * Can fail with:
+ *   FDK_ERR_INVALID_ARGUMENT - surface or out_root is NULL
+ *   FDK_ERR_OUT_OF_MEMORY    - the root's first allocation
+ */
+fdk_result fdk_ext_surface_host_widgets(fdk_ext_surface *surface,
+                                        fdk_widget **out_root);
 
 /* ---- Popups parented to extension surfaces -------------------------------
  *

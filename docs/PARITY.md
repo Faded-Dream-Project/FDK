@@ -69,18 +69,20 @@ tree, iconview, calendar, date picker, time picker, combo, canvas.
 **GTK4 widget inventory diff**: missing are `GtkAssistant`
 (deliberate policy: OUT), `GtkActionBar` (toolbar + custom
 containers cover the layout), `GtkFixed` (FDK containers position
-explicitly — same role), `GtkColorChooserWidget`/
-`GtkFontChooserWidget` (the DIALOGS exist —
-`fdk_dialog_choose_color/font` — the inline widget form does
-not; choosers.c ships some inline chooser machinery),
-`GtkScaleButton`, `GtkVolumeButton`, `GtkRecentChooser`,
-`GtkAppChooserWidget`. The GRID container exists (1.4.x:
+explicitly — same role), `GtkScaleButton`, `GtkVolumeButton`,
+`GtkRecentChooser`, `GtkAppChooserWidget`. The chooser pair is
+CLOSED (this round): `fdk_color_chooser_widget` and
+`fdk_font_chooser_widget` are the inline widget forms of the
+`fdk_dialog_choose_color/font` dialogs, built on the same
+chooser engines (one implementation, two hosts — the dialog and
+the widget share the wheel, the hex parser, the enumeration and
+the preview reload). The GRID container exists (1.4.x:
 `fdk_grid_create/_attach` with colspan/rowspan,
 row/column expand, homogeneous, spacing, padding — the GtkGrid
 feature set; corrected 2026-11-01, an earlier revision of this
-document wrongly listed grid as a gap). **PARTIAL** — the
-every-application set is complete; the chooser-widget forms are
-the honest missing tail.
+document wrongly listed grid as a gap). **CLOSED** — the
+every-application set is complete; the chooser-widget forms
+shipped.
 
 **Qt6 Widgets diff**: Qt's ~180 classes include a rich
 item-view/MVC layer (QTableView, QHeaderView, QDataWidgetMapper,
@@ -246,10 +248,10 @@ toolkit's spine; see docs/threading.md).
 | 1 | fdk-shell-overlay (shell surfaces) | **CLOSED** — the package (formerly `fdk-shell/`, renamed this round); X11 suite green in-sandbox, live re-anchoring + auto-hide + outputs + popups verified on Xvfb |
 | 2 | Clipboard: image + URI-list formats | **CLOSED** — image since 1.0.0 + INCR 1.0.0; text/uri-list set/get added this round (§23/B2a-close), both backends, two-process verified |
 | 3 | Gestures + multi-touch | **CLOSED** — touch slots + PINCH/SWIPE events since 1.0.0; the RECOGNIZER layer (click/long-press/drag/pan/swipe/zoom/rotate) added this round (§23/B2b) |
-| 4 | Text on extension surfaces | OPEN (the next extension-API version: hosting widgets on fdk_ext_surface) |
+| 4 | Text on extension surfaces | **CLOSED** (this round) — extension API v3: `fdk_ext_surface_host_widgets()` puts the whole widget catalog (any label's text with it) on any extension surface through the window layer's own root machinery; the X11 integration test pins render, input, resize, the add-on callback contract, and teardown |
 | 5 | Pango-grade run attributes in markup | **CLOSED** this round (§23/B2c) — the named set; the deeper tail (gravity, features, stretch) stated above |
 | 6 | Grid container | **CLOSED** (shipped 1.4.x; this document's earlier revision wrongly listed it — corrected this round) |
-| 7 | Inline chooser widgets (color/font) | OPEN (dialogs exist; the widget forms do not) |
+| 7 | Inline chooser widgets (color/font) | **CLOSED** (this round) — `fdk_color_chooser_widget` (the HSV wheel + swatch + hex entry, live) and `fdk_font_chooser_widget` (the face list + size spinner + live preview), the dialogs' engines as embeddable widgets; headless tests pin the silent setters, the user-gesture callbacks, and the pixel output |
 | 8 | Model/view split for tree/list | **CLOSED** this round (§23/B2e) — model + sort/filter proxies + live bindings + selection-by-id + reorder write-back |
 | 9 | Print dialog / CUPS | **CLOSED** this round (§23/B2f) — own PDF writer (pdfinfo-verified), native IPP client (RFC 8010/8011, no libcups), dialog + preview |
 | 10 | Windows/macOS backends | OUT by charter |

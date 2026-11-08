@@ -77,6 +77,15 @@ static void test_argument_ladder(void) {
     fdk_ext_loop_remove_fd(NULL); /* safe no-op */
     assert(fdk_ext_fd_source_fd(NULL) == -1);
 
+    /* Widget hosting (v3): the argument ladder. The real hosting
+     * needs a live backend and lives in the X11 integration suite's
+     * extension section. */
+    fdk_widget *host_root = NULL;
+    assert(fdk_ext_surface_host_widgets(NULL, &host_root) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    /* (A non-NULL surface without a live backend is INVALID_STATE —
+     * unreachable here without a kind; the X11 suite drives it.) */
+
     printf("[ok] ext argument/NULL ladder: every entry point\n");
 }
 

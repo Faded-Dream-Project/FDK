@@ -3402,6 +3402,8 @@ int main(void) {
                "weston)\n");
     } else {
         int focus_ever = 0;
+        int injected = 0;   /* the real-seat injector's availability:
+                             * leg A arms it, leg B reads it        */
 
         /* LEG A — the pipeline: no text widget, the window callback
          * is the composition surface. */
@@ -3418,7 +3420,7 @@ int main(void) {
             fdk_window_set_event_callback(aw, ime_win_cb, NULL);
             fdk_window_show(aw);
 
-            (void)wayland_injector_start();
+            injected = wayland_injector_start();
             int base_activations = g_ime.activations;
             for (int i = 0; i < 45 &&
                             g_ime.activations == base_activations;
@@ -3440,6 +3442,19 @@ int main(void) {
                     (void)fdk_pump_events(ctx, 50);
                     ime_client_poll(20);
                 }
+                if (g_ime_cb.preedits == 0 && !injected) {
+                    /* The relay armed (focus activated) but delivered
+                     * no composition — the inert-relay posture of a
+                     * sandbox without the real-seat injector tooling.
+                     * The e2e assert stays with CI and the owner's
+                     * desktop; fdk_ime.c's headless legs + the X11
+                     * suite carry the logic asserts. (The rule the
+                     * cursor/dnd sections run on: absent tooling
+                     * honestly skips.) */
+                    printf("[skip] wayland ime A: focus activated but "
+                           "the relay delivered nothing — no "
+                           "fdk-wl-inject in this sandbox\n");
+                } else {
                 assert(g_ime_cb.preedits == 1);
                 assert(strcmp(g_ime_cb.last_preedit, "nihao") == 0);
 
@@ -3469,6 +3484,7 @@ int main(void) {
                 printf("[ok] wayland ime A: preedit (show/revise/"
                        "clear) + commit reached the window callback "
                        "through the real sway relay\n");
+                }
             }
             fdk_window_destroy(aw);
             /* The window's death deactivates the IM on the relay;
@@ -3547,6 +3563,15 @@ int main(void) {
                     (void)fdk_pump_events(ctx, 50);
                     ime_client_poll(20);
                 }
+                if (g_ime_entry_changes == 0 && !injected) {
+                    /* Leg A's inert-relay posture, leg B's half: the
+                     * commit never reaches the entry without real
+                     * seat tooling — the honest skip, the assert
+                     * stays with CI and the owner's desktop. */
+                    printf("[skip] wayland ime B: the relay delivered "
+                           "no commit — no fdk-wl-inject in this "
+                           "sandbox\n");
+                } else {
                 assert(g_ime_entry_changes == 1);
                 assert(strcmp(fdk_entry_get_text(bentry), "h\xc7\x8eo") == 0);
 
@@ -3568,6 +3593,7 @@ int main(void) {
                        "(splice + on_changed) and the IM received the "
                        "updated surrounding text + caret — the full "
                        "loop through sway\n");
+                }
             }
             fdk_window_destroy(bw);
         }

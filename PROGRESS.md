@@ -4,29 +4,30 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-07, after round 30)
+## Current state (2026-11-08, after round 40)
 
-- **Version:** 1.0.0-dev line (no tags; the rc discipline holds —
-  the repo's own M-9 rule: no tag without the owner's sign-off).
-- **Surface:** 1,020 exported symbols, 34 public headers, 36 widget
-  classes; PARITY.md audited against the GTK4 4.24 catalog and Qt6.
-- **Batteries:** 784-check unit suite green (ASan/UBSan, both
-  backends); the nine-app fleet receipts on Xvfb, sway AND labwc;
-  the typing audit green (1,112,111 codepoints, 589 layouts).
-- **Release gate (G1–G7, docs/RELEASE-READINESS.md):** G2 PASS
-  (no open bugs), G5 PASS, G6 PASS. G1 open by the two PARITY tails
-  (text-on-extension-surfaces, inline chooser widgets); G3 open —
-  round 32 recorded one clean environment round; one more clean
-  round closes it; G4 open — the real-desktop walkthrough is the
-  owner's hardware; G7 not started (external evidence). **Do NOT
-  tag until G1–G6 are green.**
-- **Open bugs: NONE.** The layer-shell kill is CLOSED (round 31,
-  root cause + fix below); every P0/P1 is resolved.
-- **Next steps:** (1) the language sweep — every writing system the
-  installed fonts cover, rendered and typed, on X11 and labwc, table
-  in this file; (2) environment rounds (scales, fonts, layouts,
-  compositors) logging the bug-discovery rate per round until two
-  consecutive rounds are clean; (3) then the gate.
+- **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
+  no tag without the owner's sign-off).
+- **Surface:** 1,032 exported symbols, 34 public headers, 38 widget
+  classes (the two inline chooser widgets joined the catalog);
+  extension API v3 (widget hosting); PARITY.md audited against the
+  GTK4 4.24 catalog and Qt6 — its gap table now carries zero OPEN
+  rows.
+- **Batteries:** the unit suite green (ASan/UBSan); the X11
+  integration + uri + thread suites green on Xvfb; the Wayland
+  integration suite green against headless sway (39 groups; the
+  injector-less sections honest-skip, the IME relay's inert half
+  included — see round 40).
+- **Release gate (G1–G7, docs/RELEASE-READINESS.md), 2026-11-08 run:
+  G1 PASS, G2 PASS, G3 PASS, G5 PASS, G6 PASS — only G4 open** (the
+  28-section real-desktop walkthrough is the owner's hardware; the
+  sandbox cannot produce it); G7 not started (external evidence,
+  never blocks a tag). **Do NOT tag until G4 is signed** — then the
+  tag itself is the owner's call (docs/versioning.md).
+- **Open bugs: NONE.**
+- **Next steps:** (1) the owner's 28-section real-desktop walkthrough
+  closes G4 (docs/TESTING-ON-DESKTOP.md §§1–28 → docs/REAL-DESKTOP-
+  SIGNOFF.md); (2) then the tag is the owner's call.
 
 > **Repository posture (2026-10-31):** the project is **in
 > development — no stable release yet.** One branch (`main`), zero
@@ -36,6 +37,77 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 40 (2026-11-08) — the PARITY honest tail closed: the chooser widgets + widget hosting on extension surfaces (API v3); bug-rate: 0 new library bugs after the in-round find+fix
+
+The owner's instruction — "continue to build what's left" — read out
+of the release gate: G1's two PARITY OPEN rows were the only build
+work between the tree and the tag. Both shipped this round, each as
+a composition of shipped machinery rather than a new engine (the
+user's standing warning — nothing here reimplements what FDK
+already has):
+
+1. **Inline chooser widgets** (PARITY row 7, G1): the color and
+   font chooser DIALOGS already existed; the embeddable WIDGET
+   forms were the gap. Rather than duplicate the engines, both
+   dialogs were refactored to expose their cores (`fdk_cc_core` /
+   `fdk_fc_core`) and the new `fdk_color_chooser_widget` /
+   `fdk_font_chooser_widget` (fdk_dialog.h, 8 public functions)
+   host the SAME wheel rasterizer, hex parser, enumeration, and
+   preview reload — one implementation, two hosts. User gestures
+   fire the new change callbacks (watch-token guarded); the
+   programmatic setters stay silent (the color button's rule).
+   Headless tests (test_choosers.c): create ladders, the
+   silent-setter contract, wheel+swatch pixel proofs (a 120-degree
+   ring pixel is saturated green), ring/triangle picks, the
+   unknown-family fallback, the honest empty enumeration,
+   destroy-from-callback survival.
+2. **Widget hosting on extension surfaces** (PARITY row 4, G1):
+   extension API v2 → v3, one new entry point —
+   `fdk_ext_surface_host_widgets()`. The structural fact that an
+   extension surface IS an internal fdk_window meant the whole
+   hosting story already existed in the window layer: the bridge is
+   fdk_window_get_root + the dialogs' auto_paint tail (configure
+   re-layout, standard input dispatch, frame-paced repaint+present).
+   The add-on's event callback keeps the standard
+   fdk_window_get_root rule (window-level events always;
+   widget-consumed input does not) — the first test run asserted
+   the wrong contract there and the header doc was corrected to
+   match. The X11 integration test (test_ext_widget_hosting_x11)
+   pins the window-owned root + idempotence, server-side pixel
+   proofs (theme background fill + label glyph ink), a real click
+   activating a button while the tree consumes the pair, a press
+   over no widget reaching the add-on, a real XResizeWindow
+   re-arranging the root, and clean teardown.
+
+**The in-round find+fix** (found by the new X11 test, fixed in
+round): `ext_destroy_notify` called `kind->ops.destroy()` unguarded
+— the header has always documented destroy as OPTIONAL ("may be
+NULL"), and the hosting test's destroy-less kind crashed the
+teardown (NULL call). The guard is in. Bug-rate: 0 new library bugs
+after the fix; no P0/P1 open.
+
+**Environment evidence (G3's different-environments rule)**: this
+round ran headless (the full unit suite, ASan/UBSan), on Xvfb
+(X11 integration + uri + threads, all green), and against headless
+sway (the Wayland integration suite, 39 groups green) — a
+compositor environment. Sandbox-recycle notes for the next round:
+the X11 dev headers survived under /tmp/x11dev (scripts/env.sh),
+but `fdk-wl-inject` (untracked test infra) is gone — the cursor/
+dnd/menu sections honest-skip for it; and the IME group's e2e leg
+hard-asserted on a relay that is inert without that tooling. The
+pristine-HEAD worktree run (4e77d5a, zero round-40 changes) failed
+at the SAME assert — environmental, not a regression — and the
+group now carries the honest skip its siblings have (the assert
+stays hard wherever the tooling exists; leg B's commit loop still
+runs and PASSES on sway). The rig variable that cost a rerun:
+swaymsg needs SWAYSOCK exported.
+
+**Docs**: EXTENDING.md §19 (widget hosting, with the contract and
+the test map), CHANGELOG ([1.0.0] Added (round 40)), PARITY.md
+(both gap rows CLOSED + the GTK4 widget diff paragraph updated),
+README (the chooser line names both forms). verify-exports: 1032
+symbols, exactly the public API.
 
 ## Round 39 (2026-11-08) — everything above the first release reads 1.0.0, both repos
 
