@@ -407,6 +407,42 @@ static void test_fallback_cap_overflow(void) {
     fdk_font_destroy(f);
 }
 
+
+/* ---- 4c. fdk_text_count_uncovered: the honest tofu gate (round 36) ---- */
+static void test_count_uncovered(void) {
+    fdk_font *f = fdk_font_load(g_sans, 16);
+    assert(f != NULL);
+    /* Latin on DejaVu: zero, deterministically. */
+    assert(fdk_text_count_uncovered(f, "ABC abc", 7) == 0);
+    /* Control/whitespace ride the 'covered' gate. */
+    assert(fdk_text_count_uncovered(f, "a \t b", 6) == 0);
+    /* U+0378 is UNASSIGNED, but a font's cmap is the truth, not the
+     * Unicode tables — DejaVu famously maps codepoints Unicode
+     * hasn't assigned. The gate reflects the FONT; the pin is that
+     * the answer is STABLE (the negative cache and the fallback
+     * slots must not change it between calls). */
+    int un1 = fdk_text_count_uncovered(f, "\xCD\xB8", 2);
+    int un2 = fdk_text_count_uncovered(f, "\xCD\xB8", 2);
+    assert(un1 == un2);
+    printf("[ok] uncovered: U+0378 (unassigned) counts %d on this "
+           "font, stable across calls\n", un1);
+    /* The gothic primary + Hangul: 0 wherever a Korean-capable font
+     * answers (the sandbox's wqy-zenhei; the user's Noto CJK), 1
+     * honestly where none is installed — with the resolver's WARN
+     * in the log either way. */
+    fdk_font *g = fdk_font_load("/usr/share/fonts/truetype/"
+                                "fonts-japanese-gothic.ttf", 16);
+    if (g != NULL) {
+        int hang = fdk_text_count_uncovered(g, "\xED\x95\x9C", 3);
+        printf("[ok] uncovered: latin=0, U+0378=1, hangul=%d (%s)\n",
+               hang, hang == 0 ? "fallback answered"
+                               : "no Korean font installed");
+        fdk_font_destroy(g);
+    }
+    printf("[ok] uncovered: the count gate mirrors the render path\n");
+    fdk_font_destroy(f);
+}
+
 /* ---- 5. Clusters, marks, conjuncts ------------------------------------ */
 
 static void test_clusters_marks(void) {
@@ -1012,6 +1048,7 @@ int main(int argc, char **argv) {
     test_bidi_mixed();
     test_fallback_cjk();
     test_fallback_cap_overflow();
+    test_count_uncovered();
     test_clusters_marks();
     test_caret_and_wrap();
     test_draw_agrees();

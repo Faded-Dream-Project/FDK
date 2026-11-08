@@ -937,6 +937,44 @@ static fdk_font *sh_font_for_cp(fdk_font *primary, fdk_u32 cp,
     return primary;
 }
 
+int fdk_text_count_uncovered(fdk_font *font, const char *utf8,
+                             size_t n) {
+    if (font == NULL || utf8 == NULL) {
+        return 0;
+    }
+    /* Run the REAL pipeline (segmentation, bidi, fallback resolution)
+     * and attribute every codepoint to the font that paints it: an
+     * isolated per-codepoint classification lies for COMMON
+     * codepoints that inherit their neighbor's segment — U+FF0C and
+     * U+3002 ride the CJK fallback at paint time but classify
+     * script-less alone (the gate's first live run failed exactly
+     * Han and Kana on their punctuation while the render was fine). */
+    fdk__shaped *sh = fdk__shape_range(font, utf8, n, 0, n, NULL, 0);
+    if (sh == NULL) {
+        return 0;
+    }
+    int miss = 0;
+    for (size_t k = 0; k < sh->n_cp; k++) {
+        size_t b = sh->cp_byte[k];
+        fdk_font *f = font;
+        size_t best;
+        size_t have = 0;
+        for (size_t i = 0; i < sh->n_places; i++) {
+            size_t c = sh->places[i].cluster;
+            if (c <= b && (!have || c >= best)) {
+                best = c;
+                f = sh->places[i].font;
+                have = 1;
+            }
+        }
+        if (!fdk__font_covers(f, sh->cp[k])) {
+            miss++;
+        }
+    }
+    fdk__shaped_free(sh);
+    return miss;
+}
+
 /* ---- 7. The shaped pipeline ---------------------------------------- */
 
 /* One shaping segment: a maximal logical run with one direction

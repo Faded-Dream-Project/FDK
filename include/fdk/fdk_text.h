@@ -604,6 +604,16 @@ int fdk_text_shaping_available(void);
  * per-script fallback (whose answer fontconfig decides). */
 bool fdk_font_has_glyph(const fdk_font *font, fdk_u32 codepoint);
 
+/* How many codepoints of the string would draw as .notdef (tofu) if
+ * rendered with this font, through the SAME pipeline the widgets
+ * use: the per-script fallback resolution runs (and caches) exactly
+ * as it would at paint time, so 0 means "every codepoint is
+ * provably renderable on this machine" — the honest gate for test
+ * apps and self-checks. Control characters and whitespace count as
+ * covered (their .notdef is legitimately empty ink). */
+int fdk_text_count_uncovered(fdk_font *font, const char *utf8,
+                             size_t n);
+
 #ifdef __cplusplus
 }
 #endif

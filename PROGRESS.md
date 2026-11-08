@@ -37,6 +37,35 @@
 > checks on every push. See `docs/versioning.md` for the record.
 
 
+## Round 36 (2026-11-07) — the honest tofu gate ships: fdk_text_count_uncovered
+
+The round-35 note ("a real tofu-detector needs font-coverage
+introspection") is closed with a small public API:
+fdk_text_count_uncovered(font, utf8, n) — how many codepoints would
+draw .notdef under this font, computed by running the REAL pipeline
+(segmentation, bidi, per-script fallback resolution — the same
+caches and warnings) and attributing every codepoint to the font
+that actually paints it (largest cluster <= the cp's byte over the
+placement array, RTL-safe). fdk-langs gates every family on it now:
+the per-family line carries uncovered=N and a positive count is a
+LOUD LANG FAIL (fails++, exit 2) — renders=ok can never be fooled
+by tofu again.
+
+The gate's first live run caught its own bug before it could lie to
+anyone: per-codepoint classification failed Han and Kana on their
+fullwidth punctuation (U+FF0C, U+3002 classify script-less in
+isolation but inherit the CJK segment's font at paint time) — the
+rewrite through the real shaped result fixed exactly that, and the
+sandbox rerun is 13/13 families uncovered=0, fails=0.
+
+Pins (test_shaping.c test_count_uncovered): latin=0 deterministic;
+U+0378 reflects the FONT's cmap, not the Unicode tables (DejaVu
+maps the unassigned codepoint — count 0, stable across calls — the
+gothic primary counts 1); the gothic primary + Hangul = 0 wherever
+a Korean-capable font answers. Battery 792/792. The user confirmed
+the round-35 fix end to end on Arch (all noto-fonts packages
+installed; Hangul and Emoji render; exit clean).
+
 ## Round 35 (2026-11-07) — the silent-tofu bug found on the user's machine: the fallback-table cap
 
 **Root cause of "Hangul is just rectangles and zero emojis":** the

@@ -78,6 +78,7 @@ static char png_dir[280];
  * overrides (0 = the old flash-through, what the automated runs
  * use). */
 static long dwell_ms = 5000;
+static fdk_font *sys_font; /* the honest coverage gate */
 
 static long now_ms(void) {
     struct timespec ts;
@@ -129,6 +130,7 @@ static int ink_permille(void) {
 }
 
 static void run_family(int i) {
+    int unc = 0;
     const family *f = &FAMILIES[i];
     char title[128];
     snprintf(title, sizeof title, "lang: %s (%d/%d)", f->script, i + 1, NFAM);
@@ -176,9 +178,15 @@ static void run_family(int i) {
         printf("LANG FAIL %s: bidi line round-trip\n", f->script);
         fails++;
     }
-    printf("LANG %-10s ink=%4d permille renders=%s entry=%s bidi=%s\n",
+    unc = fdk_text_count_uncovered(sys_font, f->sample, strlen(f->sample)) +
+        fdk_text_count_uncovered(sys_font, f->mixed, strlen(f->mixed));
+    if (unc > 0) {
+        printf("LANG FAIL %s: %d codepoint(s) would draw .notdef (tofu) on this machine\n", f->script, unc);
+        fails++;
+    }
+    printf("LANG %-10s ink=%4d permille renders=%s entry=%s bidi=%s uncovered=%d\n",
            f->script, r, ok ? "ok" : "NO", rt ? "ok" : "NO",
-           b ? "ok" : "NO");
+           b ? "ok" : "NO", unc);
     if (png_dir[0] && ok) {
         fdk_surface *ps = NULL;
         if (fdk_ok(fdk_window_get_surface(TA.window, &ps))) {
@@ -260,6 +268,7 @@ int main(int argc, char **argv) {
         !ta_open(&TA, "fdk-langs — the language sweep", 1000, 720)) {
         return 1;
     }
+    sys_font = fdk_font_load_system_default(14);
     fdk_widget *col = NULL;
     fdk_box_create(TA.content, FDK_VERTICAL, &col);
     TA.content = col;
@@ -280,6 +289,9 @@ int main(int argc, char **argv) {
     printf("LANGS receipt: families=%d renders=%d entry=%d bidi=%d "
            "locales=24 fails=%d\n",
            NFAM, fam_renders, fam_roundtrip, fam_bidi, fails);
+    if (sys_font != NULL) {
+        fdk_font_destroy(sys_font);
+    }
     ta_close(&TA);
     return fails == 0 ? 0 : 2;
 }
