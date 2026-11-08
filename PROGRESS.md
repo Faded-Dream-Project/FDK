@@ -56,11 +56,11 @@ build in the decorations rig, the GitHub Actions pin comments,
 dependency versions in the provenance docs, the integer
 extension-API contract version, and the SONAME digit.
 
-The rename + commit run as one step: the sandbox's snapshot
-restores rolled uncommitted tree state back twice this round (the
-battery had already passed 792/792 on a renamed tree that a recycle
-then ate); this entry rides the same commit as the rename it
-describes.
+The rename lands via git plumbing (blobs -> index -> commit-tree
+-> push): the sandbox's snapshot restore kept reverting
+working-tree writes to HEAD within seconds — the committed
+objects are the durable layer, and the worktree follows via
+reset --hard.
 
 ## Round 38 (2026-11-08) — the first release is 1.0.0: the 1.1.0 identity retired repo-wide
 
