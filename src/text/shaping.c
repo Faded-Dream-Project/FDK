@@ -957,7 +957,9 @@ int fdk_text_count_uncovered(fdk_font *font, const char *utf8,
     for (size_t k = 0; k < sh->n_cp; k++) {
         size_t b = sh->cp_byte[k];
         fdk_font *f = font;
-        size_t best;
+        size_t best = 0;   /* only read when have is set — but GCC's
+                              -Wmaybe-uninitialized cannot see the
+                              guard; keep it initialized */
         size_t have = 0;
         for (size_t i = 0; i < sh->n_places; i++) {
             size_t c = sh->places[i].cluster;

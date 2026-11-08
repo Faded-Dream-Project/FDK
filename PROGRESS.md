@@ -37,6 +37,29 @@
 > checks on every push. See `docs/versioning.md` for the record.
 
 
+## Round 37 (2026-11-07) — the user's Wayland full pass recorded; the -O2 warning in the gate closed
+
+The user's Arch machine ran the whole sweep on the Wayland backend
+with the NVIDIA GPU present lane active (BGRA + UNPACK_ROW_LENGTH
+upload path driver-probed): 13/13 families, every one uncovered=0,
+24/24 locales, fails=0, exit clean — NotoColorEmoji loaded and the
+emoji family rendered. The rounds 34-36 chain (dwell, fallback cap,
+the coverage gate) is confirmed end to end on real hardware.
+
+One -Wmaybe-uninitialized in fdk_text_count_uncovered (the user's
+-O2 release build; the dev -O0 build never sees it): `best` is only
+read when `have` is set, but GCC cannot see the guard — initialized
+to 0, the guard short-circuits before the read. The -O2 syntax
+check is warning-clean and the release build carries zero
+uninitialized warnings.
+
+Cosmetic note worth keeping: every fallback file loads TWICE in
+fdk-langs runs — the coverage gate shapes through its own system-
+font copy (fdk_font_load_system_default) and the widgets shape
+through theirs; the fallback slots are per primary-font object, so
+both copies resolve (and cache) independently. Harmless, and the
+log tells the story honestly.
+
 ## Round 36 (2026-11-07) — the honest tofu gate ships: fdk_text_count_uncovered
 
 The round-35 note ("a real tofu-detector needs font-coverage
