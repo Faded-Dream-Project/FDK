@@ -30,6 +30,17 @@ desktops** walking the 28-section verification checklist. Then tag.
 
 ## 2. The verification gate (M-9 — the only roadmap item left)
 
+**Field evidence so far (2026-11-08, the owner's desktop):**
+examples/21 retested clean after the round-46 fix (popup opens below
+the button and drags). examples/19 (extension surfaces) walked
+end-to-end on the X11 side WITH the GPU lane active on the GTX 1050
+Ti under the proprietary driver — the first field exercise of both
+the extension API and the X11 GL path (no numbered section covers
+the X11 GL acceptance yet; the walkthrough's GL sections are the
+Wayland rounds — fold this into the signoff document). The session's
+external connection kill also exercised the fatal-IO graceful-exit
+path in the field: one detail line, clean exit, as designed.
+
 No code remains. These need YOUR hardware because the sandbox
 cannot produce them; TESTING-ON-DESKTOP.md §1–19 is the walkthrough:
 

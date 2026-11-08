@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-08, after round 46)
+## Current state (2026-11-08, after round 47)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,54 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 47 (2026-11-08) — field evidence lands, no code change; bug-rate: 0 new library bugs
+
+The owner's walkthrough reached the X11 GPU lane and the extension
+API on real hardware.
+
+1. **examples/19 (extension surfaces) walked end-to-end on the X11
+   desktop** — probe, register kind, surface create, crosshair
+   cursor, input-region fall-through, show: every `[ext]` line OK.
+   The GPU present lane went ACTIVE on the proprietary NVIDIA
+   driver (GTX 1050 Ti, 580.196.07): "GPU present lane active",
+   self-check passed on retry 2 (the vblank/compositor-latency
+   retry doing its designed job), 1348 frames. The X11 GL
+   acceptance has no numbered walkthrough section yet (the GL
+   sections in TESTING-ON-DESKTOP are the Wayland rounds) — the
+   evidence is banked for the signoff document.
+2. **The fatal-IO graceful-exit path had its first field exercise**:
+   the session ended with an external connection kill (xkill/
+   force-quit-class) — one detail line, the pump stopped, the
+   example exited cleanly. The LeakSanitizer report that followed
+   is the expected shape on that path: ~2.2 MB inside
+   libnvidia-glcore stacks with no FDK frames (the proprietary
+   driver's own allocations), and the FDK-side entries (render_gc,
+   GL staging, the shm image) are freed only on the CLEAN path
+   (x11_surface.c, x11_gl.c) — after a fatal IO the dead-display
+   flag deliberately forbids further X requests, so they cannot be
+   freed. The clean path is already proven leak-free: the battery
+   runs ASan leak detection ON by default and passes, and the
+   suite drives WM_DELETE_WINDOW itself (test_x11_integration.c).
+3. **examples/21 retested clean post-round-46** (the owner's
+   report: the popup opens below the button and drags).
+4. **The build-parallelism question answered with measurements**:
+   plain GNU make is SERIAL by default; ninja (GTK's build backend)
+   runs parallel by default (ninja-build.org manual: "Builds are
+   always run in parallel, based by default on the number of CPUs
+   your system has"). FDK's Makefile is -j-safe and was never
+   single-core by nature: measured on the 2-core sandbox, `make
+   static -j2` 16.3 s vs serial 24.4 s from clean, and `make test
+   -j2` + `make test-x11 -j2` pass. The recommendation:
+   `make -j$(nproc)`.
+5. Ops: the recycled sandbox restored a stale checkout (main 33
+   commits behind origin, mode-bit-only drift on 679 files) —
+   reconciled with `git reset --hard origin/main` after proving
+   nothing local-only existed; /tmp/x11dev rebuilt by
+   scripts/setup-sandbox.sh.
+
+Battery: both suites green under a -j2 parallel build (this
+round's only run — no code changed).
 
 ## Round 46 (2026-11-08) — the field report: the scale button's popup never mapped; bug-rate: 2 found, 2 fixed, 0 new after the fix
 
