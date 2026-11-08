@@ -1803,6 +1803,34 @@ fdk_result fdk_menu_popup_at(fdk_menu *menu, fdk_widget *anchor,
     return fdk__menu_popup_open(menu, anchor, x, y, 0);
 }
 
+/* Round 50: the TRAY's popup — the anchor-less open. The desktop tray
+ * item owns a hidden host window whose origin is the screen's (0, 0),
+ * so (x, y) are the logical screen coordinates of the click. Same
+ * desktop rule as the context path: opening closes every other
+ * context-class session first. */
+fdk_result fdk__menu_popup_open_at_screen(fdk_menu *menu, fdk_window *host,
+                                          fdk_i32 x, fdk_i32 y,
+                                          void (*on_closed)(void *),
+                                          void *closed_user,
+                                          fdk_window **out_popup) {
+    if (menu == NULL || host == NULL || menu->count == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    for (int i = 0; i < FDK_MENU_MAX_SESSIONS; i++) {
+        if (g_sessions[i].active && g_sessions[i].bar == NULL) {
+            fdk__menu_session_close_all(&g_sessions[i]);
+        }
+    }
+    fdk_menu_session *s = session_new(NULL);
+    s->closed = on_closed;
+    s->closed_user = closed_user;
+    fdk_result r = session_open_level(s, menu, host, x, y, 0, 0);
+    if (fdk_ok(r) && out_popup != NULL) {
+        *out_popup = s->chain[0].popup;
+    }
+    return r;
+}
+
 /* =====================================================================
  * The MenuBar widget
  * ===================================================================== */

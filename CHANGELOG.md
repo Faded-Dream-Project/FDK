@@ -9,6 +9,16 @@ changes; the round-40 release-closing work below landed under the
 same release identity before the tag.
 
 
+### Added (round 50)
+
+- **The tray click menu** — a click on the tray icon now opens the
+  item's attached menu as a real dropdown: on StatusNotifier bars
+  the host renders it (DBusMenu, unchanged); on classic XEmbed
+  bars the toolkit pops the SAME fdk_tray_menu locally at the
+  click's position (the widget layer's popup machinery, the
+  adapter mirroring the model). Button 1 and button 3 both fire
+  the app's on_activate (secondary flag on button 3) either way.
+
 ### Fixed (round 49)
 
 - **The tray fallback renders icon NAMES** — round 48's fallback

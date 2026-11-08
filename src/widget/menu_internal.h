@@ -70,6 +70,17 @@ fdk_result fdk__menu_popup_open_full(fdk_menu *model, fdk_widget *anchor,
                                      void (*on_closed)(void *),
                                      void *closed_user);
 
+/* Round 50: the anchor-less open for the TRAY fallback — `host` is
+ * the tray item's hidden host window (origin = the screen's (0,0)),
+ * so (x, y) are logical SCREEN coordinates. Same closed-contract as
+ * _open_full; same close-other-context-menus rule. `out_popup` (nullable)
+ * receives the created popup window — its death is the session's death. */
+fdk_result fdk__menu_popup_open_at_screen(fdk_menu *model, fdk_window *host,
+                                          fdk_i32 x, fdk_i32 y,
+                                          void (*on_closed)(void *),
+                                          void *closed_user,
+                                          fdk_window **out_popup);
+
 /* Closes a session's whole chain (activation path). Safe on any
  * session, active or not. */
 void fdk__menu_session_close_all(fdk_menu_session *session);

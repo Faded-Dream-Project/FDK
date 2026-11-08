@@ -30,10 +30,12 @@
  */
 
 #include "hermetic_env.h"
+#include "desktop/tray_internal.h" /* the popup adapter + test seam */
 #include "fdk/fdk.h"
 #include "fdk/fdk_dbus.h"
 #include "fdk/fdk_theme.h" /* the name-render leg's probe */
 #include "fdk/fdk_tray.h"
+#include "fdk/fdk_widgets.h" /* the mirrored fdk_menu assertions */
 
 #include <assert.h>
 #include <stdio.h>
@@ -904,6 +906,115 @@ static int pump_xembed_until(fdk_context *ctx, xembed_rig *rig, int timeout_ms,
 static int pred_item_hosted(void *u) { return fdk_tray_item_hosted(u); }
 static int pred_item_unhosted(void *u) { return !fdk_tray_item_hosted(u); }
 
+/* ---- the click-menu legs (round 50) -------------------------------------- */
+
+static int pred_activate_1(void *u) {
+    (void)u;
+    return g_app.activate_count >= 1;
+}
+static int pred_activate_2(void *u) {
+    (void)u;
+    return g_app.activate_count >= 2;
+}
+static int pred_popup_open(void *u) {
+    return fdk__tray_item_popup((fdk_tray_item *)u) != NULL;
+}
+static int pred_popup_gone(void *u) {
+    return fdk__tray_item_popup((fdk_tray_item *)u) == NULL;
+}
+
+/* The icon is EMBEDDED: the manager window has a child (the re-dock
+ * after a bar restart races the hosted flag — the stale flag from the
+ * previous bar's dock can still be up when the pump starts, so poll
+ * the tree, which only gains the child once the new dock landed). */
+static int pred_icon_embedded(void *u) {
+    xembed_rig *rig = u;
+    Window root = None, parent = None, *children = NULL;
+    unsigned int n = 0;
+    int ok = XQueryTree(rig->dpy, rig->mgr, &root, &parent, &children, &n);
+    if (children != NULL) {
+        XFree(children);
+    }
+    return ok && n >= 1;
+}
+
+/* The docked icon window: the manager's only child after the embed. */
+static Window xembed_find_icon(xembed_rig *rig) {
+    Window root = None, parent = None, *children = NULL;
+    unsigned int n = 0;
+    if (!XQueryTree(rig->dpy, rig->mgr, &root, &parent, &children, &n) ||
+        n == 0) {
+        return None;
+    }
+    Window icon = children[0];
+    XFree(children);
+    return icon;
+}
+
+/* A synthetic button event into a window. XSendEvent with an empty
+ * mask delivers to the DESTINATION WINDOW's creator — the FDK
+ * connection for the icon and the popup, so both paths ride the
+ * same pump the real bar's events ride. */
+static void xembed_send_button(xembed_rig *rig, Window target, int type,
+                               int button, int x, int y, int root_x,
+                               int root_y) {
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.xbutton.type = type;
+    ev.xbutton.window = target;
+    ev.xbutton.root = DefaultRootWindow(rig->dpy);
+    ev.xbutton.time = CurrentTime;
+    ev.xbutton.x = x;
+    ev.xbutton.y = y;
+    ev.xbutton.x_root = root_x;
+    ev.xbutton.y_root = root_y;
+    ev.xbutton.button = (unsigned int)button;
+    ev.xbutton.same_screen = True;
+    XSendEvent(rig->dpy, target, False, NoEventMask, &ev);
+    XFlush(rig->dpy);
+}
+
+/* The root's child list (a snapshot for the popup-finder diff). */
+static Window *root_children(xembed_rig *rig, unsigned int *out_n) {
+    Window r = None, p = None, *kids = NULL;
+    if (!XQueryTree(rig->dpy, DefaultRootWindow(rig->dpy), &r, &p, &kids,
+                    out_n)) {
+        *out_n = 0;
+        return NULL;
+    }
+    return kids;
+}
+
+/* The toolkit's popup: a NEW root child that is override-redirect and
+ * bigger than the item's 1x1 hidden host window. */
+static Window popup_find_new(xembed_rig *rig, Window *before,
+                             unsigned int n_before) {
+    unsigned int n = 0;
+    Window *kids = root_children(rig, &n);
+    Window found = None;
+    for (unsigned int i = 0; i < n && found == None; i++) {
+        int seen = 0;
+        for (unsigned int j = 0; j < n_before; j++) {
+            if (before[j] == kids[i]) {
+                seen = 1;
+                break;
+            }
+        }
+        if (seen) {
+            continue;
+        }
+        XWindowAttributes wa;
+        if (XGetWindowAttributes(rig->dpy, kids[i], &wa) &&
+            wa.override_redirect && wa.width > 8 && wa.height > 8) {
+            found = kids[i];
+        }
+    }
+    if (kids != NULL) {
+        XFree(kids);
+    }
+    return found;
+}
+
 static int xembed_fallback_phase(fdk_context *ctx) {
     /* Guard: a REAL bar owning the selection would fight the rig.
      * The probe rides the shared rig display (never closed — see
@@ -925,6 +1036,76 @@ static int xembed_fallback_phase(fdk_context *ctx) {
                              "tray-free display (run: make test-dbus)");
         }
     }
+
+    /* 0. the popup MIRROR leg (round 50, headless): the tray menu
+     * mirrors into a widget-layer fdk_menu — same rows in the same
+     * order, separators skipped as rows, check/radio state carried,
+     * the "_" mnemonics converted to the "&" markers, submenus
+     * attached, and the about-to-show callback ran before the
+     * snapshot (the AboutToShow parity). */
+    {
+        fdk_tray_menu *tm2 = fdk_tray_menu_create();
+        assert(tm2 != NULL);
+        uint32_t n_folder = fdk_tray_menu_add(tm2, 0, "Folder _actions");
+        assert(n_folder == 1);
+        (void)fdk_tray_menu_add_separator(tm2, 0); /* node 2 */
+        uint32_t n_hidden = fdk_tray_menu_add(tm2, 0, "Show _hidden");
+        uint32_t n_list = fdk_tray_menu_add(tm2, 0, "List");
+        uint32_t n_grid = fdk_tray_menu_add(tm2, 0, "Grid");
+        uint32_t n_disabled = fdk_tray_menu_add(tm2, 0, "Disabled row");
+        (void)fdk_tray_menu_add(tm2, n_folder, "Nested row"); /* node 7 */
+        fdk_tray_menu_set_check(tm2, n_hidden, FDK_TRAY_MENU_CHECK_CHECK,
+                                1);
+        fdk_tray_menu_set_check(tm2, n_list, FDK_TRAY_MENU_CHECK_RADIO,
+                                0);
+        fdk_tray_menu_set_check(tm2, n_grid, FDK_TRAY_MENU_CHECK_RADIO,
+                                0);
+        fdk_tray_menu_set_check(tm2, n_list, FDK_TRAY_MENU_CHECK_RADIO,
+                                1); /* clears its radio sibling */
+        fdk_tray_menu_set_enabled(tm2, n_disabled, 0);
+        fdk_tray_menu_on_about_to_show(tm2, app_menu_show, NULL);
+
+        g_app.show_count = 0;
+        g_app.shown_parents[0] = 999;
+        fdk_tray_popup_adapter *ma = fdk__tray_menu_build_popup(tm2);
+        assert(ma != NULL);
+        fdk_menu *mm = fdk__tray_adapter_menu(ma);
+        assert(mm != NULL);
+        assert(fdk_menu_item_count(mm) == 6); /* 5 rows + 1 separator */
+        /* Depth-first: the submenu mirrors when its parent row is
+         * processed, so the nested row's handle lands right after
+         * the folder row. (The flat map is order-agnostic — the
+         * dispatch looks rows up by pointer.) */
+        assert(ma->n == 6);
+        assert(ma->ids[0] == n_folder && ma->ids[1] == 7 &&
+               ma->ids[2] == n_hidden && ma->ids[3] == n_list &&
+               ma->ids[4] == n_grid && ma->ids[5] == n_disabled);
+        assert(fdk_menu_item_get_type(ma->items[0]) ==
+               FDK_MENU_ITEM_NORMAL);
+        assert(fdk_menu_item_get_type(ma->items[1]) ==
+               FDK_MENU_ITEM_NORMAL); /* the nested row */
+        assert(fdk_menu_item_get_type(ma->items[2]) ==
+               FDK_MENU_ITEM_CHECK);
+        assert(fdk_menu_item_get_type(ma->items[3]) ==
+               FDK_MENU_ITEM_RADIO);
+        assert(fdk_menu_item_get_type(ma->items[4]) ==
+               FDK_MENU_ITEM_RADIO);
+        assert(fdk_menu_item_is_checked(ma->items[2]));
+        assert(fdk_menu_item_is_checked(ma->items[3]));
+        assert(!fdk_menu_item_is_checked(ma->items[4]));
+        assert(!fdk_menu_item_is_enabled(ma->items[5]));
+        assert(strcmp(fdk_menu_item_text(ma->items[2]), "Show hidden") ==
+               0); /* markers stripped */
+        assert(fdk_menu_item_get_mnemonic(ma->items[2]) == 'h');
+        fdk_menu *sub = fdk_menu_item_get_submenu(ma->items[0]);
+        assert(sub != NULL && fdk_menu_item_count(sub) == 1);
+        assert(g_app.show_count == 1 && g_app.shown_parents[0] == 0);
+        printf("[ok] tray XEmbed menu mirror: rows, order, toggle "
+               "state, mnemonics, submenus, about-to-show\n");
+        fdk__tray_menu_adapter_free(ma);
+        fdk_tray_menu_close(tm2);
+    }
+
     xembed_rig rig;
     if (!xembed_rig_start(&rig)) {
         return live_skip("the XEmbed manager rig could not own the "
@@ -937,6 +1118,7 @@ static int xembed_fallback_phase(fdk_context *ctx) {
     };
     fdk_tray_item_callbacks cb = {
         .on_host = app_on_host,
+        .on_activate = app_on_activate,
         .user = NULL,
     };
     g_app.host_count = 0;
@@ -1079,11 +1261,100 @@ static int xembed_fallback_phase(fdk_context *ctx) {
         }
     }
 
+    /* 5. the click legs (round 50): a FRESH item docks into the
+     * restarted bar on open — the deterministic dock path. (The
+     * earlier legs' item carries a stale docked-state across the
+     * stop/start sequence because no pump runs between them here;
+     * the announcement re-dock with real pumping is leg 3's covered
+     * ground.) */
+    assert(xembed_rig_start(&rig));
+    fdk_tray_item_options c_opts = {
+        .id = "fdk-tray-xembed-click",
+        .title = "XEmbed click",
+    };
+    fdk_tray_item *citem = fdk_tray_item_open(ctx, &c_opts, &cb, NULL);
+    assert(citem != NULL);
+    /* The app's shape (fdk-files): an icon NAME, no pixels — the
+     * round-49 render path supplies the fallback's pixels and the
+     * dock request goes out from set_icon_name's retry. */
+    fdk_tray_item_set_icon_name(citem, "folder");
+    assert(pump_xembed_until(ctx, &rig, 5000, &rig, pred_icon_embedded));
+    Window icon_w = xembed_find_icon(&rig);
+    assert(icon_w != None);
+
+    g_app.activate_count = 0;
+    g_app.secondary = -1;
+    xembed_send_button(&rig, icon_w, ButtonPress, 1, 2, 2, 640, 360);
+    xembed_send_button(&rig, icon_w, ButtonRelease, 1, 2, 2, 640, 360);
+    assert(pump_xembed_until(ctx, &rig, 5000, citem, pred_activate_1));
+    assert(g_app.activate_count == 1 && g_app.secondary == 0);
+    assert(g_app.x == 640 && g_app.y == 360);
+    printf("[ok] tray XEmbed click: the icon's ButtonPress is the "
+           "item's Activate\n");
+
+    xembed_send_button(&rig, icon_w, ButtonPress, 3, 2, 2, 650, 370);
+    xembed_send_button(&rig, icon_w, ButtonRelease, 3, 2, 2, 650, 370);
+    assert(pump_xembed_until(ctx, &rig, 5000, citem, pred_activate_2));
+    assert(g_app.activate_count == 2 && g_app.secondary == 1);
+    printf("[ok] tray XEmbed click: button 3 is the secondary "
+           "activation\n");
+
+    /* 6. the attached menu pops on click — one model, any bar. The
+     * popup opens under the click's logical screen position and the
+     * row activation dispatches the tray-menu click. */
+    {
+        fdk_tray_menu *tm3 = fdk_tray_menu_create();
+        assert(tm3 != NULL);
+        uint32_t row1 = fdk_tray_menu_add(tm3, 0, "Item _actions");
+        (void)fdk_tray_menu_add_separator(tm3, 0);
+        (void)fdk_tray_menu_add(tm3, 0, "Show _hidden");
+        (void)fdk_tray_menu_add(tm3, 0, "_Quit");
+        fdk_tray_menu_on_click(tm3, app_menu_click, NULL);
+        fdk_tray_menu_on_about_to_show(tm3, app_menu_show, NULL);
+        fdk_tray_item_set_menu(citem, tm3);
+
+        g_app.click_count = 0;
+        g_app.show_count = 0;
+        unsigned int n_before = 0;
+        Window *before = root_children(&rig, &n_before);
+        xembed_send_button(&rig, icon_w, ButtonPress, 1, 2, 2, 660, 380);
+        assert(pump_xembed_until(ctx, &rig, 5000, citem, pred_popup_open));
+        fdk_tray_popup_adapter *pa = fdk__tray_item_popup(citem);
+        assert(pa != NULL);
+        assert(g_app.show_count == 1); /* about-to-show ran first */
+        Window pop_w = popup_find_new(&rig, before, n_before);
+        if (before != NULL) {
+            XFree(before);
+        }
+        assert(pop_w != None);
+        assert(pa->popup_window != NULL);
+
+        /* Activating the first row: press arms, release fires (the
+         * round-9 guard), then the chain closes and the adapter is
+         * freed by the closed hook. */
+        xembed_send_button(&rig, pop_w, ButtonPress, 1, 10, 10, 670, 390);
+        xembed_send_button(&rig, pop_w, ButtonRelease, 1, 10, 10, 670,
+                           390);
+        assert(pump_xembed_until(ctx, &rig, 5000, citem, pred_popup_gone));
+        assert(fdk__tray_item_popup(citem) == NULL);
+        assert(g_app.click_count == 1 && g_app.clicked_ids[0] == row1);
+        printf("[ok] tray XEmbed menu: the click popped the attached "
+               "menu; the row activation dispatched the tray click\n");
+
+        fdk_tray_item_set_menu(citem, NULL);
+        fdk_tray_menu_close(tm3);
+    }
+    fdk_tray_item_close(citem);
+    xembed_rig_stop(&rig);
+
     fdk_tray_item_close(item);
     xembed_rig_stop(&rig);
     /* Phase-scoped counters back to zero for the SNI phases. */
     g_app.host_count = 0;
     g_app.hosted_now = 0;
+    g_app.activate_count = 0;
+    g_app.click_count = 0;
+    g_app.show_count = 0;
     return 0;
 }
 

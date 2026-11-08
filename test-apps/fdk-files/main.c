@@ -39,6 +39,29 @@
 
 files_app fapp;
 
+/* the tray's click menu (round 50): the model lives as long as the
+ * item; the node ids are stable handles for the click dispatch. */
+static fdk_tray_menu *g_tray_menu = NULL;
+static uint32_t g_menu_open, g_menu_about, g_menu_quit;
+
+static void tray_menu_click(fdk_tray_menu *menu, uint32_t id, void *user) {
+    (void)menu;
+    (void)user;
+    if (id == g_menu_open) {
+        fdk_window_show(fapp.base.window);
+        fdk_window_activate(fapp.base.window);
+    } else if (id == g_menu_about && fapp.notify != NULL) {
+        fdk_notify_request req = {0};
+        req.summary = "fdk-files";
+        req.body = "The FDK validation file manager (round 50: the "
+                   "tray click menu).";
+        req.urgency = FDK_NOTIFY_URGENCY_LOW;
+        (void)fdk_notify_send(fapp.notify, &req, NULL);
+    } else if (id == g_menu_quit) {
+        fapp.base.quit = true;
+    }
+}
+
 static void fi_undo_apply(void *state);
 static void fi_undo_redo(void *state);
 static void fi_undo_free(void *state);
@@ -662,6 +685,19 @@ int main(int argc, char **argv) {
         fdk_tray_item_set_icon_name(fapp.tray, "folder");
         fdk_tray_item_set_tooltip(fapp.tray, "folder", "fdk-files",
                                   "The FDK validation file manager");
+        /* The tray's click menu (round 50): ONE model serves every
+         * bar — a StatusNotifier host renders it over DBusMenu; a
+         * classic XEmbed bar gets the toolkit's local dropdown on
+         * click. */
+        g_tray_menu = fdk_tray_menu_create();
+        if (g_tray_menu != NULL) {
+            g_menu_open = fdk_tray_menu_add(g_tray_menu, 0, "_Open Files");
+            g_menu_about = fdk_tray_menu_add(g_tray_menu, 0, "_About");
+            fdk_tray_menu_add_separator(g_tray_menu, 0);
+            g_menu_quit = fdk_tray_menu_add(g_tray_menu, 0, "_Quit");
+            fdk_tray_menu_on_click(g_tray_menu, tray_menu_click, NULL);
+            fdk_tray_item_set_menu(fapp.tray, g_tray_menu);
+        }
     }
 
     /* §27/2b: the deterministic drag-rig layout. FDK_FILES_DRIG=1
@@ -844,6 +880,10 @@ int main(int argc, char **argv) {
     td_sweep(); /* the payloads + menu models the registry owns   */
     if (fapp.tray != NULL) {
         fdk_tray_item_close(fapp.tray);
+    }
+    if (g_tray_menu != NULL) {
+        fdk_tray_menu_close(g_tray_menu);
+        g_tray_menu = NULL;
     }
     if (fapp.notify != NULL) {
         fdk_notify_close(fapp.notify);

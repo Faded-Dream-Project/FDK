@@ -75,6 +75,8 @@ struct fdk_x11_systray {
     int docked;      /* the tray confirmed the embed              */
 
     void (*on_event)(void *user, int docked);
+    void (*on_click)(void *user, int button, int32_t root_x,
+                     int32_t root_y);
     void *user;
 
     struct fdk_x11_systray *next; /* the connection's handle list */
@@ -229,7 +231,11 @@ static void systray_attempt_dock(fdk_platform_connection *conn,
         memset(&attr, 0, sizeof(attr));
         attr.background_pixel = 0;
         attr.border_pixel = 0;
-        attr.event_mask = ExposureMask | StructureNotifyMask;
+        /* Button events ride the icon window itself (round 50): the
+         * bar embeds our window, our selection receives the presses,
+         * and the item turns them into activations / its menu. */
+        attr.event_mask = ExposureMask | StructureNotifyMask |
+                          ButtonPressMask | ButtonReleaseMask;
         st->icon_w = XCreateWindow(
             dpy, conn->root, 0, 0,
             (unsigned)(st->w > 0 ? st->w : 24),
@@ -298,6 +304,16 @@ int fdk__x11_systray_handle(fdk_platform_connection *conn, XEvent *xev) {
             case Expose:
                 systray_paint(st, conn);
                 break;
+            case ButtonPress:
+                /* The click is the icon's activation (round 50):
+                 * root coordinates, PHYSICAL pixels — the desktop
+                 * layer scales them. */
+                if (st->on_click != NULL) {
+                    st->on_click(st->user, (int)xev->xbutton.button,
+                                 xev->xbutton.x_root,
+                                 xev->xbutton.y_root);
+                }
+                break;
             case ClientMessage:
                 if (xev->xclient.message_type == g_systray_atoms.xembed &&
                     xev->xclient.format == 32 &&
@@ -348,6 +364,9 @@ static fdk_result fdk_x11_systray_open(fdk_platform_connection *conn,
                                        const uint8_t *argb32, int32_t w,
                                        int32_t h, void *user,
                                        void (*on_event)(void *user, int docked),
+                                       void (*on_click)(void *user, int button,
+                                                        int32_t root_x,
+                                                        int32_t root_y),
                                        void **out_handle) {
     if (conn == NULL || out_handle == NULL || !systray_atoms_init(conn)) {
         return FDK_ERR_PLATFORM_INIT;
@@ -368,6 +387,7 @@ static fdk_result fdk_x11_systray_open(fdk_platform_connection *conn,
         st->h = h;
     }
     st->on_event = on_event;
+    st->on_click = on_click;
     st->user = user;
     st->conn = conn;
     st->next = conn->systray;

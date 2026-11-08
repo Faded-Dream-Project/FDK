@@ -102,7 +102,54 @@ struct fdk_tray_item {
      * SNI wins the moment a watcher appears. */
     void *xembed;      /* the platform systray handle, or NULL      */
     int xembed_active; /* nonzero while docked/embedding            */
+
+    /* The click menu (round 50): an attached fdk_tray_menu is ALSO
+     * the XEmbed fallback's menu — a click pops it locally through
+     * the widget layer (the SNI host pops it on SNI bars). Lazily
+     * created, released on item teardown; the adapter (and the font
+     * it owns) dies with the popup's close callback. */
+    void *popup_host;  /* fdk_window* — the hidden 1x1 popup anchor */
+    void *popup;       /* fdk_tray_popup_adapter* while a popup is open */
 };
+
+/* ---- the XEmbed popup adapter (round 50) --------------------------------------- */
+
+/* Forward decls matching the public headers' forms (identical
+ * typedef redefinition is legal C11). */
+typedef struct fdk_menu fdk_menu;
+typedef struct fdk_menu_item fdk_menu_item;
+typedef struct fdk_font fdk_font;
+
+/* The tray menu mirrored into a widget-layer fdk_menu for the local
+ * popup: same rows, same order, check/radio/separators, submenus as
+ * borrowed models. Activations dispatch back as tray-menu clicks. */
+typedef struct fdk_tray_popup_adapter {
+    fdk_tray_menu *tm;     /* borrowed                              */
+    fdk_tray_item *owner;  /* weak; NULLed when the item tears down
+                            * (window destroys are deferred, so the
+                            * closed callback must outlive the item) */
+    fdk_menu *menu;        /* OWNED — destroyed with the adapter    */
+    fdk_font *font;        /* OWNED — the system font at UI size    */
+    fdk_menu **subs;       /* owned submenu models (flat list)      */
+    size_t sub_n, sub_cap;
+    fdk_menu_item **items; /* owned row handles (flat)              */
+    uint32_t *ids;         /* the tray node id of items[i]          */
+    size_t n, cap;
+    void *popup_window;    /* the session's popup fdk_window* (weak;
+                            * the item's close destroys it)         */
+} fdk_tray_popup_adapter;
+
+/* Snapshots the tray menu (after the app's about-to-show callback
+ * ran, the AboutToShow parity) into a fresh adapter. The adapter
+ * loads and owns its own system font. NULL when the menu is empty or
+ * the mirror fails. */
+fdk_tray_popup_adapter *fdk__tray_menu_build_popup(fdk_tray_menu *tm);
+/* Destroys the adapter AND the mirrored models. */
+void fdk__tray_menu_adapter_free(fdk_tray_popup_adapter *a);
+/* The mirrored model (for the popup seam). */
+fdk_menu *fdk__tray_adapter_menu(const fdk_tray_popup_adapter *a);
+/* Test seam: the open adapter while a popup is showing, else NULL. */
+fdk_tray_popup_adapter *fdk__tray_item_popup(const fdk_tray_item *it);
 
 /* Shared string helper (owned copy, NULL-safe). */
 char *fdk__tray_strdup(const char *s);

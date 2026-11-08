@@ -194,6 +194,8 @@ typedef struct fdk__platform_systray_ops {
                        const uint8_t *argb32, int32_t w, int32_t h,
                        void *user,
                        void (*on_event)(void *user, int docked),
+                       void (*on_click)(void *user, int button,
+                                        int32_t root_x, int32_t root_y),
                        void **out_handle);
     fdk_result (*set_icon)(void *handle, const uint8_t *argb32,
                            int32_t w, int32_t h);

@@ -82,7 +82,10 @@ or use the rig's probe binary as the item):
    with NO SNI watcher on the bus the item docks through the older
    System Tray v0.2 protocol instead (round 48) — set pixels with
    fdk_tray_item_set_icon_pixmap, or just give it an icon name
-   (round 49: the theme engine renders it), and the icon appears; kill and
+   (round 49: the theme engine renders it), and the icon appears.
+   Attach an fdk_tray_menu with fdk_tray_item_set_menu and a click
+   on the icon opens it as a dropdown (round 50: the toolkit pops
+   the same model locally that a StatusNotifier host would render); kill and
    restart the bar and confirm the unhost → re-dock. (SNI still
    wins the moment a watcher appears.)
 

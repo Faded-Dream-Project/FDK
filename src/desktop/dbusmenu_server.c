@@ -19,6 +19,11 @@
 
 #include "desktop/tray_internal.h"
 
+#include "core/alloc_internal.h"
+#include "fdk/fdk_text.h" /* the popup font: system default at UI size */
+#include "fdk/fdk_theme.h" /* fdk_ui_font_px */
+#include "fdk/fdk_widgets.h" /* the mirrored fdk_menu model */
+
 /* send() consumes its message on FDK_OK — free it only when the
  * send itself failed (the leak-free discipline). */
 static void send_or_free(fdk_dbus_connection *bus, fdk_dbus_message *m) {
@@ -865,4 +870,191 @@ int fdk__tray_menu_serve_method(fdk_tray_menu *m,
         send_or_free(bus, err);
     }
     return 1;
+}
+
+/* ---- the XEmbed popup adapter (round 50) ---------------------------------------
+ *
+ * On a StatusNotifier bar the HOST renders this model (DBusMenu) and
+ * clicks come back through serve_event. On a classic XEmbed bar there
+ * is no host menu — the toolkit pops the SAME model locally through
+ * the widget layer instead. The mirror is a SNAPSHOT: built at click
+ * time (after the app's about-to-show callback ran, the AboutToShow
+ * parity), owned by the adapter, destroyed when the popup closes. */
+
+static void adapter_activate(fdk_menu_item *item, void *user) {
+    fdk_tray_popup_adapter *a = user;
+    if (a == NULL || a->tm == NULL || a->tm->click_fn == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < a->n; i++) {
+        if (a->items[i] == item) {
+            a->tm->click_fn(a->tm, a->ids[i], a->tm->click_user);
+            return;
+        }
+    }
+}
+
+/* The tray's "_" mnemonic convention becomes the widget menu's "&"
+ * markers (both mean "underline the next letter"). */
+static char *adapter_label(const char *src) {
+    if (src == NULL) {
+        return NULL;
+    }
+    size_t n = strlen(src);
+    char *out = fdk_alloc(n + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < n; i++) {
+        out[i] = (src[i] == '_') ? '&' : src[i];
+    }
+    out[n] = '\0';
+    return out;
+}
+
+static int adapter_track_item(fdk_tray_popup_adapter *a, uint32_t id,
+                              fdk_menu_item *it) {
+    if (a->n == a->cap) {
+        size_t cap = a->cap == 0 ? 8 : a->cap * 2;
+        fdk_menu_item **items =
+            fdk_realloc(a->items, cap * sizeof(*items));
+        uint32_t *ids = fdk_realloc(a->ids, cap * sizeof(*ids));
+        if (items == NULL || ids == NULL) {
+            fdk_free(items); /* the other one may still be the old  */
+            fdk_free(ids);   /* block — freeing both is safe (NULL  */
+            return 0;        /* or the previous pointer)            */
+        }
+        a->items = items;
+        a->ids = ids;
+        a->cap = cap;
+    }
+    a->items[a->n] = it;
+    a->ids[a->n] = id;
+    a->n++;
+    return 1;
+}
+
+static int adapter_track_sub(fdk_tray_popup_adapter *a, fdk_menu *sub) {
+    if (a->sub_n == a->sub_cap) {
+        size_t cap = a->sub_cap == 0 ? 4 : a->sub_cap * 2;
+        fdk_menu **subs = fdk_realloc(a->subs, cap * sizeof(*subs));
+        if (subs == NULL) {
+            return 0;
+        }
+        a->subs = subs;
+        a->sub_cap = cap;
+    }
+    a->subs[a->sub_n++] = sub;
+    return 1;
+}
+
+static int adapter_build_level(fdk_tray_popup_adapter *a,
+                               fdk_tray_menu *tm, fdk_font *font,
+                               uint32_t parent, fdk_menu *m) {
+    for (size_t i = 0; i < tm->n; i++) {
+        menu_node *nd = &tm->nodes[i];
+        uint32_t id = (uint32_t)i + 1;
+        if (nd->parent != parent || !nd->visible) {
+            continue;
+        }
+        if (nd->separator) {
+            if (!fdk_ok(fdk_menu_append_separator(m))) {
+                return 0;
+            }
+            continue;
+        }
+        fdk_menu_item *it = NULL;
+        char *label = adapter_label(nd->label);
+        fdk_result r = FDK_OK;
+        if (nd->check_kind == FDK_TRAY_MENU_CHECK_CHECK) {
+            r = fdk_menu_append_check(m, label, nd->toggle != 0, &it);
+        } else if (nd->check_kind == FDK_TRAY_MENU_CHECK_RADIO) {
+            r = fdk_menu_append_radio(m, label, nd->toggle != 0, &it);
+        } else {
+            r = fdk_menu_append(m, label, &it);
+        }
+        fdk_free(label);
+        if (!fdk_ok(r) || it == NULL) {
+            return 0;
+        }
+        if (!adapter_track_item(a, id, it)) {
+            return 0;
+        }
+        if (!nd->enabled) {
+            fdk_menu_item_set_enabled(it, false);
+        }
+        int has_sub = 0;
+        for (size_t j = 0; j < tm->n; j++) {
+            if (tm->nodes[j].parent == id && tm->nodes[j].visible &&
+                !tm->nodes[j].separator) {
+                has_sub = 1;
+                break;
+            }
+        }
+        if (has_sub) {
+            fdk_menu *sub = NULL;
+            if (!fdk_ok(fdk_menu_create(font, &sub)) ||
+                !adapter_track_sub(a, sub) ||
+                !adapter_build_level(a, tm, font, id, sub) ||
+                !fdk_ok(fdk_menu_item_set_submenu(it, sub))) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+fdk_tray_popup_adapter *fdk__tray_menu_build_popup(fdk_tray_menu *tm) {
+    if (tm == NULL || tm->n == 0) {
+        return NULL;
+    }
+    /* AboutToShow parity: the app's chance to refresh labels before
+     * the snapshot (parent 0 = the root menu itself). */
+    if (tm->show_fn != NULL) {
+        tm->show_fn(tm, 0, tm->show_user);
+    }
+    if (tm->n == 0) {
+        return NULL; /* the refresh may clear the menu */
+    }
+    fdk_tray_popup_adapter *a = fdk_alloc(sizeof(*a));
+    if (a == NULL) {
+        return NULL;
+    }
+    memset(a, 0, sizeof(*a));
+    a->tm = tm;
+    a->font = fdk_font_load_system_default(fdk_ui_font_px());
+    if (a->font == NULL || !fdk_ok(fdk_menu_create(a->font, &a->menu)) ||
+        !adapter_build_level(a, tm, a->font, 0, a->menu) || a->n == 0) {
+        fdk__tray_menu_adapter_free(a);
+        return NULL;
+    }
+    fdk_menu_set_on_activate(a->menu, adapter_activate, a);
+    return a;
+}
+
+void fdk__tray_menu_adapter_free(fdk_tray_popup_adapter *a) {
+    if (a == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < a->sub_n; i++) {
+        fdk_menu_destroy(a->subs[i]);
+    }
+    fdk_free(a->subs);
+    if (a->menu != NULL) {
+        fdk_menu_destroy(a->menu);
+    }
+    if (a->font != NULL) {
+        fdk_font_destroy(a->font);
+    }
+    fdk_free(a->items);
+    fdk_free(a->ids);
+    fdk_free(a);
+}
+
+fdk_menu *fdk__tray_adapter_menu(const fdk_tray_popup_adapter *a) {
+    return a == NULL ? NULL : a->menu;
+}
+
+fdk_tray_popup_adapter *fdk__tray_item_popup(const fdk_tray_item *it) {
+    return it == NULL ? NULL : (fdk_tray_popup_adapter *)(void *)it->popup;
 }

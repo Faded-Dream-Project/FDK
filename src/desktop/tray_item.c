@@ -35,8 +35,12 @@ static void send_or_free(fdk_dbus_connection *bus, fdk_dbus_message *m) {
 #include "core/context_internal.h" /* ctx->ops / ctx->conn (the XEmbed
                                     * systray fallback) */
 #include "fdk/fdk_surface.h"
+#include "fdk/fdk_text.h" /* the popup's system font (round 50) */
 #include "fdk/fdk_theme.h" /* fdk_icon_theme_surface: the named-icon
-                            * render for the XEmbed fallback (round 49) */
+                            * render for the XEmbed fallback (round 49);
+                            * fdk_ui_scale/fdk_ui_font_px (round 50) */
+#include "fdk/fdk_window.h" /* the popup host window + teardown */
+#include "widget/menu_internal.h" /* the tray's local popup seam */
 
 #include <stdlib.h>
 #include <string.h>
@@ -930,6 +934,83 @@ static void xembed_event(void *user, int docked) {
     }
 }
 
+/* ---- the click menu (round 50) -------------------------------------------------
+ *
+ * A click on the embedded icon is the item's activation. The app sees
+ * it through on_activate either way (SNI parity); when an fdk_tray_menu
+ * is attached, the SAME menu the SNI host would render is popped
+ * locally through the widget layer — one model, any bar. The closed
+ * callback owns the adapter: window destroys are deferred, so it must
+ * be safe to fire after the item is gone (owner NULLed at teardown). */
+
+static void popup_closed(void *user) {
+    fdk_tray_popup_adapter *a = user;
+    if (a == NULL) {
+        return;
+    }
+    if (a->owner != NULL) {
+        a->owner->popup = NULL;
+    }
+    fdk__tray_menu_adapter_free(a);
+}
+
+static void tray_item_popup_menu(fdk_tray_item *it, int32_t root_x,
+                                 int32_t root_y) {
+    if (it->menu == NULL || it->popup != NULL) {
+        return; /* no menu, or one is already up (the next click
+                 * dismisses it through the popup's grab) */
+    }
+    /* The hidden 1x1 host window: popups position at parent-relative
+     * coords, and this window's origin is the screen's (0, 0) — never
+     * shown, so nothing flashes. Created once, kept for the item. */
+    if (it->popup_host == NULL) {
+        fdk_window_options ho;
+        memset(&ho, 0, sizeof(ho));
+        ho.width = 1;
+        ho.height = 1;
+        fdk_window *host = NULL;
+        if (!fdk_ok(fdk_window_create(it->ctx, &ho, &host))) {
+            return;
+        }
+        it->popup_host = host;
+    }
+    fdk_tray_popup_adapter *a = fdk__tray_menu_build_popup(it->menu);
+    if (a == NULL) {
+        return;
+    }
+    a->owner = it;
+    it->popup = a;
+    /* The click's root coordinates are PHYSICAL pixels; popups take
+     * logical offsets from the host's origin (the screen's (0,0)). */
+    double scale = fdk_ui_scale();
+    fdk_i32 lx = (fdk_i32)((double)root_x / scale);
+    fdk_i32 ly = (fdk_i32)((double)root_y / scale);
+    fdk_window *pop = NULL;
+    fdk_result r = fdk__menu_popup_open_at_screen(
+        a->menu, (fdk_window *)it->popup_host, lx, ly, popup_closed, a,
+        &pop);
+    if (!fdk_ok(r)) {
+        a->owner = NULL;
+        it->popup = NULL;
+        fdk__tray_menu_adapter_free(a);
+        return;
+    }
+    a->popup_window = pop;
+    FDK_INFO("tray: popped the item menu at (%d, %d) logical", lx, ly);
+}
+
+static void xembed_click(void *user, int button, int32_t root_x,
+                         int32_t root_y) {
+    fdk_tray_item *it = user;
+    if (it == NULL || it->tearing_down) {
+        return;
+    }
+    if (it->cb.on_activate != NULL) {
+        it->cb.on_activate(it, button == 3, root_x, root_y, it->cb_user);
+    }
+    tray_item_popup_menu(it, root_x, root_y);
+}
+
 /* Dock into a classic X11 bar's systray when no StatusNotifierWatcher
  * is on the bus. Idempotent; a no-op on backends without the protocol
  * (Wayland's ops->systray is NULL) and until the item has pixmap
@@ -966,7 +1047,7 @@ static void xembed_try(fdk_tray_item *it) {
     void *handle = NULL;
     fdk_result r = ops->open(it->ctx->conn, it->icon_px.bytes,
                              it->icon_px.w, it->icon_px.h, it, xembed_event,
-                             &handle);
+                             xembed_click, &handle);
     if (fdk_ok(r) && handle != NULL) {
         it->xembed = handle;
         it->xembed_active = 1;
@@ -1038,6 +1119,25 @@ void fdk_tray_item_close(fdk_tray_item *item) {
         return;
     }
     item->tearing_down = 1;
+    /* The click popup (round 50): the adapter's closed callback owns
+     * the mirrored models, and window destroys are deferred — so the
+     * item only detaches (owner NULL) and asks the popup window to
+     * die. Whenever the destroy lands (now or at the next pump), the
+     * adapter is freed with no dangling reference to this item. */
+    if (item->popup != NULL) {
+        fdk_tray_popup_adapter *a = item->popup;
+        item->popup = NULL;
+        a->owner = NULL;
+        if (a->popup_window != NULL) {
+            fdk_window_destroy((fdk_window *)a->popup_window);
+            a->popup_window = NULL;
+        }
+        /* The adapter itself dies with the popup's close callback. */
+    }
+    if (item->popup_host != NULL) {
+        fdk_window_destroy((fdk_window *)item->popup_host);
+        item->popup_host = NULL;
+    }
     xembed_leave(item); /* destroy the embedded icon window, if any */
     if (item->menu != NULL) {
         item->menu->item = NULL;

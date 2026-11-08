@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-08, after round 49)
+## Current state (2026-11-08, after round 50)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,62 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 50 (2026-11-08) — the tray click menu: one model, any bar; feature round, bug-rate: 0 product bugs (1 test-sequencing wrinkle, fixed in the leg)
+
+1. **The ask**: the owner's tint2 retest now docks the rendered
+   icon — "can you make so clicking it opens a dropdown, a list of
+   things to do". The pieces already existed in the core, un-
+   connected: the tray item's on_activate callback (the SNI
+   Activate/SecondaryActivate path), the fdk_tray_menu model (the
+   DBusMenu server), and the widget layer's popup sessions (the
+   ComboBox/context-menu machinery). Round 50 wires them.
+2. **The platform half**: the XEmbed icon window selected
+   ButtonPress/ButtonRelease (round 48 created it with exposure +
+   structure masks only) and the systray ops' open gained an
+   on_click(user, button, root_x, root_y) callback — button 3
+   marked as the secondary activation, root coordinates in
+   PHYSICAL pixels.
+3. **The desktop half**: xembed_click fires the app's on_activate
+   either way (SNI parity), and when an fdk_tray_menu is attached,
+   the SAME model the SNI host would render is popped locally: a
+   new adapter (dbusmenu_server.c) snapshots the tray menu into a
+   widget-layer fdk_menu — rows in order, separators, check/radio
+   state, "_" mnemonics converted to "&" markers, submenus as
+   borrowed models — after the app's about-to-show callback ran
+   (the AboutToShow parity). The popup opens at the click's logical
+   screen position (physical / fdk_ui_scale()) through a new
+   anchor-less seam, fdk__menu_popup_open_at_screen, parented to a
+   hidden 1x1 host window the item owns (never shown; popups are
+   root-level override-redirect windows, so the host only anchors
+   coordinates). Row activations dispatch back as tray-menu clicks;
+   the closed hook frees the mirrored models — the exact lifecycle
+   the combo dropdown rides ("the callback runs first because
+   closed hooks may free the model" — view_activate's own
+   contract). The adapter also loads and owns its system font
+   (fdk_font_load_system_default at fdk_ui_font_px()).
+4. **The app**: fdk-files attaches a real menu — Open Files
+   (show + activate the window), About (a notification), Quit —
+   via fdk_tray_item_set_menu. ONE model now serves both
+   protocols: a StatusNotifier host renders it over DBusMenu; a
+   classic XEmbed bar gets the toolkit's local dropdown on click.
+5. **The suite pins it, seven legs**: the popup mirror (headless:
+   rows, order, toggle state, radio-sibling clearing, mnemonic
+   conversion, submenu linkage, about-to-show), button 1 → Activate
+   with the click's coordinates, button 3 → secondary, and the full
+   round trip — click on the icon pops the attached menu (the
+   about-to-show ran first), a synthetic press+release on the first
+   row activates it, the chain closes, the adapter is freed, and
+   the tray-menu click callback receives the right node id. The
+   dock/restart/name-render legs from rounds 48-49 stay green
+   untouched. One test-sequencing wrinkle on the way: the click
+   legs' item must be opened FRESH after the bar restart (the
+   earlier legs' item carries a stale docked-state across the
+   compressed stop/start because no pump runs between them in the
+   test — the round-48 restart leg with real pumping is the
+   covered path for the live behavior).
+
+Battery: test-dbus ALL PASS twice, core + X11 suites green.
 
 ## Round 49 (2026-11-08) — the name-render layer: the fallback docks apps that only have an icon name; bug-rate: 1 found (the field retest), 1 fixed, 0 new after the fix
 
