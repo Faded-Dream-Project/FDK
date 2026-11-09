@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-09, after round 54)
+## Current state (2026-11-09, after round 55)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,33 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 55 (2026-11-09) — the gsettings differential diagnosed: FDK followed its channel; the bridge is the desktop's; no code change
+
+1. **The field result**: the owner set the font through gsettings
+   on their X11 desktop — librewolf (GTK) followed, FDK did not,
+   staying at the 10 pt statement its portal serves.
+2. **The diagnosis** (theirs was the perfect differential): gsettings
+   writes dconf; GTK reads dconf directly. FDK's integration channel
+   is the desktop STATEMENT — XSETTINGS `Gtk/FontName` on X11 when
+   served, the Settings portal `ReadOne` everywhere else — and the
+   statement only tracks dconf when the portal routes Settings to a
+   dconf-backed backend (xdg-desktop-portal-gtk). The rig's portal
+   serves 10 pt from its own source: a routing gap on the desktop,
+   not an FDK bug.
+3. **The proof, in-repo, same day**: scripts/portal-mock.py owns
+   org.freedesktop.portal.Desktop on a real session bus and serves
+   ReadOne from a file. Portal says `Sans 11` → FDK boots at
+   "11 pt (15 px)"; flip to `Sans 14` → "14 pt (19 px)". The
+   channel follows whatever serves it, exactly as documented.
+4. **Handed to the owner**: the one-line busctl ReadOne check (what
+   does the portal serve right now?) and the fix recipe (install
+   xdg-desktop-portal-gtk, route `org.freedesktop.impl.portal.Settings=gtk`
+   in portals.conf, restart). Until routed, FDK's own knobs
+   (FDK_UI_FONT_SIZE, `fdk-set fdk ui.font_size`) reach the chrome
+   with no portal at all — field-proven in round 53.
+5. Docs-only round (the mock script is the only tree delta): no
+   battery delta beyond round 53's clean rebuild.
 
 ## Round 54 (2026-11-09) — the second sweep pass: Orca speaks, text_demo's scripts walk; no code change
 

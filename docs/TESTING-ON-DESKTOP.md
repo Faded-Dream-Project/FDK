@@ -52,13 +52,42 @@ roles/names/states live under `application: org.fdk.testapps.edit`
 — that is the level-1 bridge doing its job, and enough to sign §16
 even without audio.
 
-**Steps for #7 (nothing to install):** the settings-portal half is
-already confirmed (the boot line above). The only remaining live
-check is §8's follow channel on labwc: with
-`xdg-desktop-portal` running, `gsettings set
-org.gnome.desktop.interface font-name 'Sans 11'`, restart an app,
-and the chrome follows (`FDK_UI_FONT_SIZE` and
-`fdk-set fdk ui.font_size 18` both beat it).
+**#7 — the portal half, resolved (2026-11-09, second pass).** The
+owner ran the gsettings test on the X11 desktop: librewolf (GTK)
+followed the new font, FDK stayed at the 10 pt statement its portal
+serves. Diagnosis, with the follow proven in-repo the same day:
+`gsettings set` writes dconf, and GTK apps read dconf directly —
+that is the control group. FDK's integration channel is the desktop
+STATEMENT (XSETTINGS `Gtk/FontName` on X11 when served, the
+Settings portal `ReadOne` everywhere); the statement only follows
+dconf when the portal routes Settings to a dconf-backed backend
+(`xdg-desktop-portal-gtk`). The rig's portal answers 10 pt from its
+own source, so the bridge is missing — a desktop-side routing gap,
+not an FDK bug. Proof (scripts/portal-mock.py, the real D-Bus
+interface on a session bus): the portal serving `Sans 11` boots the
+chrome at "11 pt (15 px)"; flipping the statement to `Sans 14`
+moves it to "14 pt (19 px)". The channel follows whatever serves
+it, by design.
+
+The one-line check on any desktop — what does the portal serve
+RIGHT NOW?:
+
+```sh
+busctl --user call org.freedesktop.portal.Desktop \
+  /org/freedesktop/portal/desktop \
+  org.freedesktop.portal.Settings ReadOne ss \
+  org.gnome.desktop.interface font-name
+```
+
+If it disagrees with `gsettings get
+org.gnome.desktop.interface font-name`, the backend is not
+dconf-backed: install `xdg-desktop-portal-gtk` and route Settings
+to it (`~/.config/xdg-desktop-portal/portals.conf`:
+`[preferred]` / `org.freedesktop.impl.portal.Settings=gtk`), then
+restart the app — the statement follows gsettings on both X11 and
+labwc. Until then, FDK's own knobs reach it with no portal at all
+(`FDK_UI_FONT_SIZE`, `fdk-set fdk ui.font_size N` — the wins rule,
+field-proven in the round-53 sweep).
 
 **Addendum — the second pass, same day (2026-11-09).** The owner's
 "task 18" is the walkthrough's open item 3 (M-2): the text_demo
