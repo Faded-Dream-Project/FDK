@@ -88,6 +88,9 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          # Explicit repo: this job has no checkout, so gh has no git
+          # context to infer it from.
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             --title "FDK ${GITHUB_REF_NAME}" \
@@ -122,6 +125,9 @@ jobs:
       - name: Upload the packages to the release
         env:
           GH_TOKEN: ${{ github.token }}
+          # gh release upload shells out to git to resolve the repo;
+          # this job has no checkout, so give it the repo explicitly.
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release upload "${GITHUB_REF_NAME}" \
             pkgs/pkg-*/* \

@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-09, after round 57 — 1.0.0 re-released with packages)
+## Current state (2026-11-09, after round 58 — 1.0.0 re-released, packages attached via GH_REPO fix)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,19 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 58 (2026-11-09) — the attach fix: GH_REPO for a checkout-less gh job; bug-rate: 0 new library bugs
+
+1. **The re-release run's one red step**: all five families built
+   and install-tested green (debian/rpm/arch/alpine/void), the
+   bundle published — but the attach step died with "failed to run
+   git: fatal: not a git repository": `gh release upload` resolves
+   the repo through git, and the attach job has no checkout.
+2. **The fix**: explicit `GH_REPO: ${{ github.repository }}` on
+   both gh steps (create + upload) — no inference, no git needed.
+   A workflow bug, not a library bug.
+3. **Re-tagged v1.0.0** on the fix commit: the release re-runs
+   end-to-end (fresh bundle, the five packages attached).
 
 ## Round 57 (2026-11-09) — the re-release: the tree cleaned of tracked rig junk, the packages channel wired; bug-rate: 0 new library bugs
 
