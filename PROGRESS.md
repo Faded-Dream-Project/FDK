@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-09, after round 51)
+## Current state (2026-11-09, after round 52)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,34 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 52 (2026-11-09) — the release gate run on the release tree: G1/G2/G3/G5/G6 green, G4 red (the owner's signoff); no code change
+
+1. The owner asked the question RELEASE-READINESS.md exists for:
+   "ready for release (1.0.0)?" The answer came from the tree,
+   mechanically: `scripts/release-gate.sh` run in the clean worktree
+   at origin/main (round 51, fa61946).
+2. **G1** feature freeze PASS (register: 44 DONE · 0 PARTIAL ·
+   1 IN PROGRESS (M-9 itself) · 0 MISSING; PARITY open gaps: 0).
+   **G2** zero open bugs PASS. **G3** bug-rate plateau PASS (rounds
+   50 and 51, both zero, different environments — CI and the
+   owner's desktop). **G5** clean-checkout build + full unit
+   battery PASS (786 checks). **G6** claim discipline PASS.
+   **G7** informational, never blocks.
+3. **G4 FAIL** — docs/REAL-DESKTOP-SIGNOFF.md does not exist. The
+   28-section TESTING-ON-DESKTOP.md walkthrough is the owner's
+   hardware; the sandbox cannot produce it and will not forge it.
+4. Field progress toward G4 already banked today (the owner's
+   tint2 run, 10:42): the GL lane self-check on the GTX 1050 Ti
+   (§27), the tray chain end-to-end (the rounds 48–51 arc),
+   notifications with and without a daemon, themes / icons (235/235
+   lookups) / fonts / ui-metrics, EWMH focus, touch-present +
+   tablet-absent probing, the AT-SPI bridge live. Still unwalked on
+   their hardware: the Wayland-desktop sections and the X11 tail
+   (hotplug, startup notification, drag icons, portals, Orca).
+5. The verdict delivered: **5/6 mandatory gates green; the tag is
+   the owner's act (docs/versioning.md) the moment their signoff
+   lands.**
 
 ## Round 51 (2026-11-09) — field run 2 on tint2: the menu pops; About learns to speak without a daemon; app round, bug-rate: 1 found (app-level), 1 fixed, 0 new library bugs
 
