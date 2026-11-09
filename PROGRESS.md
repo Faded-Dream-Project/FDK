@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-08, after round 50)
+## Current state (2026-11-09, after round 51)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,43 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 51 (2026-11-09) — field run 2 on tint2: the menu pops; About learns to speak without a daemon; app round, bug-rate: 1 found (app-level), 1 fixed, 0 new library bugs
+
+1. **The field evidence**: the owner's tint2 run shows the round-50
+   chain firing end to end — three clicks, three popups
+   ("popped the item menu at (1799, 9) / (1796, 4) / (1800, 15)
+   logical", three distinct popup windows taking focus), then a
+   clean exit. The owner's verdict: "Exit button only works ...
+   hopefully nothing is hardcoded."
+2. **Why About was silent**: this session had NO notification
+   daemon on the bus ("notify: no notification daemon on the
+   bus" — dunst was not running), so the About notification had
+   nowhere to land; the send succeeded into the void. Fix: About
+   is now a real message dialog (fdk_dialog_show_message, OK,
+   parented to the main window) — visible with or without a
+   daemon, and it doubles as the in-app answer to "what is this
+   menu".
+3. **Open Files was never broken**: the log shows the main window
+   taking focus (WM_TAKE_FOCUS) right after popups two and three —
+   the activation fired; it only LOOKS like nothing when the
+   window is already in front. Left as-is.
+4. **The live-model proof** (the "nothing hardcoded" answer made
+   visible): the rows were always the app's own fdk_tray_menu
+   model — the core hardcodes nothing. Round 51 makes that
+   unmistakable: the about-to-show callback now re-reads the
+   active pane and renames the Open row to the CURRENT folder
+   ("Open my-project") before every popup (and before the SNI
+   host's GetLayout — the same parity serves both protocols).
+5. **Ops**: the sandbox recycled (wiped /tmp/x11dev AND reset the
+   clone to a stale divergent snapshot — 680 dirty files on a
+   foreign lineage). setup-sandbox.sh rebuilt the environment
+   (the recycle playbook worked as designed); the round was
+   developed in a clean worktree off origin/main and the divergent
+   checkout was left untouched for the owner to re-align.
+
+Battery: core + X11 + dbus ALL PASS in the worktree; the release
+app builds clean.
 
 ## Round 50 (2026-11-08) — the tray click menu: one model, any bar; feature round, bug-rate: 0 product bugs (1 test-sequencing wrinkle, fixed in the leg)
 

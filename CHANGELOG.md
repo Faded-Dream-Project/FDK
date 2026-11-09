@@ -9,6 +9,13 @@ changes; the round-40 release-closing work below landed under the
 same release identity before the tag.
 
 
+### Changed (round 51)
+
+- **fdk-files' tray menu is live**: the Open row names the current
+  folder (refreshed through the about-to-show parity before every
+  show, both protocols), and About opens a message dialog so it is
+  visible even with no notification daemon on the bus.
+
 ### Added (round 50)
 
 - **The tray click menu** — a click on the tray icon now opens the

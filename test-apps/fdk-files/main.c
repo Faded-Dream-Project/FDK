@@ -44,22 +44,56 @@ files_app fapp;
 static fdk_tray_menu *g_tray_menu = NULL;
 static uint32_t g_menu_open, g_menu_about, g_menu_quit;
 
+static void dialog_ok_cb(fdk_dialog_response response, void *user);
+
 static void tray_menu_click(fdk_tray_menu *menu, uint32_t id, void *user) {
     (void)menu;
     (void)user;
     if (id == g_menu_open) {
         fdk_window_show(fapp.base.window);
         fdk_window_activate(fapp.base.window);
-    } else if (id == g_menu_about && fapp.notify != NULL) {
-        fdk_notify_request req = {0};
-        req.summary = "fdk-files";
-        req.body = "The FDK validation file manager (round 50: the "
-                   "tray click menu).";
-        req.urgency = FDK_NOTIFY_URGENCY_LOW;
-        (void)fdk_notify_send(fapp.notify, &req, NULL);
+    } else if (id == g_menu_about) {
+        /* A dialog, not a notification: About must be visible even
+         * when no notification daemon is on the bus (the round-51
+         * desktop run hit exactly that — About was silent with no
+         * daemon to receive the notify). */
+        fdk_dialog_options opts = {0};
+        opts.title = "About fdk-files";
+        opts.text = "fdk-files — the FDK validation file manager.\n\n"
+                    "The tray menu is this app's own fdk_tray_menu "
+                    "model: one model serves a StatusNotifier host "
+                    "(DBusMenu) and a classic XEmbed bar (the "
+                    "toolkit's local popup), and the rows refresh "
+                    "live on every show.";
+        opts.buttons = FDK_DIALOG_BUTTONS_OK;
+        opts.parent = fapp.base.window;
+        (void)fdk_dialog_show_message(fapp.base.ctx, &opts,
+                                      dialog_ok_cb, NULL, NULL);
     } else if (id == g_menu_quit) {
         fapp.base.quit = true;
     }
+}
+
+/* The about-to-show parity (round 51): the Open row names the
+ * CURRENT folder — the menu model is live, not a hardcoded list;
+ * every show re-reads the pane before the popup (or the SNI host's
+ * GetLayout) mirrors it. */
+static void tray_menu_about_to_show(fdk_tray_menu *menu, uint32_t parent,
+                                    void *user) {
+    (void)user;
+    if (menu == NULL || parent != 0) {
+        return;
+    }
+    pane *p = active_pane();
+    tab *t = (p != NULL) ? active_tab(p) : NULL;
+    if (t == NULL || t->dir[0] == '\0') {
+        return;
+    }
+    const char *base = strrchr(t->dir, '/');
+    base = (base != NULL && base[1] != '\0') ? base + 1 : t->dir;
+    char label[FI_PATH_MAX + 16];
+    snprintf(label, sizeof label, "_Open %s", base);
+    fdk_tray_menu_set_label(menu, g_menu_open, label);
 }
 
 static void fi_undo_apply(void *state);
@@ -696,6 +730,8 @@ int main(int argc, char **argv) {
             fdk_tray_menu_add_separator(g_tray_menu, 0);
             g_menu_quit = fdk_tray_menu_add(g_tray_menu, 0, "_Quit");
             fdk_tray_menu_on_click(g_tray_menu, tray_menu_click, NULL);
+            fdk_tray_menu_on_about_to_show(g_tray_menu,
+                                           tray_menu_about_to_show, NULL);
             fdk_tray_item_set_menu(fapp.tray, g_tray_menu);
         }
     }
