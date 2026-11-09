@@ -9,6 +9,18 @@ changes; the round-40 release-closing work below landed under the
 same release identity before the tag.
 
 
+### Fixed (round 53)
+
+- **The test apps exit cleanly on SIGTERM/SIGINT** (logout daemons,
+  `timeout`, `kill`): the common boot turns the signal into the
+  same main-thread teardown as a window close (was: exit 143, no
+  session save). The core's handler-quit contract was already in
+  place; the apps now use it.
+- **No more boot ERROR for an absent translation catalog**: a
+  missing optional `.fmo` is the designed fallback to source
+  strings and logs INFO; a catalog that exists but is broken still
+  errors.
+
 ### Changed (round 51)
 
 - **fdk-files' tray menu is live**: the Open row names the current

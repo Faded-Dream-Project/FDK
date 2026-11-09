@@ -7,9 +7,13 @@
 #include "fdk/fdk_theme.h"
 
 #include <stdarg.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+static void ta_signals_install(void);
 
 static fdk_u32 ta_status_ctx(ta_app *app) {
     return fdk_statusbar_get_context_id(app->statusbar, "main");
@@ -134,6 +138,7 @@ bool ta_open(ta_app *app, const char *display_name, fdk_i32 w,
 
     fdk_window_show(app->window);
     (void)fdk_window_paint(app->window);
+    ta_signals_install();
     return true;
 }
 
@@ -146,7 +151,35 @@ void ta_status(ta_app *app, const char *fmt, ...) {
     (void)fdk_statusbar_push(app->statusbar, ta_status_ctx(app), buf);
 }
 
+/* TERM/INT → the clean exit. The owner's field run showed kill %1
+ * landing as exit 143 — no session save, no clean unmap. The core's
+ * contract honors a quit from a handler, but the apps own their
+ * signal policy: the handler only sets a flag (signal-safe), and
+ * ta_pump maps it to the app quit inside the 15 ms pump budget, so
+ * the teardown runs on the main thread like any other quit. */
+static volatile sig_atomic_t g_signal_quit;
+
+static void ta_signal_quit(int sig) {
+    (void)sig;
+    g_signal_quit = 1;
+}
+
+static void ta_signals_install(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = ta_signal_quit;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    (void)sigaction(SIGTERM, &sa, NULL);
+    (void)sigaction(SIGINT, &sa, NULL);
+}
+
 bool ta_pump(ta_app *app) {
+    if (g_signal_quit) {
+        g_signal_quit = 0;
+        app->quit = true;
+        return false;
+    }
     if (app->quit) {
         return false;
     }
@@ -431,7 +464,17 @@ struct fdk_catalog *ta_i18n_load(ta_app *app, const char *dir,
     if (strcmp(lang, "ro") == 0) {
         char path[512];
         snprintf(path, sizeof path, "%s/ro.fmo", dir);
-        (void)fdk_catalog_load(path, &g_catalog); /* fail-soft: EN */
+        /* A missing catalog is the designed fallback (source strings),
+         * not an error: every app whose po/ ships nothing logged a
+         * boot ERROR on the owner's ro-locale desktop. Say so at INFO
+         * and skip the load; the library's ERROR stays for a catalog
+         * that exists but is broken (malformed, empty, over the cap). */
+        if (access(path, R_OK) == 0) {
+            (void)fdk_catalog_load(path, &g_catalog);
+        } else {
+            fdk_log(FDK_LOG_INFO, "i18n",
+                    "no catalog at %s — using the source strings", path);
+        }
     }
     return g_catalog;
 }

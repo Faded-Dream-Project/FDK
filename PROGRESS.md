@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-09, after round 52)
+## Current state (2026-11-09, after round 53)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,47 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 53 (2026-11-09) — the owner's 10-item sweep lands; TERM learns to exit cleanly; the missing-catalog noise dies; app round, bug-rate: 1 found, 1 fixed, 0 new library bugs
+
+1. **The tally**: the owner answered the 10-item verification list.
+   Six PASS (font size, the tray, notifications, drag icons, the GL
+   lane, and touch's probe behaving correctly on a touch-less rig),
+   one re-scoped (the Wayland walk is labwc, not sway), one blocked
+   by hardware (hotplug — one HDMI output), one clarified (portals:
+   no FDK file chooser exists by documented PARITY-out; the
+   settings-portal statement reads correctly at every boot), one
+   pending with steps now in the doc (Orca §16). Recorded as the
+   Field results section in TESTING-ON-DESKTOP.md — the raw
+   material for gate G4's signoff.
+2. **TERM bypassed the clean exit** (found by the owner's font-size
+   sweep): `kill %1` / `timeout` / logout daemons all land as
+   SIGTERM, and the app died with exit 143 — no session save, no
+   clean unmap. The core's contract (context.c's EINTR path) was
+   built to honor a quit from a handler, but no test app ever
+   installed one. Fix (app-side, by design — the core leaves signal
+   policy to the application): the common boot installs
+   TERM/INT → a sig_atomic_t flag; ta_pump maps it to the app quit
+   inside the 15 ms pump budget, so teardown runs on the main
+   thread like any other quit. Verified headless: TERM now exits 0
+   in 0.01 s with the app's own "exited cleanly" line.
+3. **The missing-catalog ERROR** (found by the same run): every app
+   whose po/ ships nothing logged a boot ERROR on the owner's
+   ro-locale desktop — but a missing OPTIONAL catalog is the
+   designed fallback to source strings. Fix: the common boot stats
+   the path first; absent → one INFO line ("no catalog at … —
+   using the source strings"); present-but-broken keeps the
+   library's ERROR. Verified headless with LANG=ro_RO.UTF-8: zero
+   ERROR lines.
+4. The doc's §1 sweep command now uses `timeout 4` instead of the
+   `kill %1` form (job-control-dependent; that is what piled up
+   windows on the owner's shell).
+
+Battery: clean rebuild + core + X11 + dbus ALL PASS; the release
+apps build clean (a sanitizer-contaminated archive from the gate's
+incremental rebuild forced the clean rebuild — the same trap the
+CI incident taught; the gate's build and a release build must not
+share build/obj).
 
 ## Round 52 (2026-11-09) — the release gate run on the release tree: G1/G2/G3/G5/G6 green, G4 red (the owner's signoff); no code change
 

@@ -16,6 +16,52 @@ Current open items:
 
 ---
 
+## Field results — the owner's 10-item sweep (2026-11-09)
+
+The owner answered the 10-item verification list on their hardware
+(X11: Openbox + tint2 + the GTX 1050 Ti proprietary driver; Wayland:
+**labwc** — this note re-scopes every "sway" mention). Evidence:
+their session logs, quoted where the wording is theirs. This table
+is the raw material for REAL-DESKTOP-SIGNOFF.md (gate G4).
+
+| # | item | verdict | evidence |
+|---|------|---------|----------|
+| 1 | the UI font size (TASK C, §8) | **PASS** | default runs of fdk-notes/fdk-edit; the `FDK_UI_FONT_SIZE` 12→16→24→32 sweep ("the text just got bigger and bigger"); the desktop statement read at boot (`ui-metrics: the portal's font statement is 10 pt (14 px)`, scale 1.00) |
+| 2 | the tray against the real bar | **PASS** | the fdk-files runs: docked to tint2 via the systray manager + the System Tray v0.2 fallback, popup menus at the click's position, the live-model row (rounds 48–51) |
+| 3 | notifications against the real daemon | **PASS** | the dunst session delivered; the daemon-less sessions degraded correctly (and prompted round 51's About dialog, which no longer needs a daemon at all) |
+| 4 | multi-monitor hotplug (§12) | **BLOCKED by hardware** | the rig has a single HDMI-0 output — untestable there |
+| 5 | the Wayland compositor walk | **RE-SCOPED, pending** | the owner's compositor is labwc, not sway; the §1–7 walkthrough applies verbatim on labwc |
+| 6 | drag icons (§14) | **PASS** | "I can drag icons on fdk-files and it follows the cursor" |
+| 7 | portals (§15) | **CLARIFIED — confirmed where it applies** | FDK ships no portal file chooser (a documented PARITY out — not an FDK surface); FDK's portal check is the settings/font statement, and it reads correctly on every boot |
+| 8 | Orca / AT-SPI (§16) | **PENDING — steps below** | the bridge is live in every log (`atspi: the accessibility bridge is live (level 1)`); the screen-reader walk needs the steps below |
+| 9 | touch (§26) | **N/A by hardware** | no touch device; the probe behaves correctly in the field (`X Input 2.2: touch events available`, `no stylus evidence among 5 pointer device(s)`) |
+| 10 | the GL/GPU lane (§27) | **PASS** | `GPU present lane active (NVIDIA GeForce GTX 1050 Ti)` and the small-surface CPU path both observed in the field; the owner confirmed enable/disable |
+
+**Steps for #8 (Orca, ~5 minutes):**
+
+```sh
+sudo apt install orca accerciser      # or the distro equivalent
+DISPLAY=:0 orca --replace &           # speech + the screen reader
+DISPLAY=:0 accerciser &               # the silent AT-SPI tree browser
+DISPLAY=:0 ./test-apps/build/fdk-edit
+```
+
+Tab through the editor: Orca announces the window, focus moves and
+roles (text, menu, button). In accerciser, the FDK tree shows
+roles/names/states live under `application: org.fdk.testapps.edit`
+— that is the level-1 bridge doing its job, and enough to sign §16
+even without audio.
+
+**Steps for #7 (nothing to install):** the settings-portal half is
+already confirmed (the boot line above). The only remaining live
+check is §8's follow channel on labwc: with
+`xdg-desktop-portal` running, `gsettings set
+org.gnome.desktop.interface font-name 'Sans 11'`, restart an app,
+and the chrome follows (`FDK_UI_FONT_SIZE` and
+`fdk-set fdk ui.font_size 18` both beat it).
+
+---
+
 ## 1. the UI font size on your desktop (TASK C — needs your eyes)
 
 FDK's chrome now scales off one answer: the
@@ -42,11 +88,16 @@ text inside its dialog.
 
 ```sh
 for S in 12 16 24 32; do
-  DISPLAY=:0 FDK_UI_FONT_SIZE=$S ./test-apps/build/fdk-notes & 
-  sleep 4; kill %1
+  FDK_UI_FONT_SIZE=$S DISPLAY=:0 timeout 4 ./test-apps/build/fdk-notes
 done
-DISPLAY=:0 FDK_UI_FONT_SIZE=32 ./test-apps/build/fdk-edit
+FDK_UI_FONT_SIZE=32 DISPLAY=:0 ./test-apps/build/fdk-edit
 ```
+
+(`timeout` closes each instance before the next opens — the earlier
+`… & sleep 4; kill %1` form depends on the shell's job control and
+left every instance alive in shells without it, piling up windows.
+Since round 53 the TERM lands as a clean exit, so `timeout` also
+exercises the graceful shutdown on the way past.)
 
 Expected: every app's chrome grows with the number you asked for;
 at 32 px the menus' rows still fit the screen and no label touches
