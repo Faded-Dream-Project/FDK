@@ -35,3 +35,7 @@ test-apps/*.deb
 # an old install tree from the pre-rename days; build debris only,
 # never commit it
 /fdk-shell/
+
+# Local rigs the owner named as junk: parity cache + screenshot output
+/.cache/
+/download/

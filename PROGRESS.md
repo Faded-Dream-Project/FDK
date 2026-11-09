@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-09, after round 56 — 1.0.0 tagged)
+## Current state (2026-11-09, after round 57 — 1.0.0 re-released with packages)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,31 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 57 (2026-11-09) — the re-release: the tree cleaned of tracked rig junk, the packages channel wired; bug-rate: 0 new library bugs
+
+1. **The owner's cleanup order**: .cache/parity and
+   download/fdk-langs-screenshots were TRACKED (29 files — a parity
+   cache and the language-screenshot rig output committed at some
+   past git add). They rode in every tag's auto-generated source
+   archive — the 1.0.0 source archives included them. Removed from
+   tree and index, gitignored (/.cache/ and /download/), so no
+   future tag carries them.
+2. **The owner meant PACKAGES, not a tarball**: the release now
+   ships the five native families — deb/rpm/arch/apk/xbps — built
+   by the same push through the validated distro-packages pipeline
+   (each family's own tool in its pinned container, install-tested
+   clean first), then attached to the GitHub release. release.yml
+   grew the packages job (distro-packages.yml, upload: true) and
+   the attach-packages job; distro-packages.yml's stale "never a
+   release" comments corrected. One self-caught bug: the
+   download-artifact pin must be the REAL upstream SHA (verified
+   against the API: v7.0.0 = 37930b1c...), never guessed.
+3. **The re-release**: the v1.0.0 release and tag are deleted and
+   re-tagged on this commit — fresh source archives without the
+   junk, same bundle, now with the five packages attached.
+4. No library code touched; the gate result from round 56 stands
+   (the tree delta is junk removal + workflow + docs).
 
 ## Round 56 (2026-11-09) — 1.0.0 ships: the sign-off signed, the log line honest, the tag channel wired; bug-rate: 0 new library bugs
 

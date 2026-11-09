@@ -13,8 +13,9 @@ same release identity before the tag.
 
 Tag `v1.0.0`; the prebuilt Linux bundle (libfdk.so.1 + headers +
 examples + docs, sha256-signed) is built by CI from the tag
-(.github/workflows/release.yml); the five distro families build
-from the same source through packaging/.
+(.github/workflows/release.yml); the five distro families' native
+packages (deb/rpm/arch/apk/xbps) are built by the same push and
+ship alongside it as release assets.
 
 ### What you should know before running it
 

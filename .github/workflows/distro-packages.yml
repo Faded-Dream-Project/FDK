@@ -14,9 +14,10 @@
 #      the shipped CLI tool, a compile+run smoke test under Xvfb,
 #      and removal verification)
 #
-# The project is in development with no published releases; this
-# workflow exists so the packaging recipes can never silently rot —
-# it proves the recipes still build and install, nothing more.
+# This workflow exists so the packaging recipes can never silently
+# rot — ci.yml calls it with upload: false purely as a build+install
+# proof; release.yml calls it with upload: true on a v* tag and
+# attaches the built packages to the GitHub release.
 #
 # alpine and void are marked optional until their pipelines have
 # proven stable: a failure there does not block the rest of the
@@ -33,7 +34,7 @@ on:
   workflow_call:
     inputs:
       upload:
-        description: Upload the built packages as workflow artifacts (CI debugging aid — never a release)
+        description: Upload the built packages as workflow artifacts (CI debugging aid, or the release channel when release.yml calls on a v* tag)
         required: false
         type: boolean
         default: false

@@ -14,10 +14,10 @@
 #
 # The bundle is the built Linux runtime + SDK: libfdk.so.1 (plus the
 # dev symlink), the example/test-app binaries built against it, the
-# public headers, and the docs. Distro packages build from the same
-# tag source through the five families' recipes (packaging/) —
-# distro-packages.yml keeps those buildable; the release tarball is
-# the prebuilt convenience artifact.
+# public headers, and the docs. The five distro families' native
+# packages (deb/rpm/arch/alpine/void) are built by the same tag push
+# through distro-packages.yml and attached to the release — the
+# source archive GitHub auto-generates covers everyone else.
 
 name: release
 
@@ -94,3 +94,35 @@ jobs:
             --notes-file "${NOTES}" \
             --verify-tag \
             "${BUNDLE}" "${BUNDLE}.sha256"
+
+  packages:
+    # The five native packages (deb / rpm / arch / apk / xbps), built
+    # by the same reusable pipeline ci.yml validates every push:
+    # each family's own package tool inside its pinned container,
+    # install-tested clean before the artifact is allowed here.
+    uses: ./.github/workflows/distro-packages.yml
+    permissions:
+      contents: read
+    with:
+      upload: true
+
+  attach-packages:
+    name: attach packages to the release
+    needs: [binaries, packages]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the built packages
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: pkg-*
+          path: pkgs/
+
+      - name: Upload the packages to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            pkgs/pkg-*/* \
+            --clobber
