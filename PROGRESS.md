@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-09, after round 53)
+## Current state (2026-11-09, after round 54)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,27 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 54 (2026-11-09) — the second sweep pass: Orca speaks, text_demo's scripts walk; no code change
+
+1. **§16 (Orca/AT-SPI) PASS**: the owner ran a real screen reader
+   against the test apps — "Tested orca with fdk and it works and
+   its loud my ears". Speech + focus announcements over the level-1
+   bridge, on their hardware, through the field's first screen
+   reader. Task #8 closes.
+2. **M-2 (text_demo complex scripts) PASS**: the owner's "task 18"
+   is the walkthrough's open item 3 — two text_demo runs with
+   Arabic + Han + Devanagari (नमस्ते with the explicit virama);
+   both logs show the per-script fallback chain (Arabic → DejaVu,
+   Han → Noto CJK, Devanagari → Noto Devanagari) under the active
+   shaping pipeline, clean exits both times. Plus a third GL-lane
+   field observation (fdk-gl.log) for §27.
+3. **G4's remaining delta**: the labwc walk (item 5), the portal
+   font-follow on labwc (the #7 half), and the signoff document
+   itself; hotplug (#4) stays hardware-blocked. Recorded in the
+   TESTING-ON-DESKTOP.md field-results addendum.
+4. Docs-only round: no code delta (the battery result from round
+   53's clean rebuild stands).
 
 ## Round 53 (2026-11-09) — the owner's 10-item sweep lands; TERM learns to exit cleanly; the missing-catalog noise dies; app round, bug-rate: 1 found, 1 fixed, 0 new library bugs
 

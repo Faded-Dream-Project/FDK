@@ -33,7 +33,7 @@ is the raw material for REAL-DESKTOP-SIGNOFF.md (gate G4).
 | 5 | the Wayland compositor walk | **RE-SCOPED, pending** | the owner's compositor is labwc, not sway; the §1–7 walkthrough applies verbatim on labwc |
 | 6 | drag icons (§14) | **PASS** | "I can drag icons on fdk-files and it follows the cursor" |
 | 7 | portals (§15) | **CLARIFIED — confirmed where it applies** | FDK ships no portal file chooser (a documented PARITY out — not an FDK surface); FDK's portal check is the settings/font statement, and it reads correctly on every boot |
-| 8 | Orca / AT-SPI (§16) | **PENDING — steps below** | the bridge is live in every log (`atspi: the accessibility bridge is live (level 1)`); the screen-reader walk needs the steps below |
+| 8 | Orca / AT-SPI (§16) | **PASS** (second pass, 2026-11-09) | the owner ran a real screen reader against the test apps: "Tested orca with fdk and it works" (loud enough to complain about — speech and focus announcements live over the level-1 bridge) |
 | 9 | touch (§26) | **N/A by hardware** | no touch device; the probe behaves correctly in the field (`X Input 2.2: touch events available`, `no stylus evidence among 5 pointer device(s)`) |
 | 10 | the GL/GPU lane (§27) | **PASS** | `GPU present lane active (NVIDIA GeForce GTX 1050 Ti)` and the small-surface CPU path both observed in the field; the owner confirmed enable/disable |
 
@@ -59,6 +59,22 @@ check is §8's follow channel on labwc: with
 org.gnome.desktop.interface font-name 'Sans 11'`, restart an app,
 and the chrome follows (`FDK_UI_FONT_SIZE` and
 `fdk-set fdk ui.font_size 18` both beat it).
+
+**Addendum — the second pass, same day (2026-11-09).** The owner's
+"task 18" is the walkthrough's open item 3 (M-2): the text_demo
+complex-script exercise, run twice on their fonts —
+`text_demo "مرحبا 漢字" "नमस<094d>त<0947>"` and
+`text_demo "مرحبا" $'\u0928\u092e\u0938\u094d\u0924\u0947'`
+(नमस्ते with the explicit virama). Both logs show the full
+per-script fallback chain firing (Arabic → DejaVu Sans, Han →
+Noto Sans CJK, Devanagari → Noto Sans Devanagari) under the active
+harfbuzz + fribidi pipeline, and both sessions exited cleanly —
+**M-2 PASS**. The GL run (`fdk-gl.log`) adds a third field
+observation of the GPU lane self-check passing on the GTX 1050 Ti
+(§27). **G4's remaining delta after this pass:** the labwc walk
+(item 5), the portal font-follow on labwc (the #7 half above), and
+the signoff document itself; hotplug (#4) stays hardware-blocked
+on the single-output rig.
 
 ---
 
