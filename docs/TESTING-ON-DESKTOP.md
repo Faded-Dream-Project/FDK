@@ -8,11 +8,12 @@ Everything below is marked in the roadmap as
 walked its numbered steps. Each step lists the exact commands, the
 trace environment variable, and the output to expect.
 
-Current open items:
-
-1. [the UI font size on your desktop (TASK C)](#1-the-ui-font-size-on-your-desktop-task-c--needs-your-eyes)
-2. [the app-facing API against YOUR desktop (TASK B)](#2-the-app-facing-api-against-your-desktop-task-b--needs-your-eyes)
-3. [text_demo: complex scripts, bidi, fallback, caret (M-2)](#3-text_demo-complex-scripts-bidi-fallback-caret-m-2--needs-your-eyes)
+All items are now walked or dispositioned on the owner's hardware —
+the verdicts, quotes and dispositions live in
+docs/REAL-DESKTOP-SIGNOFF.md (signed 2026-11-09, gate G4). The
+sections below remain as the standing verification recipe for every
+future release; re-walk them when the hardware or the desktop
+changes.
 
 ---
 

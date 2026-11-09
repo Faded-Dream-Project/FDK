@@ -14,7 +14,7 @@ developed as part of the
 [![Built with C](https://img.shields.io/badge/built%20with-C-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Standard: C17](https://img.shields.io/badge/standard-C17-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Backends: X11 and Wayland](https://img.shields.io/badge/backends-X11%20%7C%20Wayland-blueviolet?style=flat-square)](docs/architecture.md)
-[![Status: in development](https://img.shields.io/badge/status-in%20development-orange?style=flat-square)](docs/versioning.md)
+[![Status: 1.0.0 released](https://img.shields.io/badge/status-1.0.0%20released-brightgreen?style=flat-square)](docs/versioning.md)
 [![Part of Faded Dream](https://img.shields.io/badge/part%20of-Faded%20Dream-purple?style=flat-square)](https://github.com/Faded-Dream-Project/Faded-Dream-dotfiles)
 
 </div>

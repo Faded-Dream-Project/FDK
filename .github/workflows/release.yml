@@ -1,0 +1,96 @@
+# release.yml — the tag-triggered binary channel.
+#
+# ci.yml validates every push to main ("buildable, not a release
+# channel"); THIS workflow exists only for release tags (v*): it
+# builds the optimized tree once more, from the exact tag source, on
+# the ephemeral runner, and publishes the built bundle as a GitHub
+# release. The same no-cache, clean-tree rule as ci.yml applies: a
+# green run always means "this exact source built".
+#
+# Posture note: ci.yml runs contents: read everywhere. This job holds
+# contents: write — the minimum needed to create the release and
+# upload its artifacts. Still no secrets: the ephemeral GITHUB_TOKEN,
+# scoped to this one repository, is the only credential in play.
+#
+# The bundle is the built Linux runtime + SDK: libfdk.so.1 (plus the
+# dev symlink), the example/test-app binaries built against it, the
+# public headers, and the docs. Distro packages build from the same
+# tag source through the five families' recipes (packaging/) —
+# distro-packages.yml keeps those buildable; the release tarball is
+# the prebuilt convenience artifact.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    name: release binaries (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install build dependencies
+        # The same set ci.yml's build-test installs: the release binary
+        # must be the one CI has been validating all along, built the
+        # same way (libxtst/libxrandr stay — the toolkit links both).
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libx11-dev libxext-dev libxtst-dev libxi-dev zlib1g-dev \
+            libwayland-dev libxkbcommon-dev \
+            libgl1 libharfbuzz0b libfribidi0 \
+            libxrandr-dev
+
+      - name: Build (release config) + examples + export check
+        # FDK_CONFIG pinned throughout (the config-stamp rule from
+        # ci.yml: an unpinned `make examples` flips the tree back to
+        # the sanitizer debug config mid-run).
+        run: make FDK_CONFIG=release all examples verify-exports
+
+      - name: Stage the bundle
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          ARCH="$(uname -m)"
+          DIR="fdk-${VER}-linux-${ARCH}"
+          mkdir -p "${DIR}"/{lib,bin,include,docs}
+          cp build/libfdk.so.1 "${DIR}/lib/"
+          [ -e build/libfdk.so ] && cp build/libfdk.so "${DIR}/lib/"
+          find build/examples build/test-apps -maxdepth 1 -type f \
+            -executable 2>/dev/null | sort -u | xargs -r cp -t "${DIR}/bin/"
+          cp -r include/fdk "${DIR}/include/"
+          cp README.md CHANGELOG.md ROADMAP.md THIRD-PARTY-NOTICES.md "${DIR}/" 2>/dev/null || true
+          cp docs/*.md "${DIR}/docs/"
+          # The release notes: the tagged version's section, cut from
+          # the changelog the gate's claim-discipline check already
+          # vets.
+          awk -v ver="${VER}" '
+            /^## /{ if (found) exit; }
+            $0 ~ "^## "ver" " { found=1 }
+            found { print }
+          ' CHANGELOG.md > /tmp/release-notes.md
+          [ -s /tmp/release-notes.md ] || \
+            printf 'FDK %s\n\nSee CHANGELOG.md in the bundle.\n' "${VER}" \
+              > /tmp/release-notes.md
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+            -czf "${DIR}.tar.gz" "${DIR}"
+          sha256sum "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256"
+          echo "BUNDLE=${DIR}.tar.gz" >> "$GITHUB_ENV"
+          echo "NOTES=/tmp/release-notes.md" >> "$GITHUB_ENV"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "FDK ${GITHUB_REF_NAME}" \
+            --notes-file "${NOTES}" \
+            --verify-tag \
+            "${BUNDLE}" "${BUNDLE}.sha256"

@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-09, after round 55)
+## Current state (2026-11-09, after round 56 — 1.0.0 tagged)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,33 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 56 (2026-11-09) — 1.0.0 ships: the sign-off signed, the log line honest, the tag channel wired; bug-rate: 0 new library bugs
+
+1. **G4 signed**: docs/REAL-DESKTOP-SIGNOFF.md — the owner's walked
+   evidence (the 10-item sweep, the portal chain, Orca, the Wayland
+   logs), their three dispositions (multi-monitor untestable;
+   portal live-apply deferred with the implementation untouched;
+   the teardown residual accepted), and the final call: everything
+   else "should work perfectly fine". v1.0.0 authorized to tag.
+2. **The one approved code change** (Option B, step 1): the portal
+   statement log no longer overclaims — "recorded; running UI
+   keeps its startup size (1.0.0)". No other font-size code
+   touched, per the owner's locked spec (no GTK configuration
+   listening, no GTK dependency — ldd-verified empty).
+3. **The release channel**: .github/workflows/release.yml — tags
+   v* build the release tree on the ephemeral runner (the same
+   dependency set and FDK_CONFIG pinning as ci.yml), stage the
+   bundle (libfdk.so.1 + headers + examples + docs), sha256 it,
+   and publish the GitHub release with the changelog's own section
+   as notes. contents: write scoped to the release job — the
+   posture change is documented in the workflow header.
+4. **The docs swept for the release**: the walkthrough preamble now
+   points at the sign-off; CHANGELOG carries the 1.0.0 block
+   (the four things a user must know); ROADMAP's M-9 row records
+   the signature and the standing-surface rule.
+5. **Verification**: release-gate.sh (G1-G6) run on this tree —
+   all pass; the gate's clean-checkout battery is G5 itself.
 
 ## Round 55 (2026-11-09) — the gsettings differential diagnosed: FDK followed its channel; the bridge is the desktop's; no code change
 

@@ -341,8 +341,13 @@ static void portal_readone_font_reply(fdk_dbus_connection *c,
         if (!g_font_override) {
             g_font_px = px;
         }
+        /* 1.0.0 (the owner's Option B, rounds 55-56): the statement is
+         * RECORDED — a fresh instance boots at it — but the running UI
+         * keeps its startup size; no live re-shape lands on arrival.
+         * Say so, so the log never overclaims consumption. */
         FDK_INFO("ui-metrics: the portal's font statement is %d pt "
-                 "(%d px)",
+                 "(%d px) — recorded; running UI keeps its startup "
+                 "size (1.0.0)",
                  pt, px);
     }
     fdk_dbus_values_free_array(args, n);

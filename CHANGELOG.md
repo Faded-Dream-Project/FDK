@@ -9,6 +9,33 @@ changes; the round-40 release-closing work below landed under the
 same release identity before the tag.
 
 
+## 1.0.0 — the first release (tagged 2026-11-09)
+
+Tag `v1.0.0`; the prebuilt Linux bundle (libfdk.so.1 + headers +
+examples + docs, sha256-signed) is built by CI from the tag
+(.github/workflows/release.yml); the five distro families build
+from the same source through packaging/.
+
+### What you should know before running it
+
+- **The desktop font statement is read, not chased.** FDK reads the
+  desktop's font statement through the freedesktop Settings portal
+  (XSETTINGS on X11 when served) at startup, and honors it for
+  fresh instances, below `FDK_UI_FONT_SIZE` and FDK's own settings.
+  In 1.0.0 the statement does NOT resize already-rendered text
+  live — the log says "recorded; running UI keeps its startup
+  size". Live resize is the first post-1.0.0 follow-up. FDK has no
+  GTK linkage and reads no GTK/dconf configuration: `ldd` shows no
+  gtk/gdk/gobject/pango, by the owner's locked spec.
+- **Multi-monitor behavior is untested** (the verification rig has
+  one output). Single-display desktops are the tested posture.
+- **Known cosmetic:** at most ~1 KB of one-time D-Bus teardown
+  residual, visible only in ASan debug builds; release builds do
+  not ship the sanitizer.
+- **The apps exit cleanly on SIGTERM/SIGINT** (logout daemons,
+  `timeout`, `kill`) since round 53; a missing optional translation
+  catalog logs INFO, not ERROR.
+
 ### Fixed (round 53)
 
 - **The test apps exit cleanly on SIGTERM/SIGINT** (logout daemons,
