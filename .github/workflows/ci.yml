@@ -238,6 +238,15 @@ jobs:
   #     (the SKIP lines must disappear; every other check keeps its verdict).
   drm-soak:
     name: dmabuf round-trip (DRM runner)
+    # Never pending on a normal push: the job SKIPS unless the repo
+    # variable HAS_DRM_RUNNER is literally 'true' (Settings -> Secrets
+    # and variables -> Actions -> Variables). That is the one switch —
+    # flip it when the self-hosted runner with the `drm` label is
+    # actually registered, not before (a queued job on a missing label
+    # holds the whole run in progress forever, which is exactly what
+    # happened on 2026-11-10/11). Fork pull requests can never reach
+    # it either: a self-hosted runner must not execute forked code.
+    if: ${{ vars.HAS_DRM_RUNNER == 'true' && !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true) }}
     runs-on: [self-hosted, drm]
     timeout-minutes: 25 # a dead runner fails fast (the arch hang, 2026-11-10)
     continue-on-error: true # non-blocking by design: the soak REPORTS, it

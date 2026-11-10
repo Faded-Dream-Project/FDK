@@ -1,4 +1,20 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## CI: the DRM soak can never pend a run again
+
+- The dmabuf-soak job is gated on vars.HAS_DRM_RUNNER == 'true': on
+  every normal push it SKIPS (the variable is unset by default —
+  treating unset as off is the safe direction), so no run can sit
+  in-progress forever behind a job waiting on a missing [self-hosted,
+  drm] runner. That is precisely what run 42906909731 did (the run
+  stayed 'queued' for hours with every runnable job completed).
+- The job is also fork-PR-restricted: a self-hosted runner must not
+  execute forked code
+  (!(pull_request && head.repo.fork)).
+- The lingering run was cancelled via the API; the re-run's
+  completed-ness is asserted in this session's report.
+- Audit: every other runs-on in the repo is ubuntu-latest (the
+  caller's two jobs, the distro callee, release.yml) — nothing else
+  can wait on a missing runner or label.
 ## The LSan suppression question CLOSED (with evidence)
 
 The deciding CI run surfaced clang's own verdict: "Supported
