@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <dlfcn.h>
@@ -208,6 +209,78 @@ int main(void) {
             fdk_texture_destroy(tt);
         }
         close(mfd);
+    }
+
+    /* ---- the robustness matrix (Item 2): clean errors, never a
+     * crash — a wrong stride, a wrong size, a closed fd ------------- */
+    {
+        int rfd = memfd_create("fdk-dmabuf-robust", 0);
+        CHECK(rfd >= 0, "robustness memfd");
+        if (rfd >= 0) {
+            /* a SMALL buffer: 4x4 */
+            uint8_t small[4 * 4 * 4];
+            memset(small, 0x7F, sizeof small);
+            CHECK(write(rfd, small, sizeof small) ==
+                      (ssize_t)sizeof small,
+                  "the small buffer written");
+
+            /* wrong stride/size vs the REAL buffer: measure it, then
+             * demand a descriptor that overruns it 4x (the gate is
+             * honest about the actual size — never a fixed guess) */
+            struct stat st_;
+            fstat(rfd, &st_);
+            fdk_i64 real_size = (fdk_i64)st_.st_size;
+            fdk_texture *wt = NULL;
+            fdk_dmabuf_params wp = base_params();
+            wp.width = (fdk_i32)(real_size / 4); /* 1 row fits exactly */
+            wp.height = 4;                       /* 4 rows: 4x overrun */
+            wp.fourcc = FOURCC('R', 'A', '2', '4');
+            wp.planes[0].fd = rfd;
+            wp.planes[0].stride = (fdk_u32)wp.width * 4u;
+            CHECK(fdk_texture_import_dmabuf(&wp, &wt) ==
+                      FDK_ERR_INVALID_ARGUMENT,
+                  "wrong stride vs the buffer size: clean refusal");
+            CHECK(wt == NULL, "no texture on the stride refusal");
+
+            /* wrong size: 4x40 (beyond the buffer end) */
+            fdk_dmabuf_params hp = base_params();
+            hp.width = 4;
+            hp.height = 40;
+            hp.fourcc = FOURCC('R', 'A', '2', '4');
+            hp.planes[0].fd = rfd;
+            hp.planes[0].stride = 4 * 4;
+            CHECK(fdk_texture_import_dmabuf(&hp, &wt) ==
+                      FDK_ERR_INVALID_ARGUMENT,
+                  "wrong size vs the buffer size: clean refusal");
+
+            /* closed fd: a positive number the kernel rejects */
+            int dead = dup(rfd);
+            close(dead);
+            fdk_dmabuf_params dp = base_params();
+            dp.width = 4;
+            dp.height = 4;
+            dp.fourcc = FOURCC('R', 'A', '2', '4');
+            dp.planes[0].fd = dead;
+            dp.planes[0].stride = 4 * 4;
+            CHECK(fdk_texture_import_dmabuf(&dp, &wt) ==
+                      FDK_ERR_INVALID_ARGUMENT,
+                  "closed fd: clean refusal (fstat fails)");
+
+            /* the honest control: the SAME buffer with the matching
+             * descriptor imports fine */
+            fdk_dmabuf_params okp = base_params();
+            okp.width = 4;
+            okp.height = 4;
+            okp.fourcc = FOURCC('R', 'A', '2', '4');
+            okp.planes[0].fd = rfd;
+            okp.planes[0].stride = 4 * 4;
+            CHECK(fdk_ok(fdk_texture_import_dmabuf(&okp, &wt)),
+                  "the matching descriptor still imports");
+            if (wt != NULL) {
+                fdk_texture_destroy(wt);
+            }
+            close(rfd);
+        }
     }
 
     /* ---- the driver's modifier query: only where an EGL lane

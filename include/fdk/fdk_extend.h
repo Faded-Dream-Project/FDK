@@ -189,11 +189,18 @@ typedef enum fdk_ext_capability {
                                         * hook (core + XI2 events; the
                                         * OR-window path is the popup
                                         * API)                     */
-    FDK_EXT_CAP_DMABUF_IMPORT = 19, /* zero-copy dma-buf texture import
-                                     * (EGL_EXT_image_dma_buf_import +
-                                     * _import_modifiers on the lane's
-                                     * EGL display; the zero-copy draw
-                                     * path). FALSE means only the
+    FDK_EXT_CAP_DMABUF_IMPORT = 19, /* zero-copy dma-buf texture import.
+                                     * Wayland: the lane's EGL display
+                                     * carries EGL_EXT_image_dma_buf_import
+                                     * (+ _modifiers). X11: the mesa
+                                     * unified-driver side door — a
+                                     * platform-x11 EGL display for THIS
+                                     * process's DISPLAY has the import
+                                     * extensions AND the GLX context
+                                     * binds the image through
+                                     * GL_OES_EGL_image (checked at draw;
+                                     * its absence degrades honestly per
+                                     * draw). FALSE means only the
                                      * explicit CPU-mode linear-mmap
                                      * fallback serves imports — and
                                      * tiled/INVALID modifiers then

@@ -190,3 +190,33 @@ jobs:
     uses: ./.github/workflows/distro-packages.yml
     permissions:
       contents: read
+
+  # The DRM-equipped soak (non-blocking): the dmabuf round-trip and the
+  # modifier query need a real render node. Stock runners have none, so
+  # this job is a TEMPLATE for a self-hosted runner — enable it by
+  # giving the runner the `drm` label and the setup below.
+  #
+  # SETUP NOTES (self-hosted, one-time):
+  #   - a machine with /dev/dri/renderD128 (any modern amdgpu/i915/nouveau,
+  #     or vgem/vkms for software), udev access for the runner user
+  #     (`sudo usermod -aG render <user>`; re-login),
+  #   - packages: libgbm1 libdrm2 libegl1 mesa-utils (the distro's mesalib),
+  #   - the runner needs no display: the GBM round-trip uses the render
+  #     node directly (no compositor, no seat, no tty),
+  #   - verify once by hand: ls -l /dev/dri/renderD* && ./build/tests/test_dmabuf
+  #     (the SKIP lines must disappear; every other check keeps its verdict).
+  drm-soak:
+    name: dmabuf round-trip (DRM runner)
+    runs-on: [self-hosted, drm]
+    continue-on-error: true # non-blocking by design: the soak REPORTS, it
+                            # does not gate (the sandbox/stock runners SKIP)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render node present?
+        run: |
+          test -c /dev/dri/renderD128 || {
+            echo "SKIP: no render node on this runner"; exit 0; }
+      - name: Build + the dmabuf suite
+        run: |
+          make build/tests/test_dmabuf
+          ./build/tests/test_dmabuf

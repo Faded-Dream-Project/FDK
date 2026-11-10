@@ -1,4 +1,30 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 2: the dmabuf X11 lane, the DRM job, the robustness gate
+
+- The X11 lane gets the zero-copy import (the mesa unified-driver side
+  door): the bridge caches a platform-x11 EGL display for the
+  process's own DISPLAY (same X server, same driver as the GLX lane;
+  the dma-buf fd is process-global), checks the import extensions,
+  and the GLX context binds the image through GL_OES_EGL_image —
+  resolved from the ENGINE's libGL (eglGetProcAddress's pointer is
+  the EGL-side one). The SAMPLING half is draw-time truth: a GLX
+  context without GL_OES_EGL_image degrades to the honest per-draw
+  UNSUPPORTED. Cap 19 is now TRUE on X11 when the driver supports the
+  path (fdk_x11_dmabuf_available probes the EGL half at the cap; the
+  header documents the split). The sandbox's Xvfb+llvmpipe answers
+  the cap honestly by driver: the import attempt fails without a
+  gbm device, the draw refuses, never a wrong draw.
+- tests/test_dmabuf.c: the robustness matrix — a descriptor that
+  overruns the real buffer (the stride gate is measured against
+  fstat, never a fixed guess), a wrong size, a closed fd, and the
+  matching control. Every case a clean FDK_ERR_INVALID_ARGUMENT; the
+  fstat gate in the import exists precisely because a wrong stride
+  would otherwise SIGBUS the fallback mmap mid-draw.
+- .github/workflows/ci.yml: the drm-soak job (non-blocking,
+  continue-on-error) — the GBM round-trip and the modifier query on a
+  self-hosted runner with /dev/dri/renderD128; the full setup notes
+  (the render group, the packages, no display needed, the hand-verify
+  command) live in the job's comments.
 ## Item 1: CI green at the tip; the blanket leak-suppression replaced
 
 - The run for e151b5c: build + test (ubuntu) SUCCESS - every fix from

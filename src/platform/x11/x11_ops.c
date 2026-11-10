@@ -12,6 +12,17 @@ static int fdk_x11_next_wakeup_ms(fdk_platform_connection *conn,
     return fdk_x11_gl_selfcheck_next_wakeup(conn->gl, out_ms_until);
 }
 
+/* Extension API v4 work (Item 2): the X11 dmabuf probe. The EGL
+ * half: a platform-x11 display for THIS process's DISPLAY with the
+ * import extensions (mesa shares the driver with the GLX lane). The
+ * sampling half (GL_OES_EGL_image in the GLX context) is draw-time
+ * truth and degrades honestly per draw. */
+int fdk_x11_dmabuf_available(fdk_platform_connection *conn) {
+    (void)conn;
+    extern int fdk__dmabuf_egl_x11_available(void *x11_display);
+    return fdk__dmabuf_egl_x11_available(NULL);
+}
+
 static const fdk_platform_ops g_x11_ops = {
     .x11_set_event_filter = fdk_x11_set_event_filter_impl,
     .name = "x11",
@@ -49,6 +60,7 @@ static const fdk_platform_ops g_x11_ops = {
     .window_set_cursor = fdk_x11_window_set_cursor,
     .window_set_input_region = fdk_x11_window_set_input_region,
     .window_activate = fdk_x11_window_activate,
+    .dmabuf_import_available = fdk_x11_dmabuf_available,
     .window_activation_token = fdk_x11_window_activation_token,
     .window_get_framebuffer = fdk_x11_window_get_framebuffer,
     .window_present = fdk_x11_window_present,

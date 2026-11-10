@@ -19,6 +19,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -240,6 +241,18 @@ fdk_result fdk_texture_import_dmabuf(const fdk_dmabuf_params *params,
                     (uint64_t)p->stride * (uint64_t)params->height;
     if (p->stride < (fdk_u32)params->width * 4u || need > SIZE_MAX) {
         return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* the descriptor must FIT the buffer: fstat the fd and require
+     * offset + stride*height <= size — a wrong stride or a wrong
+     * size otherwise SIGBUSes the fallback mmap mid-draw (the
+     * robustness contract: clean errors, never crashes). A closed fd
+     * fails the fstat the same way. (Robustness, Item 2.) */
+    {
+        struct stat st;
+        if (fstat(p->fd, &st) != 0 || st.st_size < 0 ||
+            (uint64_t)st.st_size < need) {
+            return FDK_ERR_INVALID_ARGUMENT;
+        }
     }
 
     fdk_texture *t = NULL;

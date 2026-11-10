@@ -66,6 +66,141 @@ typedef int EGLint;
 #define GL_LINEAR 0x2601
 
 #define DRM_FORMAT_MOD_INVALID (((uint64_t)1 << 56) - 1)
+#define EGL_PLATFORM_X11_EXT 0x31DC
+
+/* ---- the X11 side door (extension API v4 work, Item 2) -------------
+ *
+ * The X11 lane renders through GLX, and the EGL bridge's "current
+ * context" reads (eglGetCurrentDisplay) see NOTHING there. But mesa
+ * (the driver almost every Linux desktop runs) implements BOTH APIs
+ * against one driver: an EGLImage created on a platform-x11 EGL
+ * display CAN be bound in the GLX context when the context's GL
+ * exposes GL_OES_EGL_image (the mpv-style route). The bridge caches
+ * one platform-x11 display per process, created against the SAME
+ * Display* the GLX lane drives - same driver, same device, one
+ * import path.
+ *
+ * The capability truth is therefore RUNTIME: the probe answers "the
+ * EGL half exists" (the platform-x11 display initialized + the
+ * import extensions present); the SAMPLING half (GL_OES_EGL_image in
+ * the GLX context) is checked at draw, and its absence degrades to
+ * the honest per-draw UNSUPPORTED - never a wrong draw. */
+
+static void *g_x11_dpy = NULL;      /* the cached platform-x11 display */
+static void *g_x11_dpy_for = NULL;  /* the Display* it was built for */
+
+/* The process's own X display for the side door: dlopen libX11 and
+ * XOpenDisplay(NULL) — the DISPLAY the lane connected to (same X
+ * server, same driver; the dma-buf fd is process-global so the
+ * import is server-agnostic). NULL without X11. */
+static void *side_door_x_display(void) {
+    static void *xd = NULL;
+    static int tried = 0;
+    if (tried) {
+        return xd;
+    }
+    tried = 1;
+    void *lib = dlopen("libX11.so.6", RTLD_NOW | RTLD_LOCAL);
+    if (lib == NULL) {
+        return NULL;
+    }
+    void *(*xopen)(const char *) =
+        (void *(*)(const char *))dlsym(lib, "XOpenDisplay");
+    if (xopen == NULL) {
+        return NULL;
+    }
+    xd = xopen(NULL);
+    return xd;
+}
+
+void *fdk__dmabuf_egl_x11_display(void *x11_display) {
+    struct fdk__dmabuf_egl_api *api = NULL;
+    if (!fdk__dmabuf_egl_load(&api) || x11_display == NULL) {
+        return NULL;
+    }
+    if (g_x11_dpy != NULL) {
+        return g_x11_dpy_for == x11_display ? g_x11_dpy : NULL;
+    }
+    void *(*gdp)(unsigned, void *, const void *) =
+        (void *(*)(unsigned, void *, const void *))
+        dlsym(api->lib, "eglGetPlatformDisplay");
+    unsigned char (*init)(void *, int *, int *) =
+        (unsigned char (*)(void *, int *, int *))dlsym(api->lib,
+                                                       "eglInitialize");
+    if (gdp == NULL || init == NULL) {
+        return NULL;
+    }
+    void *d = gdp(EGL_PLATFORM_X11_EXT, x11_display, NULL);
+    if (d == NULL || !init(d, &(int){0}, &(int){0})) {
+        return NULL;
+    }
+    g_x11_dpy = d;
+    g_x11_dpy_for = x11_display;
+    return g_x11_dpy;
+}
+
+/* A bridge view with the plain-GL texture entry points resolved from
+ * a SPECIFIC library (libGL for the GLX lane: the desktop
+ * GL_OES_EGL_image entry lives there; eglGetProcAddress's pointer is
+ * the EGL-side one and only works in EGL contexts). The returned
+ * view borrows `lib`; the caller keeps it loaded. Returns NULL when
+ * the required symbols are missing. */
+struct fdk__dmabuf_egl_api *fdk__dmabuf_egl_api_with_gl_lib(void *lib) {
+    if (lib == NULL) {
+        return NULL;
+    }
+    static struct fdk__dmabuf_egl_api view;
+    static int built = 0;
+    static void *built_from = NULL;
+    if (built && built_from == lib) {
+        return &view;
+    }
+    memset(&view, 0, sizeof view);
+    struct fdk__dmabuf_egl_api *base = NULL;
+    if (!fdk__dmabuf_egl_load(&base)) {
+        return NULL;
+    }
+    view = *base;
+    view.lib = base->lib; /* the EGL library stays the base's */
+    view.glGenTextures = (void (*)(int, unsigned *))dlsym(lib, "glGenTextures");
+    view.glBindTexture = (void (*)(unsigned, unsigned))dlsym(lib, "glBindTexture");
+    view.glTexParameteri =
+        (void (*)(unsigned, unsigned, unsigned))dlsym(lib, "glTexParameteri");
+    view.glDeleteTextures =
+        (void (*)(int, const unsigned *))dlsym(lib, "glDeleteTextures");
+    /* the image-target bind: the desktop entry name IS the GLES name
+     * (GL_OES_EGL_image); resolve it from the same libGL */
+    view.glEGLImageTargetTexture2DOES =
+        (void (*)(unsigned, void *))dlsym(
+            lib, "glEGLImageTargetTexture2DOES");
+    if (view.glGenTextures == NULL || view.glBindTexture == NULL ||
+        view.glTexParameteri == NULL || view.glDeleteTextures == NULL ||
+        view.glEGLImageTargetTexture2DOES == NULL) {
+        return NULL;
+    }
+    built = 1;
+    built_from = lib;
+    return &view;
+}
+
+void *fdk__dmabuf_egl_x11_process_display(void) {
+    return side_door_x_display();
+}
+
+int fdk__dmabuf_egl_x11_available(void *x11_display) {
+    if (x11_display == NULL) {
+        x11_display = side_door_x_display();
+    }
+    void *d = fdk__dmabuf_egl_x11_display(x11_display);
+    if (d == NULL) {
+        return 0;
+    }
+    struct fdk__dmabuf_egl_api *api = NULL;
+    if (!fdk__dmabuf_egl_load(&api)) {
+        return 0;
+    }
+    return fdk__dmabuf_egl_dpy_supports(api, d, NULL);
+}
 
 static struct fdk__dmabuf_egl_api g_api;
 static int g_loaded = 0;

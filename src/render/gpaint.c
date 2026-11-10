@@ -404,6 +404,9 @@ struct fdk_gpu_state {
     int width, height;
     int pend_filter_cur; /* sampler state last set on a pend slot */
     int es;      /* GLES flavor (precision stmt + LUMINANCE atlas) */
+    int gl_oes_egl_image; /* the GLX context exposes GL_OES_EGL_image
+                           * (mesa: the EGLImage side door) — set at
+                           * GL bring-up from the extension string */
     int gl_ready; /* GL objects built (needs a CURRENT context; built
                    * lazily at the first flush/atlas/texture call) */
 
@@ -464,6 +467,16 @@ static int gp_ensure_gl(struct fdk_surface *s) {
     }
     const char *ver = (const char *)g_gp.GetString(0x1F02 /* VERSION */);
     g->es = (ver != NULL && strstr(ver, "OpenGL ES") != NULL);
+    g->gl_oes_egl_image = 0;
+    if (g_gp.GetString != NULL) {
+        const char *exts =
+            (const char *)g_gp.GetString(0x1F03 /* EXTENSIONS */);
+        /* the GLX context's own truth: with GL_OES_EGL_image the
+         * context can bind an EGLImage (mesa shares the driver with
+         * the platform-x11 EGL display; see dmabuf_egl.c) */
+        g->gl_oes_egl_image =
+            exts != NULL && strstr(exts, "GL_OES_EGL_image") != NULL;
+    }
 
     if (!gp_program(g)) {
         fprintf(stderr, "fdk-gpaint: GL bring-up failed (shader/program); "
@@ -983,6 +996,29 @@ static unsigned gp_tex_realize(struct fdk_gpu_state *g,
     return slot->name;
 }
 
+/* The lane's X11 Display* for the dmabuf side door (x11_gl.c sets
+ * it; NULL elsewhere — the wayland build provides the stub). */
+void *fdk__gp_lane_x11_display(struct fdk_surface *s);
+
+/* The engine's loaded GL library handle (libGL on the GLX lane) for
+ * the dmabuf bridge's desktop-GL entry resolution. NULL before
+ * bring-up. */
+void *fdk__gp_gl_lib(void);
+
+void *fdk__gp_gl_lib(void) {
+    return g_gp.lib;
+}
+
+/* The side door's X display (dmabuf_egl.c opens the process's own
+ * DISPLAY — the same X server the X11 lane drives; the dma-buf fd is
+ * process-global). The stub for the wayland-disabled build rides in
+ * dmabuf_egl.c itself. */
+void *fdk__gp_lane_x11_display(struct fdk_surface *s) {
+    (void)s;
+    extern void *fdk__dmabuf_egl_x11_process_display(void);
+    return fdk__dmabuf_egl_x11_process_display();
+}
+
 unsigned fdk__gpu_dmabuf_name(struct fdk_surface *s, void *key) {
     struct fdk_gpu_state *g = gp_state(s);
     if (g == NULL || g->dead || key == NULL) {
@@ -994,10 +1030,29 @@ unsigned fdk__gpu_dmabuf_name(struct fdk_surface *s, void *key) {
     }
     void *dpy = api->eglGetCurrentDisplay();
     if (dpy == NULL) {
-        return 0; /* no EGL context current (the X11 GLX lane, CPU
-                   * mode): the fallback rules apply */
-    }
-    if (!gp_ensure_gl(s)) {
+        /* no EGL context current: the X11 GLX lane or CPU mode. The
+         * X11 side door (mesa: platform-x11 EGL display + the GLX
+         * context's GL_OES_EGL_image) keeps the zero-copy path open;
+         * everything else falls back honestly */
+        if (!gp_ensure_gl(s) || !g->gl_oes_egl_image) {
+            return 0;
+        }
+        void *xdpy = fdk__gp_lane_x11_display(s);
+        if (xdpy == NULL) {
+            return 0;
+        }
+        dpy = fdk__dmabuf_egl_x11_display(xdpy);
+        if (dpy == NULL) {
+            return 0;
+        }
+        /* the GL calls below must land in the GLX context: resolve
+         * the bind entry from the ENGINE's GL library (libGL), not
+         * the bridge's EGL-side pointer */
+        api = fdk__dmabuf_egl_api_with_gl_lib(fdk__gp_gl_lib());
+        if (api == NULL) {
+            return 0;
+        }
+    } else if (!gp_ensure_gl(s)) {
         return 0;
     }
     const fdk_dmabuf_params *p = fdk__dmabuf_texture_params(
