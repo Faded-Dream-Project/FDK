@@ -1267,3 +1267,12 @@ void *fdk_wayland_raw_bind_pub(struct fdk_wl_queue *q, fdk_u32 name,
 int fdk_wayland_queue_dispatch_pub(struct fdk_wl_queue *q);
 void fdk_wayland_queue_attach_pub(struct fdk_wl_queue *q, int on_pump);
 void fdk_wayland_addon_queues_dispatch(fdk_platform_connection *conn);
+
+/* wayland_session_lock.c — P3 first-class session-lock */
+void *fdk_wayland_session_lock(fdk_platform_connection *conn,
+                               void (*on_event)(void *user, int locked),
+                               void *user);
+void *fdk_wayland_session_lock_surface(fdk_platform_connection *conn,
+                                       void *handle, void *wl_surface,
+                                       void *wl_output);
+void fdk_wayland_session_lock_unlock(void *handle);

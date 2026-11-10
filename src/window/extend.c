@@ -1053,3 +1053,32 @@ fdk_wl_queue *fdk_wl_queue_create(fdk_context *ctx, const char *name) {
     }
     return (fdk_wl_queue *)ctx->ops->wl_queue_create(ctx->conn, name);
 }
+
+
+/* ---- P3: the session-lock surface (Wayland) --------------------------- */
+void *fdk_session_lock_open(fdk_context *ctx,
+                            fdk_session_lock_event_fn on_event, void *user) {
+    if (ctx == NULL || ctx->ops == NULL ||
+        ctx->ops->session_lock_open == NULL) {
+        return NULL;
+    }
+    return ctx->ops->session_lock_open(ctx->conn,
+                                       (void (*)(void *, int))on_event,
+                                       user);
+}
+
+void *fdk_session_lock_surface(fdk_context *ctx, void *lock,
+                               void *wl_surface, void *wl_output) {
+    if (ctx == NULL || ctx->ops == NULL ||
+        ctx->ops->session_lock_surface == NULL) {
+        return NULL;
+    }
+    return ctx->ops->session_lock_surface(ctx->conn, lock, wl_surface,
+                                          wl_output);
+}
+
+void fdk_session_lock_unlock(void *lock) {
+    /* the lock carries no conn back-reference; the impl owns it */
+    extern void fdk_session_lock_unlock_impl(void *lock);
+    fdk_session_lock_unlock_impl(lock);
+}

@@ -997,4 +997,28 @@ fdk_result fdk_ext_gl_fence_insert(fdk_ext_surface *surface,
                                    fdk_u64 *out_fence);
 fdk_result fdk_ext_gl_fence_wait(fdk_ext_surface *surface, fdk_u64 fence);
 
+
+
+/* ---- P3: the session-lock surface (ext-session-lock-v1) ------------------
+ *
+ * The lock-screen protocol, first-class: mint the lock object
+ * (fdk_session_lock_open — the compositor answers through the event
+ * callback: 1 = locked, 0 = finished, i.e. the lock was refused or
+ * taken; on finished the add-on must destroy and give up), map one
+ * lock surface per output (fdk_session_lock_surface takes the RAW
+ * wl_surface/wl_output the add-on owns — a lock surface is raw
+ * protocol, not an FDK window), and unlock
+ * (fdk_session_lock_unlock — destroys the lock object). The raw
+ * handles come from the add-on raw-event surface
+ * (FDK_EXT_CAP_WL_RAW_EVENTS) or from an FDK ext surface's native
+ * accessor. Wayland-only: NULL/UNSUPPORTED where
+ * FDK_EXT_CAP_SESSION_LOCK is false. */
+typedef void (*fdk_session_lock_event_fn)(void *user, int locked);
+
+void *fdk_session_lock_open(fdk_context *ctx,
+                            fdk_session_lock_event_fn on_event, void *user);
+void *fdk_session_lock_surface(fdk_context *ctx, void *lock,
+                               void *wl_surface, void *wl_output);
+void fdk_session_lock_unlock(void *lock);
+
 #endif /* FDK_EXTEND_H */

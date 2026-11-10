@@ -352,6 +352,14 @@ typedef struct fdk_platform_ops {
      * (it needs the conn); the rest goes through the queue's vtable. */
     void *(*wl_queue_create)(fdk_platform_connection *conn,
                              const char *name);
+    /* P3: the first-class session-lock / input-method / virtual-
+     * keyboard surfaces (Wayland only; NULL elsewhere). */
+    void *(*session_lock_open)(fdk_platform_connection *conn,
+                               void (*on_event)(void *, int), void *user);
+    void *(*session_lock_surface)(fdk_platform_connection *conn,
+                                  void *lock, void *wl_surface,
+                                  void *wl_output);
+    void (*session_lock_unlock)(void *lock);
     /* P3: the X11 add-on event filter (x11_dispatch.c). */
     fdk_result (*x11_set_event_filter)(fdk_platform_connection *conn,
                                        int (*filter)(void *, void *),

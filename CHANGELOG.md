@@ -1,4 +1,19 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## P3(e): the session-lock surface — first-class create/bind API
+
+- New public API (fdk_extend.h): fdk_session_lock_open (mints the
+  lock object; the compositor's locked/finished verdicts arrive
+  through the callback — finished means refused or taken and the
+  add-on must give up), fdk_session_lock_surface (one raw lock
+  surface per output; the add-on owns the wl_surface/wl_output), and
+  fdk_session_lock_unlock (destroys the lock object — the unlock).
+  Gated by FDK_EXT_CAP_SESSION_LOCK; NULL/UNSUPPORTED elsewhere.
+- A lock surface is raw protocol (not an FDK window) by design: the
+  raw wl_surface/wl_output handles come from the add-on raw-event
+  surface or an ext surface's native accessor.
+- The IM-v2 and virtual-keyboard create/bind APIs land with the
+  input-method example that exercises them (their caps and binds are
+  already in).
 ## P3(d): the X11 add-on event filter — OR windows are the popup path
 
 - New public API (fdk_extend.h) with FDK_EXT_CAP_X11_EVENT_FILTER
