@@ -923,3 +923,63 @@ bindings).
 The intended path for every future add-on author is this document
 plus the example: dispatch plus two backend files (wl/, x11/), and
 it never touches an FDK private struct.
+
+## 12. Compositor reality — what each cap reports where (v3)
+
+The caps are HONEST per connection: they bind the manager global and
+report whether the protocol actually negotiated. This table is what
+each cap answers on the compositors an add-on meets in the wild, and
+the fallback to reach for when the answer is no. (Verified against
+the compositors' own protocol surface, 2026-11-10; sway additionally
+exercised by FDK's own rig.)
+
+| Cap | sway/Hyprland/labwc (wlroots) | KDE Plasma (KWin) | GNOME (Mutter) | weston |
+|---|---|---|---|---|
+| LAYER_SHELL (fdk_ext_layer_surface_*) | yes | yes (since Plasma 5.20+) | **no** | yes (weston 9+) |
+| IDLE_INHIBIT | yes | **no** (KIdleTime is compositor-internal) | **no** | **no** |
+| XDG_ACTIVATION | yes | yes | yes | **no** |
+| FOREIGN_TOPLEVEL | yes (wlr-foreign-toplevel) | **no** (plasma-window-management instead) | **no** | **no** |
+| TEXT_INPUT_V3 | yes | yes | yes | yes |
+| SESSION_LOCK | yes (sway 1.7+, Hyprland, labwc) | yes (Plasma 5.27+) | **no** (GNOME locks internally) | **no** |
+| INPUT_METHOD_V2 | yes | yes (IBus rides it) | **no** (IBus rides mutter's internal v1; the v2 manager is not exposed) | yes (weston's own IM support) |
+| VIRTUAL_KEYBOARD | yes (wlroots ships it) | yes | **no** | **no** |
+| DMABUF_IMPORT (v3) | yes (linux-dmabuf + EGL; driver-gated modifiers) | yes | yes | driver-gated |
+| WL_RAW_EVENTS (v3) | yes | yes | yes | yes |
+
+The X11 row, for completeness: EWMH_DOCK yes; every Wayland protocol
+cap no; XDG_ACTIVATION yes (the startup-notification id — the older
+mechanism of the same contract).
+
+### The fallbacks (what an add-on does when the cap says no)
+
+- **LAYER_SHELL off (GNOME)**: there is no layer role. A panel falls
+  back to a plain xdg toplevel docked by the desktop (on GNOME the
+  honest shape is a normal window with EWMH dock hints through XWayland,
+  or — cleaner — ship the panel as an AppIndicator via the D-Bus
+  StatusNotifier surface FDK already models). Do not try to fake the
+  role with empty margins; the compositor will keep the window under
+  the shell's control.
+- **IDLE_INHIBIT off (KDE, GNOME, weston)**: the protocol is not the
+  only idle lever. The freedesktop portal (`org.freedesktop.portal.
+  Inhibit`) works everywhere portals do (GNOME, KDE, sway with
+  xdg-desktop-portal-wlr); FDK's window API answers UNSUPPORTED and
+  leaves the portal call to the add-on on purpose (a portal round
+  trip is process policy, not a surface property).
+- **FOREIGN_TOPLEVEL off (KDE, GNOME)**: the taskbar/dock use cases
+  need the DE's own interfaces (plasma-window-management on KWin;
+  GNOME has none — shell extensions or the D-Bus
+  org.gnome.Shell introspection). FDK's toplevel list stays empty;
+  treat it as "nothing to list", not an error.
+- **SESSION_LOCK off (GNOME, weston)**: the session lock is the
+  compositor's own (GNOME Shell). An FDK lock screen exits honestly:
+  `fdk_session_lock_open` answers NULL, the cap is false, the
+  example SKIPs. There is no fallback that does not lie about
+  security.
+- **INPUT_METHOD_V2 off (GNOME)**: the IM conversation rides the
+  toolkit's text-input side; an FDK IM add-on exits with the cap
+  false. Compositors that expose only v1 (mutter's in-process IBus)
+  are a different protocol generation — bridging is the compositor's
+  work, not the add-on's.
+- **VIRTUAL_KEYBOARD off**: synthetic key delivery falls back to
+  uinput at the session layer (a privileged helper) — outside FDK's
+  contract; the cap is false and the API refuses.

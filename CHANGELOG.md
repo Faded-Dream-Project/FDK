@@ -1,4 +1,14 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 3 (cont.): the sway step's wlroots env — fixed
+
+- The 90c00ed run: ALL FIVE distro jobs green (arch, debian, alpine,
+  void, rpm — the 1.22 weak ref holds across the families). The
+  ubuntu job failed only at the new headless-sway step: sway tried
+  the DRM/tty/libseat path and died before binding (no
+  WLR_BACKENDS=headless in the step's env).
+- Fix: the step exports WLR_BACKENDS=headless,
+  WLR_LIBINPUT_NO_DEVICES=1, WLR_RENDERER=pixman, and waits for the
+  socket (up to 10 s) instead of a blind sleep.
 ## Item 3 (cont.): the wayland_platform.h guard bug — fixed
 
 - The ubuntu job's Wayland-integration step failed to COMPILE:

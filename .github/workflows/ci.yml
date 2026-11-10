@@ -157,8 +157,15 @@ jobs:
       - name: P3 protocol tests (headless sway)
         run: |
           export XDG_RUNTIME_DIR=$(mktemp -d)
+          # wlroots' headless backend: no DRM node, no tty, no libseat
+          export WLR_BACKENDS=headless
+          export WLR_LIBINPUT_NO_DEVICES=1
+          export WLR_RENDERER=pixman
           sway -c /dev/null & SWAY_PID=$!
-          sleep 3
+          for i in $(seq 1 20); do
+            ls "$XDG_RUNTIME_DIR" | grep -q '^wayland-' && break
+            sleep 0.5
+          done
           WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR" | grep -o 'wayland-[0-9]*' | head -1) \
             make test-p3-wayland test-matrix-wayland
           kill $SWAY_PID 2>/dev/null || true
