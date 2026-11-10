@@ -131,6 +131,14 @@ int main(int argc, char **argv) {
     CHECK(fdk_wl_raw_bind(NULL, 0, NULL, 0) == NULL,
           "raw bind: NULL handles");
 
+    /* ---- the D2 payload ceiling (the runtime echo of the static
+     * assert in src/core/abi_check.c; a build that somehow skipped
+     * that TU still fails the suite here) ------------------------------ */
+    CHECK(sizeof(fdk_event_data) <= 128,
+          "event payload ceiling (D2): sizeof(fdk_event_data) <= 128");
+    CHECK(sizeof(fdk_event_data) >= sizeof(fdk_configure_event),
+          "the union still holds the biggest payload");
+
     /* ---- the render-mode caps follow the resolved mode ------------------ */
     CHECK((fdk_ext_has_capability(ctx, FDK_EXT_CAP_RENDER_HYBRID) ||
            fdk_ext_has_capability(ctx, FDK_EXT_CAP_RENDER_GPU)),

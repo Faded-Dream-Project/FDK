@@ -33,6 +33,18 @@ _Static_assert(sizeof(fdk_key_event) == 16,
               "fdk_key_event ABI frozen");
 _Static_assert(sizeof(fdk_event_data) >= sizeof(fdk_configure_event),
               "fdk_event_data union ABI frozen");
+/* D2 (PRE-1.0-DECISIONS, applied 2026-11-12): the payload ceiling is
+ * a RULE, not a hope. A new event payload either fits the ceiling or
+ * rides a pointer — it can never silently grow the union and break
+ * every compiled switch-on-events binary (stack-slot mismatch).
+ * Measured at application: sizeof(fdk_event_data) = 56; the ceiling
+ * is 128 (the decision's number). Growing the ceiling is a
+ * deliberate, documented ABI event — same class as the widget embed
+ * budget (D1), decided by make sizes / a build failure, never by
+ * accretion. */
+_Static_assert(sizeof(fdk_event_data) <= 128,
+              "fdk_event_data outgrew the D2 payload ceiling (128); "
+              "ride a pointer or raise the ceiling as a documented ABI event");
 _Static_assert(sizeof(fdk_widget_event) == 32,
               "fdk_widget_event ABI frozen");
 _Static_assert(sizeof(fdk_a11y_event) == 24,

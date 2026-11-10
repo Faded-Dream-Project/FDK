@@ -1,4 +1,18 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## D2 applied: the event payload ceiling is a rule (128)
+
+- _Static_assert(sizeof(fdk_event_data) <= 128) now sits in
+  src/core/abi_check.c beside the frozen-layout asserts — a new
+  payload either fits the ceiling or rides a pointer; it can never
+  silently grow the union and break every compiled
+  switch-on-events binary (stack-slot mismatch).
+- MEASURED at application: sizeof(fdk_event_data) = 56 — the pinned
+  numbers are 56 current / 128 ceiling; growing the ceiling is a
+  deliberate, documented ABI event (the same class as the D1 embed
+  budget).
+- The runtime echo lives in test_matrix.c (the battery), so a build
+  that somehow skipped the abi_check TU still fails the suite.
+- Battery green.
 ## Fix-forward: widget_sizes.c left the shipped-tools set
 
 - The generic tools/% pattern rule auto-adopted the D1 probe and
