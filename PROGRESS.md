@@ -38,6 +38,54 @@
 > checks on every push. See `docs/versioning.md` for the record.
 
 
+## Round 63 (2026-11-10) — P1 landed: the GPU paint engine; bug-rate: 0 new library bugs
+
+PRIORITY 1 of the owner's work order, done and proven:
+
+- **The engine** (src/render/gpaint.{h,c}, ~950 lines): one GLSL
+  program; every primitive is an SDF-evaluated quad (fills, rounded
+  rects, circles, strokes, vertical gradients, shadows via flags);
+  texture quads and glyph-coverage quads ride the same vertex stream.
+  Quads are CPU-expanded into one VBO (24 floats/vertex, 4096-quad
+  batches); the glyph atlas is a 1024x1024 LUMINANCE shelf packed by
+  FNV-keyed content hash (the mask blit carries no glyph id — the
+  hash IS the identity, collision risk recorded); the clip stack
+  mirrors into per-quad clip data; GL procs are dlopen'd
+  (libGLESv2/libGL — the lanes' zero-new-dependency posture). The
+  engine refuses nothing silently: a GL error at flush marks the
+  engine dead and present reports FDK_ERR_UNSUPPORTED (GPU mode's
+  no-fallback contract).
+- **fdk_surface is the painter API in all modes**: every surface
+  primitive branches on the surface's engine pointer — CPU
+  rasterizes, GPU batches. Widget paint code is written once; the
+  route was surface.c / surface_aa.c / surface_transform.c branch
+  insertion, NOT a parallel paint path.
+- **Size-only framebuffers**: GPU-mode windows get pixels==NULL from
+  window_get_framebuffer; present = lane makeCurrent + engine flush
+  + swap via the new window_gpu_flush op (both backends); the frame
+  pump's internal re-presents resolve the surface through the
+  engine's pwindow registry.
+- **fdk_texture**: create/update/draw/destroy — the explicit
+  software-pixel upload path, identical call on the CPU path.
+- **The proof** (tests/test_gpu_paint.c + make test-gpu-paint, in
+  the suite's Xvfb under FDK_GL_FORCE=1/llvmpipe): the same scene
+  rendered offscreen (CPU) and into a GPU window reads back with
+  mean channel diff 0.000; FDK_NO_GL + GPU mode refuses with
+  UNSUPPORTED at creation; texture roundtrip green; resize survives.
+  Self-caught during the smoke: the scene rendered mirrored (a Y
+  flip at emit AND in the shader) — the pixel comparison caught it
+  before anything shipped.
+
+**Not done this round** (the honest residue, per priority): P2 ext
+GL API (make_current/frame-callback/sharing/fences), dmabuf import,
+per-surface present arbitration; P3 session-lock/IM-v2/activation/
+foreign-toplevel first-class APIs + the raw-event filter hooks (the
+generator already ships idle-inhibit + xdg-activation protocols);
+P4 image/font/timer gaps are mostly closed (decode/encode, metrics,
+fdk_post_delayed, fd sources all public) — the text-layout API and
+the UNSUPPORTED-path test matrix remain; P5 the seven examples vs
+installed FDK in CI.
+
 ## Round 60-62 (2026-11-10) — the add-on surface: every limit the owner named, removed; bug-rate: 0 new library bugs
 
 The owner's work order: an add-on author should do what GTK/Qt plugin
