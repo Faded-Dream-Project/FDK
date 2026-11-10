@@ -640,6 +640,11 @@ struct fdk_platform_window {
      * (or the staging buffer cannot be allocated), never cleared —
      * the re-engagement attempt in get_framebuffer checks it. */
     struct fdk_x11_gl_window *gl_win;
+
+    /* P2: the add-on GL frame callback (see wayland_platform.h). */
+    void (*gl_frame_fn)(void *, void *);
+    void *gl_frame_user;
+    void *gl_frame_surface;
     int gl_downgraded;
 
     /* WM_COMMAND (1.0.0, D-5): the ICCCM restart command, argv form,
@@ -1066,6 +1071,11 @@ fdk_result fdk_x11_window_gpu_flush(fdk_platform_window *pwindow,
 fdk_result fdk_x11_window_gpu_readback(fdk_platform_window *pwindow,
                                        fdk_u32 *out, int width,
                                        int height);
+fdk_result fdk_x11_window_gl_make_current(fdk_platform_window *pwindow);
+fdk_result fdk_x11_window_gl_swap(fdk_platform_window *pwindow);
+fdk_result fdk_x11_window_gl_set_frame_cb(fdk_platform_window *pwindow,
+                                          void (*fn)(void *, void *),
+                                          void *user, void *surface);
 fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
                                   const fdk_platform_damage *damage);
 

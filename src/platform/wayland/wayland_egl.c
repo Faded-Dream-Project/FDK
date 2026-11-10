@@ -2453,3 +2453,40 @@ fdk_result fdk_wayland_egl_window_readback(
                ? FDK_OK
                : FDK_ERR_UNSUPPORTED;
 }
+
+/* P2: makeCurrent / swap without the engine (add-on GL). */
+fdk_result fdk_wayland_egl_window_make_current(
+    struct fdk_wayland_egl_window *ewin) {
+    if (ewin == NULL || ewin->surface == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_wayland_egl *egl = ewin->egl;
+    if (!egl->fn.eglMakeCurrent(egl->egl_display, ewin->surface,
+                                ewin->surface, ewin->ctx)) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return FDK_OK;
+}
+
+fdk_result fdk_wayland_egl_window_swap(struct fdk_wayland_egl_window *ewin) {
+    if (ewin == NULL || ewin->surface == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_wayland_egl *egl = ewin->egl;
+    EGLBoolean ok = egl->fn.eglSwapBuffers(egl->egl_display, ewin->surface);
+    (void)wl_display_flush(egl->conn->display);
+    return ok ? FDK_OK : FDK_ERR_UNSUPPORTED;
+}
+
+/* The add-on frame callback's present: context current, callback, swap
+ * (the engine flush is skipped — present arbitration). */
+fdk_result fdk_wayland_egl_window_cb_flush(struct fdk_wayland_egl_window *ewin,
+                                           void (*fn)(void *, void *),
+                                           void *user, void *surface) {
+    fdk_result r = fdk_wayland_egl_window_make_current(ewin);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    fn(user, surface);
+    return fdk_wayland_egl_window_swap(ewin);
+}

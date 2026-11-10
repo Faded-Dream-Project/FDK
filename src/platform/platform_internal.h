@@ -585,6 +585,14 @@ typedef struct fdk_platform_ops {
      * registry (src/render/gpaint.c) for internal re-presents. */
     fdk_result (*window_gpu_flush)(fdk_platform_window *pwindow,
                                    void *surface);
+
+    /* P2: GL for add-ons (fdk_ext_gl_* routing) — NULL when the
+     * backend has no lane. */
+    fdk_result (*window_gl_make_current)(fdk_platform_window *pwindow);
+    fdk_result (*window_gl_swap)(fdk_platform_window *pwindow);
+    fdk_result (*window_gl_set_frame_cb)(fdk_platform_window *pwindow,
+                                         void (*fn)(void *, void *),
+                                         void *user, void *surface);
     fdk_result (*window_present)(fdk_platform_window *pwindow,
                                  const fdk_platform_damage *damage);
 

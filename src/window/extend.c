@@ -982,3 +982,9 @@ fdk_result fdk__ext_layer_set(fdk_ext_surface *surface, int what, fdk_i32 a,
     }
     return w->ctx->ops->ext_layer_surface_set(w->pwindow, what, a, b, c, d);
 }
+
+/* ext_gl.c's routing needs the owning window; the struct is private to
+ * this TU. */
+fdk_window *fdk__ext_surface_window(fdk_ext_surface *surface) {
+    return surface != NULL ? surface->window : NULL;
+}

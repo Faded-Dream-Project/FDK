@@ -1216,3 +1216,37 @@ fdk_result fdk_x11_gl_window_readback(struct fdk_x11_gl_window *gwin,
     }
     return rc == 0 ? FDK_OK : FDK_ERR_UNSUPPORTED;
 }
+
+/* P2: makeCurrent / swap without the engine (add-on GL), plus the
+ * callback-flush entry the frame-scheduling path uses. */
+fdk_result fdk_x11_gl_window_make_current(struct fdk_x11_gl_window *gwin) {
+    if (gwin == NULL || gwin->ctx == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_x11_gl *gl = gwin->gl;
+    if (!gl->fn.glXMakeCurrent(gl->conn->display, gwin->xwindow,
+                               gwin->ctx)) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return FDK_OK;
+}
+
+fdk_result fdk_x11_gl_window_swap(struct fdk_x11_gl_window *gwin) {
+    if (gwin == NULL || gwin->ctx == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_x11_gl *gl = gwin->gl;
+    gl->fn.glXSwapBuffers(gl->conn->display, gwin->xwindow);
+    return FDK_OK;
+}
+
+fdk_result fdk_x11_gl_window_cb_flush(struct fdk_x11_gl_window *gwin,
+                                      void (*fn)(void *, void *),
+                                      void *user, void *surface) {
+    fdk_result r = fdk_x11_gl_window_make_current(gwin);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    fn(user, surface);
+    return fdk_x11_gl_window_swap(gwin);
+}

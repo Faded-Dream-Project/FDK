@@ -891,4 +891,41 @@ int fdk_ext_fd_source_fd(const fdk_ext_fd_source *source);
 }
 #endif
 
+
+/* ---- GL for add-ons (P2: a real API, not a recipe) --------------------
+ *
+ * FDK_EXT_CAP_GL gates every call. The context is the OWNING window's
+ * lane context (shared with every other window's context on the
+ * connection — texture objects cross between them), current on the
+ * surface's native drawable. The frame callback runs from FDK's frame
+ * scheduling (right before present) with the context ALREADY current:
+ * draw, return, FDK swaps — the add-on never touches swap itself
+ * unless it drives the surface with fdk_ext_gl_swap().
+ *
+ * Present arbitration: a surface with a frame callback presents its GL
+ * frame while the rest of the window (and other windows) keep their
+ * own render modes. The callback replaces the paint engine for that
+ * window's buffer — software content rides fdk_texture if mixed. */
+fdk_result fdk_ext_gl_make_current(fdk_ext_surface *surface);
+
+typedef void (*fdk_ext_gl_frame_fn)(fdk_ext_surface *surface, void *user);
+
+/* Registers the per-frame render callback. NULL removes it. The
+ * callback runs on the UI thread with the lane context current. */
+fdk_result fdk_ext_gl_set_frame_callback(fdk_ext_surface *surface,
+                                         fdk_ext_gl_frame_fn fn,
+                                         void *user);
+
+/* Presents the surface's GL frame now (for callbacks that finished
+ * drawing outside the frame callback; the frame callback's frame is
+ * swapped automatically). */
+fdk_result fdk_ext_gl_swap(fdk_ext_surface *surface);
+
+/* Explicit sync where the driver supports it (EGLSync / GL fence).
+ * FDK_ERR_UNSUPPORTED when the driver lacks the extension at runtime
+ * — capability-honest, never faked. */
+fdk_result fdk_ext_gl_fence_insert(fdk_ext_surface *surface,
+                                   fdk_u64 *out_fence);
+fdk_result fdk_ext_gl_fence_wait(fdk_ext_surface *surface, fdk_u64 fence);
+
 #endif /* FDK_EXTEND_H */

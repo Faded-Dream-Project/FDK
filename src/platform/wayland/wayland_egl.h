@@ -161,4 +161,12 @@ fdk_result fdk_wayland_egl_window_readback(
     struct fdk_wayland_egl_window *ewin, void *surface, fdk_u32 *out,
     int width, int height);
 
+
+fdk_result fdk_wayland_egl_window_make_current(
+    struct fdk_wayland_egl_window *ewin);
+fdk_result fdk_wayland_egl_window_swap(struct fdk_wayland_egl_window *ewin);
+fdk_result fdk_wayland_egl_window_cb_flush(struct fdk_wayland_egl_window *ewin,
+                                           void (*fn)(void *, void *),
+                                           void *user, void *surface);
+
 #endif /* FDK_WAYLAND_EGL_H */

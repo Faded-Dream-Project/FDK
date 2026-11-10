@@ -137,4 +137,10 @@ fdk_result fdk_x11_gl_window_readback(struct fdk_x11_gl_window *gwin,
  * start from an honest UNVERIFIED state. */
 void fdk__x11_gl_test_reset(void);
 
+
+fdk_result fdk_x11_gl_window_make_current(struct fdk_x11_gl_window *gwin);
+fdk_result fdk_x11_gl_window_swap(struct fdk_x11_gl_window *gwin);
+fdk_result fdk_x11_gl_window_cb_flush(struct fdk_x11_gl_window *gwin,
+                                      void (*fn)(void *, void *),
+                                      void *user, void *surface);
 #endif /* FDK_X11_GL_H */

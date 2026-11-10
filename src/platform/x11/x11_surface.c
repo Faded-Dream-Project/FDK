@@ -595,6 +595,15 @@ fdk_result fdk__x11_surface_downgrade_from_lane(
  * engine's pwindow registry resolves it. */
 fdk_result fdk_x11_window_gpu_flush(fdk_platform_window *pwindow,
                                     void *surface) {
+    if (pwindow != NULL && pwindow->gl_frame_fn != NULL &&
+        pwindow->gl_win != NULL) {
+        /* Present arbitration: the add-on's GL frame callback owns
+         * this window's buffer this frame. */
+        return fdk_x11_gl_window_cb_flush(pwindow->gl_win,
+                                          pwindow->gl_frame_fn,
+                                          pwindow->gl_frame_user,
+                                          pwindow->gl_frame_surface);
+    }
     struct fdk_surface *s = (struct fdk_surface *)surface;
     if (s == NULL) {
         s = fdk__gpu_surface_for_window(pwindow);
@@ -919,4 +928,34 @@ fdk_result fdk_x11_window_gpu_readback(fdk_platform_window *pwindow,
     }
     return fdk_x11_gl_window_readback(pwindow->gl_win, s, out, width,
                                       height);
+}
+
+/* ---- P2: GL for add-ons (fdk_ext_gl_* routing) ------------------------- */
+fdk_result fdk_x11_window_gl_make_current(fdk_platform_window *pw) {
+    if (pw == NULL || pw->gl_win == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk_x11_gl_window_make_current(pw->gl_win);
+}
+
+fdk_result fdk_x11_window_gl_swap(fdk_platform_window *pw) {
+    if (pw == NULL || pw->gl_win == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk_x11_gl_window_swap(pw->gl_win);
+}
+
+fdk_result fdk_x11_window_gl_set_frame_cb(fdk_platform_window *pw,
+                                          void (*fn)(void *, void *),
+                                          void *user, void *surface) {
+    if (pw == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (fn != NULL && pw->gl_win == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    pw->gl_frame_fn = fn;
+    pw->gl_frame_user = user;
+    pw->gl_frame_surface = surface;
+    return FDK_OK;
 }

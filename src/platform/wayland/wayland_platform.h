@@ -688,6 +688,13 @@ struct fdk_platform_window {
      * the lane state itself. The exact X11 shape (gl_win /
      * gl_downgraded). */
     struct fdk_wayland_egl_window *egl_win;
+
+    /* P2: the add-on GL frame callback (fdk_ext_gl_set_frame_callback).
+     * Non-NULL = this window's buffer is presented by the add-on's GL
+     * drawing (present arbitration); the engine flush is skipped. */
+    void (*gl_frame_fn)(void *, void *);
+    void *gl_frame_user;
+    void *gl_frame_surface;
     int egl_downgraded;
     fdk_size render_size;  /* the lane's current staging size (the SHM
                             * path derives sizes from the slots)     */
@@ -1191,6 +1198,11 @@ fdk_result fdk_wayland_window_gpu_flush(fdk_platform_window *pwindow,
 fdk_result fdk_wayland_window_gpu_readback(fdk_platform_window *pwindow,
                                            fdk_u32 *out, int width,
                                            int height);
+fdk_result fdk_wayland_window_gl_make_current(fdk_platform_window *pwindow);
+fdk_result fdk_wayland_window_gl_swap(fdk_platform_window *pwindow);
+fdk_result fdk_wayland_window_gl_set_frame_cb(fdk_platform_window *pwindow,
+                                              void (*fn)(void *, void *),
+                                              void *user, void *surface);
 int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow);
 
 /* The window_ever_presented ops entry: nonzero once a render buffer
