@@ -51,6 +51,7 @@ static const fdk_platform_ops g_x11_ops = {
     .window_activation_token = fdk_x11_window_activation_token,
     .window_get_framebuffer = fdk_x11_window_get_framebuffer,
     .window_present = fdk_x11_window_present,
+    .window_gpu_flush = fdk_x11_window_gpu_flush,
     .window_ever_presented = fdk_x11_window_ever_presented,
     .window_frame_ready = fdk_x11_window_frame_ready,
     .window_get_scale = fdk_x11_window_get_scale,

@@ -1059,6 +1059,8 @@ void fdk_x11_window_set_size_limits(fdk_platform_window *pwindow,
 /* Software rendering (see x11_surface.c for the design notes). */
 fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
                                            fdk_platform_framebuffer *out_fb);
+fdk_result fdk_x11_window_gpu_flush(fdk_platform_window *pwindow,
+                                    void *surface);
 fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
                                   const fdk_platform_damage *damage);
 

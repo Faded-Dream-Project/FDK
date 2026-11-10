@@ -150,4 +150,10 @@ void fdk__wayland_egl_test_pack_rows(fdk_u32 *dst, const fdk_u32 *src,
                                      int stride, int x, int y, int rw,
                                      int rh);
 
+
+/* GPU paint-mode flush: makeCurrent + engine batch + swap (the GPU
+ * render mode's present). Declared for wayland_window.c's ops shim. */
+fdk_result fdk_wayland_egl_window_paint_flush(
+    struct fdk_wayland_egl_window *ewin, void *surface);
+
 #endif /* FDK_WAYLAND_EGL_H */

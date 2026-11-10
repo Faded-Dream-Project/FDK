@@ -21,6 +21,7 @@
 #define FDK_LOG_TAG "render"
 
 #include "surface_internal.h"
+#include "gpaint.h"
 
 #include "core/log_internal.h"
 
@@ -272,6 +273,28 @@ fdk_result fdk_surface_blit_transformed(fdk_surface *dst, fdk_matrix m,
     r = fdk__surface_acquire(src);
     if (!fdk_ok(r)) {
         return r;
+    }
+    if (dst->gpu != NULL) {
+        /* GPU: bake the affine into the destination quad. Scale +
+         * translate (the HiDPI path's integer-scale family) is exact;
+         * rotation/shear degrades to the bounding box with a warning —
+         * the CPU rasterizer stays the reference for those. */
+        if (m.m01 == 0.0f && m.m10 == 0.0f && m.m00 != 0.0f &&
+            m.m11 != 0.0f) {
+            fdk_rect src_bounds = { 0, 0, src->fb.width, src->fb.height };
+            fdk_i32 dx = (fdk_i32)(m.tx + m.m00 * (fdk_f32)src_bounds.x);
+            fdk_i32 dy = (fdk_i32)(m.ty + m.m11 * (fdk_f32)src_bounds.y);
+            fdk_rect dr = { dx, dy,
+                            (fdk_i32)(m.m00 * (fdk_f32)src_bounds.width),
+                            (fdk_i32)(m.m11 * (fdk_f32)src_bounds.height) };
+            fdk__gpu_blit(dst, dr, src, src_bounds);
+            return FDK_OK;
+        }
+        FDK_WARN("GPU mode: transformed blit with rotation/shear falls "
+                 "back to its bounding box\n");
+        fdk_rect src_bounds2 = { 0, 0, src->fb.width, src->fb.height };
+        fdk__gpu_blit(dst, src_bounds2, src, src_bounds2);
+        return FDK_OK;
     }
 
     if (src->fb.width <= 0 || src->fb.height <= 0) {

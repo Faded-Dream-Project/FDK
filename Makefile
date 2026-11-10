@@ -577,6 +577,26 @@ $(BUILD_DIR)/tests/%: tests/%.c $(STATIC_LIB)
 # what this test does and does not cover (window-manager-dependent
 # behavior like WM_DELETE_WINDOW delivery is skipped under bare Xvfb,
 # not faked — the test says so when it runs).
+GPU_PAINT_TEST_BIN := $(BUILD_DIR)/tests/test_gpu_paint
+
+$(GPU_PAINT_TEST_BIN): tests/test_gpu_paint.c $(STATIC_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual tests/test_gpu_paint.c $(STATIC_LIB) -o $@ $(LDFLAGS) -lX11
+
+# The GPU paint engine's runtime proof: CPU-vs-GPU pixel equivalence
+# under llvmpipe (FDK_GL_FORCE=1) in a throwaway Xvfb, plus the
+# GPU-mode contracts (UNSUPPORTED without GL, texture roundtrip,
+# resize). Standalone gate; not part of plain `make test` (needs GL).
+test-gpu-paint: $(GPU_PAINT_TEST_BIN)
+	@mkdir -p /tmp/fdk-gpu-test
+	XVFB_NUM=$$((90 + ($$$$ % 400))); \
+	    rm -f "/tmp/.X11-unix/X$$XVFB_NUM"; \
+	    Xvfb ":$$XVFB_NUM" -screen 0 1024x768x24 >/tmp/fdk-gpu-xvfb.log 2>&1 & \
+	    XVFB_PID=$$!; \
+	    DISPLAY=:$$XVFB_NUM LSAN_OPTIONS=suppressions=$(CURDIR)/tests/data/lsan-gl.supp \
+	    $(BUILD_DIR)/tests/test_gpu_paint;
+	    rc=$$?; kill $$XVFB_PID 2>/dev/null; exit $$rc
+
 test-x11: $(X11_TEST_BIN) $(X11_URI_TEST_BIN) $(THREAD_TEST_BIN)
 	@if [ -n "$$DISPLAY" ]; then \
 		echo "== running X11 integration test against DISPLAY=$$DISPLAY =="; \

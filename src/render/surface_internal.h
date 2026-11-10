@@ -94,6 +94,16 @@ struct fdk_surface {
      * "presented nothing ever" (present = documented no-op) from
      * "acquired but drew nothing" (present = cheap no-op skip). */
     int ever_acquired;
+
+    /* GPU paint engine state (window surfaces in FDK_RENDER_GPU only;
+     * src/render/gpaint.c owns the type). Non-NULL switches every
+     * drawing primitive from CPU rasterization to GPU batching — the
+     * size-only framebuffer contract (pixels == NULL) means there is
+     * no CPU memory to rasterize into. gpu_failed marks an engine
+     * that could not initialize: GPU mode has no CPU fallback by
+     * contract, so primitives no-op and present reports the error. */
+    void *gpu;
+    int gpu_failed;
 };
 
 /* Implemented in surface.c, called by fdk_window_destroy() (see

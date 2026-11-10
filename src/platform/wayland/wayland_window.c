@@ -3,6 +3,7 @@
 #define FDK_LOG_TAG "wayland"
 
 #include "platform/wayland/wayland_platform.h"
+#include "render/gpaint.h"
 
 #include "generated/viewporter-client-protocol.h"
 #include "generated/fractional-scale-v1-client-protocol.h"
@@ -1138,6 +1139,17 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
             pwindow->egl_win, size.width, size.height);
         if (staging != NULL) {
             pwindow->render_size = size;
+            if (pwindow->render_mode == FDK_RENDER_GPU) {
+                /* GPU paint mode: the engine owns the frame — a
+                 * size-only framebuffer (no CPU pixels exist; the
+                 * staging buffer stays allocated as the lane's
+                 * downgrade target, unused while GPU mode holds). */
+                out_fb->pixels = NULL;
+                out_fb->width = size.width;
+                out_fb->height = size.height;
+                out_fb->stride = 0;
+                return FDK_OK;
+            }
             out_fb->pixels = staging;
             out_fb->width = size.width;
             out_fb->height = size.height;
@@ -1629,8 +1641,31 @@ static fdk_result commit_render_pending(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
+/* GPU paint-mode flush shim (the ops entry): surface.c's present
+ * passes the surface; the frame pump's internal re-presents pass NULL
+ * and the engine's pwindow registry resolves it. */
+fdk_result fdk_wayland_window_gpu_flush(fdk_platform_window *pwindow,
+                                        void *surface) {
+    struct fdk_surface *s = (struct fdk_surface *)surface;
+    if (s == NULL) {
+        s = fdk__gpu_surface_for_window(pwindow);
+    }
+    if (pwindow == NULL || pwindow->egl_win == NULL || s == NULL ||
+        s->gpu == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk_wayland_egl_window_paint_flush(pwindow->egl_win, s);
+}
+
 fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
                                       const fdk_platform_damage *damage) {
+    if (pwindow->render_mode == FDK_RENDER_GPU) {
+        struct fdk_surface *gs = fdk__gpu_surface_for_window(pwindow);
+        if (gs != NULL && gs->gpu != NULL) {
+            return fdk_wayland_window_gpu_flush(pwindow, gs);
+        }
+    }
+
     if (pwindow == NULL || damage == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }

@@ -1,5 +1,29 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
 
+### Added — the GPU paint engine (P1, the main goal)
+
+- **Real GPU rendering**: FDK_RENDER_GPU now PAINTS on the GPU — no
+  CPU framebuffer exists (the size-only framebuffer contract:
+  `window_get_framebuffer` returns pixels==NULL in GPU mode) and
+  every `fdk_surface` draw command executes as batched GPU draws.
+  One GLSL program; quads CPU-expanded into one VBO; SDF rounded
+  rects/circles/strokes, linear gradients, texture quads, glyph
+  coverage; clip stack mirrored into per-quad clip data; flush on
+  state change or 4096-quad batch fullness. Proven pixel-equal to
+  the CPU rasterizer on llvmpipe (tests/test_gpu_paint.c, mean
+  channel diff 0.000).
+- `fdk_surface` is THE painter API in all three modes — widget paint
+  code is written once (the engine hooks ride the same primitives,
+  not a parallel path).
+- **fdk_texture**: `fdk_texture_create/update/draw/destroy` — the
+  explicit software-pixel upload path for GPU mode (RGBA8888,
+  sub-region updates, identical call on the CPU path).
+- GL entry points dlopen'd (libGLESv2/libGL, the lanes' posture);
+  the engine owns a pwindow->surface registry so the frame pump's
+  internal re-presents flush correctly; failure = the engine marks
+  itself dead and present reports UNSUPPORTED (GPU mode never fakes
+  a frame or downgrades silently).
+
 ### Added — the add-on surface (extension API v3 fold, pre-release)
 
 - Render modes: `FDK_RENDER_AUTO/CPU/HYBRID/GPU` (init option >

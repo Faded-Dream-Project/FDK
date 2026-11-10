@@ -1,6 +1,7 @@
 #define FDK_LOG_TAG "x11"
 
 #include "platform/x11/x11_platform.h"
+#include "render/gpaint.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -1153,4 +1154,36 @@ int fdk_x11_gl_window_present(struct fdk_x11_gl_window *gwin,
          * verdict stays pending for the next completed present. */
     }
     return 0;
+}
+
+/* GPU paint-mode flush (the GPU render mode's present): make the
+ * window's GLX context current, issue the surface's pending batch,
+ * swap. Failure = FDK_ERR_UNSUPPORTED (GPU mode has no CPU fallback
+ * by contract). Drawable resizes ride the window's own X resize. */
+fdk_result fdk_x11_gl_window_paint_flush(struct fdk_x11_gl_window *gwin,
+                                         void *surface_ptr) {
+    if (gwin == NULL || surface_ptr == NULL || gwin->ctx == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_x11_gl *gl = gwin->gl;
+    fdk_surface *s = (fdk_surface *)surface_ptr;
+    if (s->gpu == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (s->fb.width > 0 && (s->fb.width != gwin->w ||
+                            s->fb.height != gwin->h)) {
+        gwin->w = s->fb.width;
+        gwin->h = s->fb.height;
+        gwin->tex_ok = 0;
+    }
+    if (!gl->fn.glXMakeCurrent(gl->conn->display, gwin->xwindow,
+                               gwin->ctx)) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    fdk__gpu_flush(s);
+    if (s->gpu == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    gl->fn.glXSwapBuffers(gl->conn->display, gwin->xwindow);
+    return FDK_OK;
 }

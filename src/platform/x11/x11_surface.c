@@ -1,6 +1,7 @@
 #define FDK_LOG_TAG "x11"
 
 #include "platform/x11/x11_platform.h"
+#include "render/gpaint.h"
 
 #include "core/log_internal.h"
 
@@ -577,8 +578,31 @@ fdk_result fdk__x11_surface_downgrade_from_lane(
     return fdk_x11_window_present(pwindow, &fallback_full);
 }
 
+/* GPU paint-mode flush shim (the ops entry): surface.c's present
+ * passes the surface; the internal re-presents pass NULL and the
+ * engine's pwindow registry resolves it. */
+fdk_result fdk_x11_window_gpu_flush(fdk_platform_window *pwindow,
+                                    void *surface) {
+    struct fdk_surface *s = (struct fdk_surface *)surface;
+    if (s == NULL) {
+        s = fdk__gpu_surface_for_window(pwindow);
+    }
+    if (pwindow == NULL || pwindow->gl_win == NULL || s == NULL ||
+        s->gpu == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk_x11_gl_window_paint_flush(pwindow->gl_win, s);
+}
+
 fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
                                  const fdk_platform_damage *damage) {
+    if (pwindow->render_mode == FDK_RENDER_GPU) {
+        struct fdk_surface *gs = fdk__gpu_surface_for_window(pwindow);
+        if (gs != NULL && gs->gpu != NULL) {
+            return fdk_x11_window_gpu_flush(pwindow, gs);
+        }
+    }
+
     if (pwindow == NULL || damage == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }

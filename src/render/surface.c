@@ -6,6 +6,7 @@
 #include "core/context_internal.h"
 #include "core/log_internal.h"
 #include "render/surface_internal.h"
+#include "gpaint.h"
 #include "window/window_internal.h"
 
 #include <math.h>
@@ -193,6 +194,29 @@ fdk_result fdk__surface_acquire(fdk_surface *surface) {
     surface->has_fb = 1;
     surface->ever_acquired = 1;
     recompute_clip(surface); /* fb bounds are part of the clip */
+
+    /* GPU render mode arrives here as a SIZE-ONLY framebuffer
+     * (pixels == NULL — the backend's GPU-mode contract). Bring the
+     * paint engine up on first acquire and track resizes; failure
+     * marks the surface gpu_failed (GPU mode has no CPU fallback by
+     * contract — present will report the error, not fake a frame). */
+    if (surface->fb.pixels == NULL) {
+        if (surface->gpu != NULL) {
+            fdk__gpu_surface_resize(surface, surface->fb.width,
+                                    surface->fb.height);
+        } else if (!surface->gpu_failed) {
+            if (fdk__gpu_surface_init(surface, surface->fb.width,
+                                      surface->fb.height)) {
+                fdk__gpu_register_window(surface->window->pwindow,
+                                         surface);
+            } else {
+                surface->gpu_failed = 1;
+                FDK_ERROR("GPU paint engine init failed; GPU mode has "
+                          "no CPU fallback by contract\n");
+            }
+        }
+    }
+
     return FDK_OK;
 }
 
@@ -295,6 +319,20 @@ fdk_result fdk_surface_present(fdk_surface *surface) {
         return FDK_ERR_UNSUPPORTED;
     }
 
+    /* GPU render mode: the batch IS the frame. Flush the engine with
+     * the lane context current and swap — no CPU framebuffer exists
+     * (the size-only fb contract), so damage bookkeeping never
+     * applies. Nothing-pending still swaps: re-presents the last
+     * frame cheaply, which matches the CPU path's visible behavior. */
+    if (surface->gpu != NULL || surface->gpu_failed) {
+        if (surface->gpu_failed ||
+            surface->window->ops->window_gpu_flush == NULL) {
+            return FDK_ERR_UNSUPPORTED;
+        }
+        return surface->window->ops->window_gpu_flush(
+            surface->window->pwindow, surface);
+    }
+
     /* Documented no-ops: nothing ever drawn, or nothing drawn since
      * the last present. The second case is the payoff of damage
      * tracking — an unchanged frame costs nothing (on Wayland, not
@@ -380,6 +418,8 @@ void fdk_surface_detach_from_window(fdk_window *window) {
      * framebuffer belongs to the backend's platform window and is
      * released by its window_destroy (wl_buffer/XImage cleanup). Only
      * the bookkeeping object goes away here. */
+    fdk__gpu_unregister_window(window->pwindow);
+    fdk__gpu_surface_destroy(window->surface);
     fdk_free(window->surface);
     window->surface = NULL;
 }
@@ -894,6 +934,10 @@ void fdk_surface_fill(fdk_surface *surface, fdk_color color) {
     if (!fdk_ok(surface_acquire(surface))) {
         return;
     }
+    if (surface->gpu != NULL) {
+        fdk__gpu_fill(surface, color);
+        return;
+    }
 
     int x0 = surface->clip_x0;
     int y0 = surface->clip_y0;
@@ -1148,6 +1192,10 @@ void fdk_surface_fill_rect(fdk_surface *surface, fdk_rect rect,
     if (!fdk_ok(surface_acquire(surface))) {
         return;
     }
+    if (surface->gpu != NULL) {
+        fdk__gpu_fill_rect(surface, rect, color);
+        return;
+    }
 
     int x0, y0, x1, y1;
     if (!clip_and_damage(surface, rect, &x0, &y0, &x1, &y1)) {
@@ -1196,6 +1244,10 @@ void fdk_surface_draw_rect(fdk_surface *surface, fdk_rect rect,
         return;
     }
     if (!fdk_ok(surface_acquire(surface))) {
+        return;
+    }
+    if (surface->gpu != NULL) {
+        fdk__gpu_draw_rect(surface, rect, color, 1);
         return;
     }
 
@@ -1257,6 +1309,10 @@ void fdk_surface_fill_gradient_vertical(fdk_surface *surface,
     if (!fdk_ok(surface_acquire(surface))) {
         return;
     }
+    if (surface->gpu != NULL) {
+        fdk__gpu_fill_gradient_vertical(surface, rect, top, bottom);
+        return;
+    }
 
     int x0, y0, x1, y1;
     if (!clip_and_damage(surface, rect, &x0, &y0, &x1, &y1)) {
@@ -1297,6 +1353,11 @@ void fdk_surface_draw_line(fdk_surface *surface,
         return;
     }
     if (!fdk_ok(surface_acquire(surface))) {
+        return;
+    }
+    if (surface->gpu != NULL) {
+        fdk__gpu_draw_line(surface, (fdk_f32)x0, (fdk_f32)y0,
+                            (fdk_f32)x1, (fdk_f32)y1, color, 1.0f, 0);
         return;
     }
 
@@ -1384,6 +1445,11 @@ void fdk_surface_draw_circle(fdk_surface *surface,
     if (!fdk_ok(surface_acquire(surface))) {
         return;
     }
+    if (surface->gpu != NULL) {
+        fdk__gpu_draw_circle(surface, (fdk_f32)cx, (fdk_f32)cy,
+                              (fdk_f32)radius, color, 1.0f, 0);
+        return;
+    }
 
     fdk_rect damaged;
     if (!circle_span(surface, cx, cy, radius, &damaged)) {
@@ -1424,6 +1490,11 @@ void fdk_surface_fill_circle(fdk_surface *surface,
     if (!fdk_ok(surface_acquire(surface))) {
         return;
     }
+    if (surface->gpu != NULL) {
+        fdk__gpu_fill_circle(surface, (fdk_f32)cx, (fdk_f32)cy,
+                              (fdk_f32)radius, color, 0);
+        return;
+    }
 
     fdk_rect damaged;
     if (!circle_span(surface, cx, cy, radius, &damaged)) {
@@ -1450,6 +1521,10 @@ void fdk_surface_fill_rounded_rect(fdk_surface *surface, fdk_rect rect,
         return;
     }
     if (!fdk_ok(surface_acquire(surface))) {
+        return;
+    }
+    if (surface->gpu != NULL) {
+        fdk__gpu_fill_rounded_rect(surface, rect, corner_radius, color, 0);
         return;
     }
 
@@ -1530,6 +1605,10 @@ void fdk_surface_draw_rounded_rect(fdk_surface *surface, fdk_rect rect,
     if (!fdk_ok(surface_acquire(surface))) {
         return;
     }
+    if (surface->gpu != NULL) {
+        fdk__gpu_draw_rounded_rect(surface, rect, corner_radius, color, 1, 0);
+        return;
+    }
 
     fdk_i32 max_radius =
         (rect.width < rect.height ? rect.width : rect.height) / 2;
@@ -1607,6 +1686,10 @@ void fdk_surface_blend_mask(fdk_surface *surface, fdk_rect rect,
     if (!fdk_ok(surface_acquire(surface))) {
         return;
     }
+    if (surface->gpu != NULL) {
+        fdk__gpu_blend_mask(surface, rect, mask, mask_stride, color, 1.0f);
+        return;
+    }
 
     int x0, y0, x1, y1;
     if (!clip_rect(surface, rect, &x0, &y0, &x1, &y1)) {
@@ -1676,6 +1759,10 @@ void fdk_surface_blend_rgba(fdk_surface *surface, fdk_rect rect,
         return;
     }
     if (!fdk_ok(surface_acquire(surface))) {
+        return;
+    }
+    if (surface->gpu != NULL) {
+        fdk__gpu_blend_rgba(surface, rect, rgba, rgba_stride, 1.0f);
         return;
     }
 
@@ -1761,6 +1848,11 @@ fdk_result fdk_surface_blit(fdk_surface *dst, fdk_i32 dst_x, fdk_i32 dst_y,
     r = surface_acquire(src);
     if (!fdk_ok(r)) {
         return r;
+    }
+    if (dst->gpu != NULL) {
+        fdk_rect dr = { dst_x, dst_y, src_rect.width, src_rect.height };
+        fdk__gpu_blit(dst, dr, src, src_rect);
+        return FDK_OK;
     }
 
     /* Clip the source rect to the source bounds first. */
@@ -2076,6 +2168,11 @@ fdk_result fdk_surface_blit_blend(fdk_surface *dst, fdk_i32 dst_x,
     if (!fdk_ok(r)) {
         return r;
     }
+    if (dst->gpu != NULL) {
+        fdk_rect dr = { dst_x, dst_y, src_rect.width, src_rect.height };
+        fdk__gpu_blit(dst, dr, src, src_rect);
+        return FDK_OK;
+    }
 
     /* Same two-sided clipping as fdk_surface_blit (source bounds,
      * then destination effective clip). */
@@ -2170,4 +2267,86 @@ fdk_result fdk_surface_blit_blend(fdk_surface *dst, fdk_i32 dst_x,
                                 .width = (fdk_i32)(dx1 - dx0),
                                 .height = (fdk_i32)(dy1 - dy0) });
     return FDK_OK;
+}
+
+/* ---- fdk_texture: the explicit software-pixel upload path ----
+ *
+ * The documented escape hatch for software-pixel widgets in GPU mode:
+ * pixels live app-side (RGBA8888), upload happens at draw time in the
+ * window's lane context, and the SAME call composites on the CPU path
+ * (blend_rgba), so widget paint code stays mode-agnostic. See the
+ * declarations in include/fdk/fdk_surface.h. */
+
+struct fdk_texture {
+    fdk_i32 width;
+    fdk_i32 height;
+    fdk_u8 *pixels; /* RGBA8888, tightly packed (stride = width*4) */
+    size_t length;
+};
+
+fdk_result fdk_texture_create(fdk_i32 width, fdk_i32 height,
+                              fdk_texture **out_texture) {
+    if (width <= 0 || height <= 0 || width > 16384 || height > 16384 ||
+        out_texture == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_texture *t = fdk_alloc(sizeof(*t));
+    if (t == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    t->length = (size_t)width * (size_t)height * 4u;
+    t->pixels = fdk_alloc(t->length);
+    if (t->pixels == NULL) {
+        fdk_free(t);
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    memset(t->pixels, 0, t->length);
+    t->width = width;
+    t->height = height;
+    *out_texture = t;
+    return FDK_OK;
+}
+
+fdk_result fdk_texture_update(fdk_texture *texture, fdk_rect rect,
+                              const void *pixels, fdk_i32 stride_bytes) {
+    if (texture == NULL || pixels == NULL || rect.width <= 0 ||
+        rect.height <= 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (rect.x < 0 || rect.y < 0 ||
+        rect.x + rect.width > texture->width ||
+        rect.y + rect.height > texture->height ||
+        stride_bytes < rect.width * 4) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    const fdk_u8 *src = pixels;
+    for (int row = 0; row < rect.height; row++) {
+        memcpy(texture->pixels +
+                   ((size_t)(rect.y + row) * (size_t)texture->width +
+                    (size_t)rect.x) * 4u,
+               src + (size_t)row * (size_t)stride_bytes,
+               (size_t)rect.width * 4u);
+    }
+    return FDK_OK;
+}
+
+fdk_result fdk_texture_draw(fdk_surface *surface, fdk_texture *texture,
+                            fdk_rect dst) {
+    if (surface == NULL || texture == NULL || dst.width <= 0 ||
+        dst.height <= 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_surface_blend_rgba(surface, dst, texture->pixels,
+                           texture->width * 4);
+    return FDK_OK;
+}
+
+void fdk_texture_destroy(fdk_texture *texture) {
+    if (texture == NULL) {
+        return;
+    }
+    /* GL-side registry entries die with their window engine (bounded
+     * table); the pixel memory is app-owned and freed here. */
+    fdk_free(texture->pixels);
+    fdk_free(texture);
 }

@@ -3,6 +3,7 @@
 #include "platform/wayland/wayland_platform.h"
 
 #include "platform/wayland/wayland_egl.h"
+#include "render/gpaint.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -1932,6 +1933,45 @@ static const fdk_u32 *lane_pack_rect(struct fdk_wayland_egl_window *ewin,
 static int lane_present_attempt(struct fdk_wayland_egl_window *ewin,
                                 const fdk_platform_damage *damage, int w,
                                 int h);
+
+/* GPU paint-mode flush (the GPU render mode's present): make the
+ * window's lane context current, issue the surface's pending GPU
+ * batch, swap. No staging upload, no texture compositing — the batch
+ * IS the frame. Resizes ride wl_egl_window_resize like the upload
+ * path's staging realloc. Failure = FDK_ERR_UNSUPPORTED: GPU mode has
+ * no CPU fallback by contract, and present reports it rather than
+ * faking a frame. */
+fdk_result fdk_wayland_egl_window_paint_flush(
+    struct fdk_wayland_egl_window *ewin, void *surface_ptr) {
+    if (ewin == NULL || surface_ptr == NULL || ewin->surface == 0 ||
+        ewin->wl_win == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_wayland_egl *egl = ewin->egl;
+    fdk_surface *s = (fdk_surface *)surface_ptr;
+    if (s->gpu == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (s->fb.width > 0 && (s->fb.width != ewin->w ||
+                            s->fb.height != ewin->h)) {
+        wl_egl_window_resize(ewin->wl_win, s->fb.width,
+                             s->fb.height, 0, 0);
+        ewin->w = s->fb.width;
+        ewin->h = s->fb.height;
+        ewin->tex_ok = 0;
+    }
+    if (!egl->fn.eglMakeCurrent(egl->egl_display, ewin->surface,
+                                ewin->surface, ewin->ctx)) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    fdk__gpu_flush(s);
+    if (s->gpu == NULL) { /* flush marked the engine dead */
+        return FDK_ERR_UNSUPPORTED;
+    }
+    EGLBoolean ok = egl->fn.eglSwapBuffers(egl->egl_display, ewin->surface);
+    (void)wl_display_flush(egl->conn->display);
+    return ok ? FDK_OK : FDK_ERR_UNSUPPORTED;
+}
 
 int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
                                    const fdk_platform_damage *damage, int w,

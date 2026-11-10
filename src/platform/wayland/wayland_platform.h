@@ -1184,6 +1184,8 @@ fdk_result fdk_wayland_window_get_scale(fdk_platform_window *pwindow,
                                         fdk_f32 *out_scale);
 fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
                                       const fdk_platform_damage *damage);
+fdk_result fdk_wayland_window_gpu_flush(fdk_platform_window *pwindow,
+                                        void *surface);
 int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow);
 
 /* The window_ever_presented ops entry: nonzero once a render buffer

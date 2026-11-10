@@ -658,4 +658,46 @@ fdk_u32 fdk_gif_player_frame(const fdk_gif_player *player);
 }
 #endif
 
+
+/* ---- Explicit texture upload (the software-pixel path in GPU mode) ----
+ *
+ * A texture is app-owned RGBA8888 pixel memory that composites into
+ * any fdk_surface with ONE call in every render mode: on the CPU path
+ * it is a blend_rgba; in FDK_RENDER_GPU it uploads into the window's
+ * lane context at draw time (cached per texture) and draws as a
+ * batched-machinery quad. Widget paint code written against
+ * fdk_texture_draw never branches on the render mode — the "paint
+ * once" contract holds for software-pixel content too. Textures are
+ * plain pixel buffers: update() writes rect sub-regions from
+ * row-strided source memory.
+ *
+ * The intended flow for a software-rendered embed (a terminal
+ * emulator grid, a video decoder, a canvas library):
+ *   fdk_texture_create(w, h, &tex);
+ *   fdk_texture_update(tex, rect, rgba, stride);   // per frame
+ *   fdk_texture_draw(surface, tex, dst_rect);      // inside paint
+ *   fdk_texture_destroy(tex);
+ */
+typedef struct fdk_texture fdk_texture;
+
+/* Allocates a zeroed RGBA8888 texture (transparent black). */
+fdk_result fdk_texture_create(fdk_i32 width, fdk_i32 height,
+                              fdk_texture **out_texture);
+
+/* Writes a sub-region from row-strided source memory (stride in
+ * BYTES, >= rect.width*4). The next draw picks the change up in
+ * every render mode. */
+fdk_result fdk_texture_update(fdk_texture *texture, fdk_rect rect,
+                              const void *pixels, fdk_i32 stride_bytes);
+
+/* Composites the whole texture into dst (scaled to fit) with
+ * straight-alpha source-over, identically in CPU/HYBRID/GPU modes.
+ * Runs inside the surface's clip, like every drawing helper. */
+fdk_result fdk_texture_draw(fdk_surface *surface, fdk_texture *texture,
+                            fdk_rect dst);
+
+/* Frees the texture. GL-side copies die with the windows that
+ * cached them. */
+void fdk_texture_destroy(fdk_texture *texture);
+
 #endif /* FDK_SURFACE_H */

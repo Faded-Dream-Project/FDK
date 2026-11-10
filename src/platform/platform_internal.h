@@ -575,6 +575,16 @@ typedef struct fdk_platform_ops {
      * wayland_window.c for per-backend notes. */
     fdk_result (*window_get_framebuffer)(fdk_platform_window *pwindow,
                                           fdk_platform_framebuffer *out_fb);
+
+    /* GPU paint engine flush (FDK_RENDER_GPU window surfaces): make
+     * the lane context current, issue the surface's pending GPU
+     * batch, swap. `surface` is the fdk_surface* passed as void* so
+     * platform headers stay free of render-internal types. NULL when
+     * the backend has no GPU lane; backends may pass NULL for
+     * `surface` and let the engine resolve it from the pwindow
+     * registry (src/render/gpaint.c) for internal re-presents. */
+    fdk_result (*window_gpu_flush)(fdk_platform_window *pwindow,
+                                   void *surface);
     fdk_result (*window_present)(fdk_platform_window *pwindow,
                                  const fdk_platform_damage *damage);
 

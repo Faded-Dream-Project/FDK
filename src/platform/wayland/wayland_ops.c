@@ -35,6 +35,7 @@ static const fdk_platform_ops g_wayland_ops = {
     .window_set_cursor = fdk_wayland_window_set_cursor,
     .window_get_framebuffer = fdk_wayland_window_get_framebuffer,
     .window_present = fdk_wayland_window_present,
+    .window_gpu_flush = fdk_wayland_window_gpu_flush,
     .window_frame_ready = fdk_wayland_window_frame_ready,
     .window_ever_presented = fdk_wayland_window_ever_presented,
     .window_render_path = fdk_wayland_window_render_path,

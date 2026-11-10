@@ -32,6 +32,7 @@
 #define FDK_LOG_TAG "render"
 
 #include "surface_internal.h"
+#include "gpaint.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -58,6 +59,11 @@ void fdk_surface_draw_line_aa(fdk_surface *surface,
         return;
     }
     if (!fdk_ok(fdk__surface_acquire(surface))) {
+        return;
+    }
+    if (surface->gpu != NULL) {
+        fdk__gpu_draw_line(surface, (fdk_f32)x0, (fdk_f32)y0,
+                            (fdk_f32)x1, (fdk_f32)y1, color, 1.0f, 1);
         return;
     }
 
@@ -150,6 +156,11 @@ void fdk_surface_draw_circle_aa(fdk_surface *surface,
     if (!fdk_ok(fdk__surface_acquire(surface))) {
         return;
     }
+    if (surface->gpu != NULL) {
+        fdk__gpu_draw_circle(surface, (fdk_f32)cx, (fdk_f32)cy,
+                              (fdk_f32)radius, color, 1.0f, 1);
+        return;
+    }
 
     /* Pixel-center distances to the ideal circle; coverage is the
      * fraction of a 1px-wide ring centered on radius r. */
@@ -181,6 +192,11 @@ void fdk_surface_fill_circle_aa(fdk_surface *surface,
         return;
     }
     if (!fdk_ok(fdk__surface_acquire(surface))) {
+        return;
+    }
+    if (surface->gpu != NULL) {
+        fdk__gpu_fill_circle(surface, (fdk_f32)cx, (fdk_f32)cy,
+                              (fdk_f32)radius, color, 1);
         return;
     }
 
@@ -216,6 +232,10 @@ void fdk_surface_fill_rounded_rect_aa(fdk_surface *surface, fdk_rect rect,
         return;
     }
     if (!fdk_ok(fdk__surface_acquire(surface))) {
+        return;
+    }
+    if (surface->gpu != NULL) {
+        fdk__gpu_fill_rounded_rect(surface, rect, corner_radius, color, 1);
         return;
     }
 
@@ -304,6 +324,10 @@ void fdk_surface_draw_rounded_rect_aa(fdk_surface *surface, fdk_rect rect,
         return;
     }
     if (!fdk_ok(fdk__surface_acquire(surface))) {
+        return;
+    }
+    if (surface->gpu != NULL) {
+        fdk__gpu_draw_rounded_rect(surface, rect, corner_radius, color, 1, 1);
         return;
     }
 
