@@ -3327,3 +3327,19 @@ fdk_result fdk_wayland_window_gl_set_frame_cb(fdk_platform_window *pw,
     pw->gl_frame_surface = surface;
     return FDK_OK;
 }
+
+fdk_result fdk_wayland_window_gl_fence_insert(fdk_platform_window *pw,
+                                              fdk_u64 *out_fence) {
+    if (pw == NULL || pw->egl_win == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk_wayland_egl_window_fence_insert(pw->egl_win, out_fence);
+}
+
+fdk_result fdk_wayland_window_gl_fence_wait(fdk_platform_window *pw,
+                                            fdk_u64 fence) {
+    if (pw == NULL || pw->egl_win == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk_wayland_egl_window_fence_wait(pw->egl_win, fence);
+}

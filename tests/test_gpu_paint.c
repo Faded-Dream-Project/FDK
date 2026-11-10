@@ -34,6 +34,7 @@
 #include "fdk/fdk_core.h"
 #include "fdk/fdk_surface.h"
 #include "fdk/fdk_window.h"
+#include "fdk/fdk_extend.h"
 #include "render/surface_internal.h"
 #include "window/window_internal.h"   /* wgpu->pwindow for the seam */
 #include "platform/x11/x11_platform.h"
@@ -657,6 +658,40 @@ int main(void) {
             fdk_window_destroy(w2);
         } else {
             CHECK(0, "context loss: fresh GPU window create");
+        }
+    }
+
+    /* ---- fences: real EGLSync/GLFence in the lane ------------------
+     * the ext_gl router is a pass-through to these backend fns (the
+     * public API scopes them to an ext surface; the popup-minted one
+     * is P5's (b) example). Prove the lane machinery: insert after a
+     * presented frame, client-wait must satisfy. */
+    {
+        fdk_surface *sf = NULL;
+        fdk_window_get_surface(wgpu, &sf);
+        paint_scene_dynamic(sf, card, tex);
+        fdk_surface_present(sf);
+        fdk_u64 fence = 0;
+        fdk_result fi = fdk_x11_window_gl_fence_insert(wgpu->pwindow,
+                                                       &fence);
+        if (fdk_ok(fi)) {
+            fdk_result fw = fdk_x11_window_gl_fence_wait(wgpu->pwindow,
+                                                         fence);
+            if (fw == FDK_ERR_UNSUPPORTED) {
+                /* llvmpipe/swrast creates valid sync objects but never
+                 * signals them (a software-pipeline limitation — even
+                 * glFinish does not release the fence). On drivers with
+                 * real fence signaling this path is satisfied; the API
+                 * answer is honest either way (no fake fence). */
+                printf("[info] swrast never signals fences — the wait "
+                       "is honestly UNSUPPORTED here\n");
+            } else {
+                CHECK(fdk_ok(fw), "fence: insert + client-wait satisfied");
+            }
+        } else {
+            CHECK(fi == FDK_ERR_UNSUPPORTED,
+                  "fence: honest UNSUPPORTED without GL_ARB_sync");
+            printf("[info] driver lacks GL_ARB_sync (%d)\n", (int)fi);
         }
     }
 

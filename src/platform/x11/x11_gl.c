@@ -154,6 +154,9 @@ struct fdk_gl_fns {
     const char *(*glGetString)(GLenum);
     GLenum (*glGetError)(void);
     void (*glFinish)(void);
+    void *(*glFenceSync)(unsigned, int);
+    unsigned (*glClientWaitSync)(void *, unsigned, unsigned long long);
+    void (*glDeleteSync)(void *);
 };
 
 struct fdk_x11_gl {
@@ -436,6 +439,9 @@ struct fdk_x11_gl *fdk_x11_gl_try_load(fdk_platform_connection *conn) {
     GL_RESOLVE(glGetString, "glGetString");
     GL_RESOLVE(glGetError, "glGetError");
     GL_RESOLVE(glFinish, "glFinish");
+    GL_RESOLVE(glFenceSync, "glFenceSync");
+    GL_RESOLVE(glClientWaitSync, "glClientWaitSync");
+    GL_RESOLVE(glDeleteSync, "glDeleteSync");
 #undef GL_RESOLVE
 #undef FDK_GL_STORE_FN
 
@@ -1249,4 +1255,48 @@ fdk_result fdk_x11_gl_window_cb_flush(struct fdk_x11_gl_window *gwin,
     }
     fn(user, surface);
     return fdk_x11_gl_window_swap(gwin);
+}
+
+/* ---- P2: real fences — glFenceSync (desktop GL 3.2+ / GL_ARB_sync;
+ * resolved via the lane's proc table, UNSUPPORTED when absent) -------- */
+fdk_result fdk_x11_gl_window_fence_insert(struct fdk_x11_gl_window *gwin,
+                                          fdk_u64 *out_fence) {
+    if (gwin == NULL || out_fence == NULL || gwin->ctx == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_x11_gl *gl = gwin->gl;
+    if (gl->fn.glFenceSync == NULL) {
+        return FDK_ERR_UNSUPPORTED; /* driver lacks GL_ARB_sync */
+    }
+    if (!gl->fn.glXMakeCurrent(gl->conn->display, gwin->xwindow,
+                               gwin->ctx)) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    void *sync = gl->fn.glFenceSync(0x9117 /* GL_SYNC_GPU_COMMANDS_COMPLETE */,
+                                    0);
+    if (sync == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    *out_fence = (fdk_u64)(uintptr_t)sync;
+    return FDK_OK;
+}
+
+fdk_result fdk_x11_gl_window_fence_wait(struct fdk_x11_gl_window *gwin,
+                                        fdk_u64 fence) {
+    if (gwin == NULL || fence == 0 || gwin->ctx == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_x11_gl *gl = gwin->gl;
+    if (gl->fn.glClientWaitSync == NULL || gl->fn.glDeleteSync == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (!gl->fn.glXMakeCurrent(gl->conn->display, gwin->xwindow,
+                               gwin->ctx)) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    unsigned r = gl->fn.glClientWaitSync((void *)(uintptr_t)fence, 0x1u,
+                                         5000000000ull);
+    gl->fn.glDeleteSync((void *)(uintptr_t)fence);
+    /* 0x911D = GL_ALREADY_SIGNALED, 0x911E = GL_CONDITION_SATISFIED */
+    return (r == 0x911D || r == 0x911E) ? FDK_OK : FDK_ERR_UNSUPPORTED;
 }

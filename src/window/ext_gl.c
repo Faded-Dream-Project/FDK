@@ -56,15 +56,23 @@ fdk_result fdk_ext_gl_swap(fdk_ext_surface *surface) {
 
 fdk_result fdk_ext_gl_fence_insert(fdk_ext_surface *surface,
                                    fdk_u64 *out_fence) {
-    (void)surface;
-    (void)out_fence;
-    /* The lane proc tables do not resolve EGLSync/GLFence yet; the
-     * honest answer until they do is UNSUPPORTED, never a fake fence. */
-    return FDK_ERR_UNSUPPORTED;
+    fdk_platform_window *pw = ext_pw(surface);
+    if (pw == NULL || fdk__ext_surface_window(surface)->ops == NULL ||
+        fdk__ext_surface_window(surface)->ops->window_gl_fence_insert ==
+            NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk__ext_surface_window(surface)->ops->window_gl_fence_insert(
+        pw, out_fence);
 }
 
 fdk_result fdk_ext_gl_fence_wait(fdk_ext_surface *surface, fdk_u64 fence) {
-    (void)surface;
-    (void)fence;
-    return FDK_ERR_UNSUPPORTED;
+    fdk_platform_window *pw = ext_pw(surface);
+    if (pw == NULL || fdk__ext_surface_window(surface)->ops == NULL ||
+        fdk__ext_surface_window(surface)->ops->window_gl_fence_wait ==
+            NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk__ext_surface_window(surface)->ops->window_gl_fence_wait(pw,
+                                                                       fence);
 }

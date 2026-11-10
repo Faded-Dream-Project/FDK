@@ -1203,6 +1203,10 @@ fdk_result fdk_wayland_window_gl_swap(fdk_platform_window *pwindow);
 fdk_result fdk_wayland_window_gl_set_frame_cb(fdk_platform_window *pwindow,
                                               void (*fn)(void *, void *),
                                               void *user, void *surface);
+fdk_result fdk_wayland_window_gl_fence_insert(fdk_platform_window *pwindow,
+                                              fdk_u64 *out_fence);
+fdk_result fdk_wayland_window_gl_fence_wait(fdk_platform_window *pwindow,
+                                            fdk_u64 fence);
 int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow);
 
 /* The window_ever_presented ops entry: nonzero once a render buffer

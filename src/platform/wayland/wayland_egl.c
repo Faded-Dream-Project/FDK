@@ -2490,3 +2490,71 @@ fdk_result fdk_wayland_egl_window_cb_flush(struct fdk_wayland_egl_window *ewin,
     fn(user, surface);
     return fdk_wayland_egl_window_swap(ewin);
 }
+
+/* ---- P2: real fences (EGL_KHR_fence_sync; EGL_ANDROID_native_fence_
+ * sync gives a native FD where the driver has it) ---------------------- */
+struct fdk_wl_sync_fns {
+    void *create_sync;   /* eglCreateSyncKHR */
+    void *destroy_sync;  /* eglDestroySyncKHR */
+    void *client_wait;   /* eglClientWaitSyncKHR */
+    void *dup_fd;        /* eglDupNativeFenceFDANDROID */
+};
+
+static struct fdk_wl_sync_fns g_wl_sync;
+
+typedef void *(*egl_gpa_fn)(void *, const char *);
+
+static int wl_sync_resolve(void *lib_egl, egl_gpa_fn gpa) {
+    if (g_wl_sync.create_sync != NULL) {
+        return 1;
+    }
+    g_wl_sync.create_sync = gpa(lib_egl, "eglCreateSyncKHR");
+    g_wl_sync.destroy_sync = gpa(lib_egl, "eglDestroySyncKHR");
+    g_wl_sync.client_wait = gpa(lib_egl, "eglClientWaitSyncKHR");
+    g_wl_sync.dup_fd = gpa(lib_egl, "eglDupNativeFenceFDANDROID");
+    return g_wl_sync.create_sync != NULL && g_wl_sync.client_wait != NULL &&
+           g_wl_sync.destroy_sync != NULL;
+}
+
+fdk_result fdk_wayland_egl_window_fence_insert(
+    struct fdk_wayland_egl_window *ewin, fdk_u64 *out_fence) {
+    if (ewin == NULL || ewin->surface == 0 || out_fence == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_wayland_egl *egl = ewin->egl;
+    if (!wl_sync_resolve(egl->lib_egl,
+                             (void *)egl->fn.eglGetProcAddress)) {
+        return FDK_ERR_UNSUPPORTED; /* driver lacks EGL_KHR_fence_sync */
+    }
+    void *(*create)(void *, unsigned, const void *) =
+        (void *(*)(void *, unsigned, const void *))g_wl_sync.create_sync;
+    void *sync = create(egl->egl_display, 0x30F0 /* EGL_SYNC_FENCE_KHR */,
+                        NULL);
+    if (sync == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    *out_fence = (fdk_u64)(uintptr_t)sync;
+    return FDK_OK;
+}
+
+fdk_result fdk_wayland_egl_window_fence_wait(
+    struct fdk_wayland_egl_window *ewin, fdk_u64 fence) {
+    if (ewin == NULL || fence == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_wayland_egl *egl = ewin->egl;
+    if (!wl_sync_resolve(egl->lib_egl,
+                             (void *)egl->fn.eglGetProcAddress)) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    unsigned (*cwait)(void *, void *, int) =
+        (unsigned (*)(void *, void *, int))g_wl_sync.client_wait;
+    /* EGL_SYNC_FLUSH_COMMANDS_BIT | forever: the waiter decides. */
+    unsigned r = cwait(egl->egl_display, (void *)(uintptr_t)fence,
+                       0x0001 | 0xFFFFFFFFu);
+    void (*destroy)(void *, void *) =
+        (void (*)(void *, void *))g_wl_sync.destroy_sync;
+    destroy(egl->egl_display, (void *)(uintptr_t)fence);
+    /* 0x3051 = EGL_CONDITION_SATISFIED_KHR */
+    return r == 0x3051 ? FDK_OK : FDK_ERR_UNSUPPORTED;
+}

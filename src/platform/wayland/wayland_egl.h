@@ -169,4 +169,8 @@ fdk_result fdk_wayland_egl_window_cb_flush(struct fdk_wayland_egl_window *ewin,
                                            void (*fn)(void *, void *),
                                            void *user, void *surface);
 
+fdk_result fdk_wayland_egl_window_fence_insert(
+    struct fdk_wayland_egl_window *ewin, fdk_u64 *out_fence);
+fdk_result fdk_wayland_egl_window_fence_wait(
+    struct fdk_wayland_egl_window *ewin, fdk_u64 fence);
 #endif /* FDK_WAYLAND_EGL_H */
