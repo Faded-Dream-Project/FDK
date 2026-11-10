@@ -24,6 +24,11 @@
 
 static fdk_context *g_ctx_dbg = NULL;
 static int g_fail = 0;
+/* HAZARD (the valgrind catch, 2026-11-12): CHECK evaluates `cond`
+ * TWICE (the printf and the branch). Never pass a side-effecting
+ * call as `cond` — a successful import in a CHECK ran two imports
+ * and the first texture leaked (definitely-lost under valgrind).
+ * Hoist the call, CHECK the result. */
 #define CHECK(cond, name)                                                    \
     do {                                                                     \
         printf("[%s] %s\n", (cond) ? "ok" : "FAIL", name);                   \
@@ -237,8 +242,8 @@ int main(void) {
             wp.fourcc = FOURCC('R', 'A', '2', '4');
             wp.planes[0].fd = rfd;
             wp.planes[0].stride = (fdk_u32)wp.width * 4u;
-            CHECK(fdk_texture_import_dmabuf(&wp, &wt) ==
-                      FDK_ERR_INVALID_ARGUMENT,
+            fdk_result wr1 = fdk_texture_import_dmabuf(&wp, &wt);
+            CHECK(wr1 == FDK_ERR_INVALID_ARGUMENT,
                   "wrong stride vs the buffer size: clean refusal");
             CHECK(wt == NULL, "no texture on the stride refusal");
 
@@ -249,8 +254,8 @@ int main(void) {
             hp.fourcc = FOURCC('R', 'A', '2', '4');
             hp.planes[0].fd = rfd;
             hp.planes[0].stride = 4 * 4;
-            CHECK(fdk_texture_import_dmabuf(&hp, &wt) ==
-                      FDK_ERR_INVALID_ARGUMENT,
+            fdk_result wr2 = fdk_texture_import_dmabuf(&hp, &wt);
+            CHECK(wr2 == FDK_ERR_INVALID_ARGUMENT,
                   "wrong size vs the buffer size: clean refusal");
 
             /* closed fd: a positive number the kernel rejects */
@@ -262,8 +267,8 @@ int main(void) {
             dp.fourcc = FOURCC('R', 'A', '2', '4');
             dp.planes[0].fd = dead;
             dp.planes[0].stride = 4 * 4;
-            CHECK(fdk_texture_import_dmabuf(&dp, &wt) ==
-                      FDK_ERR_INVALID_ARGUMENT,
+            fdk_result wr3 = fdk_texture_import_dmabuf(&dp, &wt);
+            CHECK(wr3 == FDK_ERR_INVALID_ARGUMENT,
                   "closed fd: clean refusal (fstat fails)");
 
             /* the honest control: the SAME buffer with the matching
@@ -274,7 +279,8 @@ int main(void) {
             okp.fourcc = FOURCC('R', 'A', '2', '4');
             okp.planes[0].fd = rfd;
             okp.planes[0].stride = 4 * 4;
-            CHECK(fdk_ok(fdk_texture_import_dmabuf(&okp, &wt)),
+            fdk_result wr4 = fdk_texture_import_dmabuf(&okp, &wt);
+            CHECK(fdk_ok(wr4),
                   "the matching descriptor still imports");
             if (wt != NULL) {
                 fdk_texture_destroy(wt);

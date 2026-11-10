@@ -1,4 +1,19 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Valgrind's first catch: the CHECK macro's double evaluation
+
+- CI's valgrind lane failed on its first run — a REAL find: the
+  dmabuf matrix's "matching descriptor still imports" check was
+  written as CHECK(import(...)), and the test's CHECK macro
+  evaluates its condition TWICE (once for the verdict printf, once
+  for the branch). The import ran two imports; the first texture
+  (160+64 bytes) was overwritten and definitely-lost. ASan never
+  flagged it because the second import's texture WAS destroyed —
+  only the first was lost, and only valgrind's definitely-lost
+  analysis named it.
+- All four matrix imports hoisted out of CHECK (call once, CHECK the
+  result); a HAZARD note now sits on the macro itself. LSan on the
+  debug build confirms zero leaks after the fix; the matrix is all
+  green.
 ## CI: the popup step's two real findings (the run completed, the fix verified)
 
 - The failed run PROVED the item-1 gate: the DRM job shows
