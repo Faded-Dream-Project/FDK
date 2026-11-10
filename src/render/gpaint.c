@@ -129,6 +129,8 @@ struct fdk_gpu_procs {
     void (*EnableVertexAttribArray)(unsigned);
     void (*DrawArrays)(unsigned, int, int);
     void (*ActiveTexture)(unsigned);
+    void (*ReadPixels)(int, int, int, int, unsigned, unsigned, void *);
+    void (*Finish)(void);
 };
 
 static struct fdk_gpu_procs g_gp;
@@ -146,58 +148,92 @@ int fdk__gpu_procs_init(void) {
     if (g_gp_ok) {
         return 1;
     }
+    /* Presence check only — the RESOLUTION happens in gp_resolve_procs
+     * once a context is current, because libGLESv2's and libGL's
+     * dispatch tables are keyed to their own context flavors: a desktop
+     * GLX context makes libGLESv2's glGetString return NULL (and vice
+     * versa). The engine picks the library that ANSWERS for the current
+     * context at bring-up time. */
     const char *names[] = { "libGLESv2.so.2", "libGLESv2.so",
                             "libGL.so.1",     "libGL.so" };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
-        g_gp.lib = dlopen(names[i], RTLD_NOW | RTLD_LOCAL);
-        if (g_gp.lib != NULL) {
-            break;
+        void *lib = dlopen(names[i], RTLD_NOW | RTLD_LOCAL);
+        if (lib != NULL) {
+            dlclose(lib);
+            return 1;
         }
     }
-    if (g_gp.lib == NULL) {
-        return 0;
+    return 0;
+}
+
+/* Resolve the proc table from the library that serves the CURRENT
+ * context. 1 = table ready; 0 = no GL library at all (fatal);
+ * -1 = libraries exist but none answers for the current context
+ * (soft: the caller is running before the lane's first makeCurrent). */
+static int gp_resolve_procs(void) {
+    if (g_gp_ok) {
+        return 1;
     }
-    g_gp_ok = 1;
+    const char *names[] = { "libGLESv2.so.2", "libGLESv2.so",
+                            "libGL.so.1",     "libGL.so" };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        void *lib = dlopen(names[i], RTLD_NOW | RTLD_LOCAL);
+        if (lib == NULL) {
+            continue;
+        }
+        const unsigned char *(*gs)(unsigned) =
+            (const unsigned char *(*)(unsigned))dlsym(lib, "glGetString");
+        /* The candidate must answer for the CURRENT context
+         * (GL_RENDERER non-NULL = this dispatch owns it). */
+        if (gs == NULL || gs(0x1F01) == NULL) {
+            continue;
+        }
+        g_gp.lib = lib;
+        g_gp_ok = 1;
 #define GP(field, sym) g_gp.field = (void *)gp_sym(sym)
-    GP(GetString, "glGetString");
-    GP(GetError, "glGetError");
-    GP(Viewport, "glViewport");
-    GP(Scissor, "glScissor");
-    GP(Enable, "glEnable");
-    GP(Disable, "glDisable");
-    GP(BlendFunc, "glBlendFunc");
-    GP(PixelStorei, "glPixelStorei");
-    GP(CreateShader, "glCreateShader");
-    GP(ShaderSource, "glShaderSource");
-    GP(CompileShader, "glCompileShader");
-    GP(GetShaderiv, "glGetShaderiv");
-    GP(GetShaderInfoLog, "glGetShaderInfoLog");
-    GP(CreateProgram, "glCreateProgram");
-    GP(AttachShader, "glAttachShader");
-    GP(LinkProgram, "glLinkProgram");
-    GP(GetProgramiv, "glGetProgramiv");
-    GP(GetUniformLocation, "glGetUniformLocation");
-    GP(UseProgram, "glUseProgram");
-    GP(Uniform2f, "glUniform2f");
-    GP(GenTextures, "glGenTextures");
-    GP(BindTexture, "glBindTexture");
-    GP(TexParameteri, "glTexParameteri");
-    GP(TexImage2D, "glTexImage2D");
-    GP(TexSubImage2D, "glTexSubImage2D");
-    GP(DeleteTextures, "glDeleteTextures");
-    GP(GenBuffers, "glGenBuffers");
-    GP(BindBuffer, "glBindBuffer");
-    GP(BufferData, "glBufferData");
-    GP(VertexAttribPointer, "glVertexAttribPointer");
-    GP(EnableVertexAttribArray, "glEnableVertexAttribArray");
-    GP(DrawArrays, "glDrawArrays");
-    GP(ActiveTexture, "glActiveTexture");
+        GP(GetString, "glGetString");
+        GP(GetError, "glGetError");
+        GP(Viewport, "glViewport");
+        GP(Scissor, "glScissor");
+        GP(Enable, "glEnable");
+        GP(Disable, "glDisable");
+        GP(BlendFunc, "glBlendFunc");
+        GP(PixelStorei, "glPixelStorei");
+        GP(CreateShader, "glCreateShader");
+        GP(ShaderSource, "glShaderSource");
+        GP(CompileShader, "glCompileShader");
+        GP(GetShaderiv, "glGetShaderiv");
+        GP(GetShaderInfoLog, "glGetShaderInfoLog");
+        GP(CreateProgram, "glCreateProgram");
+        GP(AttachShader, "glAttachShader");
+        GP(LinkProgram, "glLinkProgram");
+        GP(GetProgramiv, "glGetProgramiv");
+        GP(GetUniformLocation, "glGetUniformLocation");
+        GP(UseProgram, "glUseProgram");
+        GP(Uniform2f, "glUniform2f");
+        GP(GenTextures, "glGenTextures");
+        GP(BindTexture, "glBindTexture");
+        GP(TexParameteri, "glTexParameteri");
+        GP(TexImage2D, "glTexImage2D");
+        GP(TexSubImage2D, "glTexSubImage2D");
+        GP(DeleteTextures, "glDeleteTextures");
+        GP(GenBuffers, "glGenBuffers");
+        GP(BindBuffer, "glBindBuffer");
+        GP(BufferData, "glBufferData");
+        GP(VertexAttribPointer, "glVertexAttribPointer");
+        GP(EnableVertexAttribArray, "glEnableVertexAttribArray");
+        GP(DrawArrays, "glDrawArrays");
+        GP(ActiveTexture, "glActiveTexture");
+        GP(ReadPixels, "glReadPixels");
+        GP(Finish, "glFinish");
 #undef GP
-    if (!g_gp_ok) {
-        memset(&g_gp, 0, sizeof(g_gp));
-        return 0;
+        if (!g_gp_ok) {
+            g_gp.lib = NULL;
+            continue;
+        }
+        return 1;
     }
-    return 1;
+    return -1; /* libs exist, none current */
 }
 
 /* ------------------------------------------------------------------ */
@@ -253,22 +289,27 @@ static const char *GP_FS_BODY =
     "    if (mode < 0.5) {\n" /* fill: rect (radius) or circle */
     "        float d;\n"
     "        if (v_aux0.w < 0.5) {\n"
-    "            d = sd_rect(p - half_sz, half_sz - vec2(v_aux0.y));\n"
+    /*  rounded box: sd of the box inset by r, MINUS r (the standard
+        rounded-box SDF — without the -r the shape is the inset box) */
+    "            d = sd_rect(p - half_sz, half_sz - vec2(v_aux0.y)) -\n"
+    "                v_aux0.y;\n"
     "        } else {\n"
-    "            d = length(p - half_sz) -\n"
-    "                (min(half_sz.x, half_sz.y) - v_aux0.y);\n"
+    "            d = length(p - half_sz) - min(half_sz.x, half_sz.y);\n"
     "        }\n"
     "        float a = clamp(0.5 - d, 0.0, 1.0);\n"
     "        c = vec4(v_color.rgb, v_color.a * a);\n"
     "    } else if (mode < 1.5) {\n" /* stroke: ring at stroke_half */
     "        float d;\n"
     "        if (v_aux0.w < 0.5) {\n"
-    "            d = sd_rect(p - half_sz, half_sz - vec2(v_aux0.y));\n"
+    "            d = sd_rect(p - half_sz, half_sz - vec2(v_aux0.y)) -\n"
+    "                v_aux0.y;\n"
     "        } else {\n"
-    "            d = length(p - half_sz) -\n"
-    "                (min(half_sz.x, half_sz.y) - v_aux0.y);\n"
+    "            d = length(p - half_sz) - min(half_sz.x, half_sz.y);\n"
     "        }\n"
-    "        float ring = abs(d) - v_aux0.z;\n"
+    /*  the CPU's 1px stroke paints the boundary PIXEL ring: its
+        center sits half a pixel inside the shape edge. Center the
+        GPU ring there too (stroke_half is in pixels). */
+    "        float ring = abs(abs(d) - (v_aux0.z - 0.5)) - 0.5;\n"
     "        float a = clamp(0.5 - ring, 0.0, 1.0);\n"
     "        c = vec4(v_color.rgb, v_color.a * a);\n"
     "    } else if (mode < 2.5) {\n" /* vertical gradient */
@@ -284,10 +325,15 @@ static const char *GP_FS_BODY =
     "    } else if (mode < 4.5) {\n" /* texture RGBA (uv 0..1) */
     "        vec4 t = texture2D(u_tex, v_uv);\n"
     "        c = vec4(t.rgb * v_color.rgb, t.a * v_color.a) *\n"
-    "            v_aux0.z;\n" /* global alpha in aux0.z */
-    "    } else {\n"             /* glyph coverage (LUMINANCE) + tint */
+    "            v_aux2.x;\n" /* global alpha rides aux2.x */
+    "    } else if (mode < 5.5) {\n" /* glyph coverage (LUMINANCE) */
     "        float l = texture2D(u_tex, v_uv).r;\n"
-    "        c = vec4(v_color.rgb, v_color.a * l * v_aux0.z);\n"
+    "        c = vec4(v_color.rgb, v_color.a * l * v_aux2.x);\n"
+    "    } else {\n"             /* mode 6: texture, OPAQUE (surface
+                                     blits — the XRGB X byte is zero,
+                                     alpha must not come from it) */
+    "        vec4 t = texture2D(u_tex, v_uv);\n"
+    "        c = vec4(t.rgb * v_color.rgb, v_color.a) * v_aux2.x;\n"
     "    }\n"
     "    gl_FragColor = c;\n"
     "}\n";
@@ -312,6 +358,19 @@ struct gp_tex_entry {
     unsigned name;
     int w, h, rgba;
     int valid;
+    int gl_ok; /* GL texture object created (needs current context) */
+    int needs_upload;
+    const unsigned char *pend_px;
+    fdk_i32 pend_stride;
+};
+
+#define GP_MAX_PEND 256
+struct gp_pend {
+    void *key;
+    int opaque; /* surface blit: alpha forced 1 (XRGB X byte is 0) */
+    float cx[4], cy[4]; /* destination corners, top-left pixels */
+    float cu[4], cv[4]; /* texture coordinates per corner */
+    float alpha;
 };
 
 struct fdk_gpu_state {
@@ -323,7 +382,9 @@ struct fdk_gpu_state {
     int dead;
 
     int width, height;
-    int es; /* GLES flavor (precision stmt + LUMINANCE atlas) */
+    int es;      /* GLES flavor (precision stmt + LUMINANCE atlas) */
+    int gl_ready; /* GL objects built (needs a CURRENT context; built
+                   * lazily at the first flush/atlas/texture call) */
 
     /* Clip stack mirror (surface.c already bounds it; we keep our own
      * intersection in GL orientation). */
@@ -339,6 +400,12 @@ struct fdk_gpu_state {
     /* Texture registry (fdk_texture* / offscreen fdk_surface* keys) */
     struct gp_tex_entry *tex;
     unsigned tex_gen;
+
+    /* Texture draws issued before GL bring-up (no context yet): the
+     * registry entry is booked CPU-side and the DRAW is replayed at
+     * the next flush, when the lane context is current. */
+    struct gp_pend *pend;
+    int pend_count;
 };
 
 /* The gpu state rides the surface struct as an opaque pointer
@@ -346,6 +413,71 @@ struct fdk_gpu_state {
  * here. */
 static struct fdk_gpu_state *gp_state(struct fdk_surface *s) {
     return (struct fdk_gpu_state *)s->gpu;
+}
+
+static int gp_program(struct fdk_gpu_state *g);
+
+/* Deferred GL bring-up: builds the program, VBO and glyph atlas the
+ * first time it runs with a CURRENT lane context (the first flush,
+ * texture or atlas call — never a bare primitive, which runs before
+ * any present and therefore without a current context). Returns 1
+ * when GL objects exist. Failure marks the engine dead (present then
+ * reports UNSUPPORTED — GPU mode never fakes a frame). */
+static int gp_ensure_gl(struct fdk_surface *s) {
+    struct fdk_gpu_state *g = gp_state(s);
+    if (g == NULL || g->dead) {
+        return 0;
+    }
+    if (g->gl_ready) {
+        return 1;
+    }
+    int r = gp_resolve_procs();
+    if (r == 0) {
+        fprintf(stderr, "fdk-gpaint: no GL library available; engine "
+                        "marked dead\n");
+        g->dead = 1;
+        return 0;
+    }
+    if (r < 0) {
+        return 0; /* soft: primitives no-op until the first present */
+    }
+    const char *ver = (const char *)g_gp.GetString(0x1F02 /* VERSION */);
+    g->es = (ver != NULL && strstr(ver, "OpenGL ES") != NULL);
+
+    if (!gp_program(g)) {
+        fprintf(stderr, "fdk-gpaint: GL bring-up failed (shader/program); "
+                        "engine marked dead\n");
+        g->dead = 1;
+        return 0;
+    }
+    g_gp.GenBuffers(1, &g->vbo);
+
+    /* Atlas texture (LUMINANCE works on both flavors). */
+    g_gp.GenTextures(1, &g->atlas_tex);
+    g_gp.ActiveTexture(GL_TEXTURE0);
+    g_gp.BindTexture(GL_TEXTURE_2D, g->atlas_tex);
+    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    unsigned char *zeros = calloc(GP_ATLAS * GP_ATLAS, 1);
+    if (zeros != NULL) {
+        g_gp.TexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, GP_ATLAS, GP_ATLAS,
+                        0, GL_LUMINANCE, GL_UNSIGNED_BYTE, zeros);
+        free(zeros);
+    }
+    g->gl_ready = 1;
+    {
+        static int logged = 0;
+        if (!logged) {
+            logged = 1;
+            const char *r = (const char *)g_gp.GetString(0x1F01);
+            const char *v = (const char *)g_gp.GetString(0x1F02);
+            fprintf(stderr, "fdk-gpaint: GL up (renderer=%s, version=%s)\n",
+                    r ? r : "?", v ? v : "?");
+        }
+    }
+    return 1;
 }
 
 static unsigned long long gp_fnv(const unsigned char *data, size_t n,
@@ -375,10 +507,14 @@ static gl_uint gp_compile(struct fdk_gpu_state *g, unsigned type,
     gl_int ok = 0;
     g_gp.GetShaderiv(sh, GL_COMPILE_STATUS, &ok);
     if (!ok) {
-        char log[512];
+        char log[1024];
         log[0] = 0;
-        g_gp.GetShaderInfoLog(sh, sizeof(log), NULL, log);
-        fprintf(stderr, "fdk-gpaint: shader compile failed: %s\n", log);
+        g_gp.GetShaderInfoLog(sh, (gl_int)sizeof(log), NULL, log);
+        const char *glver = (const char *)g_gp.GetString(0x1F02);
+        const char *glsl = (const char *)g_gp.GetString(0x8B8C);
+        fprintf(stderr,
+                "fdk-gpaint: shader compile failed (%s / GLSL %s): %s\n",
+                glver ? glver : "?", glsl ? glsl : "?", log);
         return 0;
     }
     return sh;
@@ -430,42 +566,18 @@ int fdk__gpu_surface_init(struct fdk_surface *s, int width, int height) {
     g->verts = malloc(sizeof(float) * GP_QUAD_FLOATS * GP_MAX_QUADS);
     g->atlas_slots = calloc(GP_ATLAS_SLOTS, sizeof(*g->atlas_slots));
     g->tex = calloc(GP_TEX_SLOTS, sizeof(*g->tex));
-    if (g->verts == NULL || g->atlas_slots == NULL || g->tex == NULL) {
+    g->pend = calloc(GP_MAX_PEND, sizeof(*g->pend));
+    if (g->verts == NULL || g->atlas_slots == NULL || g->tex == NULL ||
+        g->pend == NULL) {
         free(g->verts);
         free(g->atlas_slots);
         free(g->tex);
+        free(g->pend);
         free(g);
         return 0;
     }
     g->width = width;
     g->height = height;
-    const char *ver = (const char *)g_gp.GetString(0x1F02 /* VERSION */);
-    g->es = (ver != NULL && strstr(ver, "OpenGL ES") != NULL);
-
-    if (!gp_program(g)) {
-        free(g->verts);
-        free(g->atlas_slots);
-        free(g->tex);
-        free(g);
-        return 0;
-    }
-    g_gp.GenBuffers(1, &g->vbo);
-
-    /* Atlas texture (LUMINANCE works on both flavors). */
-    g_gp.GenTextures(1, &g->atlas_tex);
-    g_gp.ActiveTexture(GL_TEXTURE0);
-    g_gp.BindTexture(GL_TEXTURE_2D, g->atlas_tex);
-    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    unsigned char *zeros = calloc(GP_ATLAS * GP_ATLAS, 1);
-    if (zeros != NULL) {
-        g_gp.TexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, GP_ATLAS, GP_ATLAS, 0,
-                        GL_LUMINANCE, GL_UNSIGNED_BYTE, zeros);
-        free(zeros);
-    }
-
     g->clip[0] = 0.0f;
     g->clip[1] = 0.0f;
     g->clip[2] = (float)width;
@@ -484,6 +596,7 @@ void fdk__gpu_surface_destroy(struct fdk_surface *s) {
     free(g->verts);
     free(g->atlas_slots);
     free(g->tex);
+    free(g->pend);
     free(g);
     s->gpu = NULL;
 }
@@ -565,7 +678,11 @@ static void gp_quad(struct fdk_surface *s, float x, float y, float w,
         GP_QUAD_FLOATS * GP_MAX_QUADS) {
         fdk__gpu_flush(s);
     }
-    if (g->dead) {
+    if (g->dead || g->vert_count + GP_QUAD_FLOATS * GP_QUAD_VERTS >
+                       GP_QUAD_FLOATS * GP_MAX_QUADS) {
+        /* Still no room after the flush attempt (GL not brought up
+         * yet — the flush retained its verts): drop this quad rather
+         * than run past the buffer. */
         return;
     }
     float *v = g->verts + g->vert_count;
@@ -576,7 +693,25 @@ static void gp_quad(struct fdk_surface *s, float x, float y, float w,
     (void)g;
     /* uv values: for pixel-space modes uv = rect-local pixel coords of
      * each corner; for texture modes pass 0..1 directly. */
-    float uvs[4][2] = { { u0, v0 }, { u1, v0 }, { u1, v1 }, { u0, v1 } };
+    /* Pixel-space modes (0-3) evaluate the SDF in RECT-LOCAL pixels:
+     * their uv corners are always (0,0)-(w,h) regardless of the
+     * caller's u0..v1 (those are texture coords, modes 4-5 only).
+     * Getting this wrong pins every fragment to the rect edge —
+     * alpha 0.5 everywhere (the bug the smoke's half-blend caught). */
+    float uu0, vv0, uu1, vv1;
+    if (mode < 4) {
+        uu0 = 0.0f;
+        vv0 = 0.0f;
+        uu1 = w;
+        vv1 = h;
+    } else {
+        uu0 = u0;
+        vv0 = v0;
+        uu1 = u1;
+        vv1 = v1;
+    }
+    float uvs[4][2] = { { uu0, vv0 }, { uu1, vv0 }, { uu1, vv1 },
+                        { uu0, vv1 } };
     float glpos[4][2] = { { x, y }, { x + w, y }, { x + w, y + h },
                           { x, y + h } };
     int idx[6] = { 0, 1, 2, 0, 2, 3 };
@@ -688,7 +823,7 @@ static int gp_atlas_put(struct fdk_surface *s, int w, int h,
                         const unsigned char *cov, fdk_i32 stride,
                         float *u0, float *v0, float *u1, float *v1) {
     struct fdk_gpu_state *g = gp_state(s);
-    if (w > GP_ATLAS || h > GP_ATLAS) {
+    if (w > GP_ATLAS || h > GP_ATLAS || !gp_ensure_gl(s)) {
         return 0;
     }
     if (g->atlas_x + w > GP_ATLAS) {
@@ -743,7 +878,8 @@ void fdk__gpu_blend_mask(struct fdk_surface *s, fdk_rect dst,
                          const unsigned char *coverage, fdk_i32 stride,
                          fdk_color color, fdk_f32 global_alpha) {
     struct fdk_gpu_state *g = gp_state(s);
-    if (g->dead || dst.width <= 0 || dst.height <= 0 || coverage == NULL) {
+    if (g->dead || dst.width <= 0 || dst.height <= 0 || coverage == NULL ||
+        !gp_ensure_gl(s)) {
         return;
     }
     unsigned long long hash = gp_fnv(coverage,
@@ -772,14 +908,51 @@ void fdk__gpu_blend_mask(struct fdk_surface *s, fdk_rect dst,
             e->h = (unsigned short)dst.height;
         }
     }
-    /* LUMINANCE atlas: v=0 is content row 0 (top). */
+    /* LUMINANCE atlas: v=0 is content row 0 (top). The sampler takes
+     * NORMALIZED coordinates — the atlas rect is in texels. */
+    float an = (float)GP_ATLAS;
     gp_quad(s, (float)dst.x, (float)dst.y, (float)dst.width,
-            (float)dst.height, 5, 0, 0, 0, color, color, u0, v0, u1, v1,
-            global_alpha);
+            (float)dst.height, 5, 0, 0, 0, color, color, u0 / an, v0 / an,
+            u1 / an, v1 / an, global_alpha);
 }
 
 /* ------------------------------------------------------------------ */
 /* Texture registry                                                    */
+
+/* Create the GL object for a booked texture and upload pending
+ * pixels. Requires a CURRENT context. */
+static unsigned gp_tex_realize(struct fdk_gpu_state *g,
+                               struct gp_tex_entry *slot) {
+    if (slot->gl_ok) {
+        return slot->name;
+    }
+    g_gp.GenTextures(1, &slot->name);
+    slot->gl_ok = 1;
+    g_gp.ActiveTexture(GL_TEXTURE0);
+    g_gp.BindTexture(GL_TEXTURE_2D, slot->name);
+    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    g_gp.PixelStorei(0x0CF5 /* UNPACK_ALIGNMENT */, 1);
+    /* format: 0=luminance, 1=rgba (fdk_texture), 2=bgra (offscreen
+     * surface pixels are BGRX in memory with X unused — uploading them
+     * as RGBA made every texel alpha 0, i.e. invisible). */
+    gl_uint ifmt = slot->rgba == 0 ? GL_LUMINANCE
+                                   : GL_RGBA; /* placeholder, replaced below */
+    (void)ifmt;
+    g_gp.TexImage2D(GL_TEXTURE_2D, 0,
+                    (gl_int)(slot->rgba == 0 ? GL_LUMINANCE
+                             : slot->rgba == 2 ? 0x80E1 /* GL_BGRA */
+                                               : GL_RGBA),
+                    slot->w, slot->h, 0,
+                    slot->rgba == 0 ? GL_LUMINANCE
+                    : slot->rgba == 2 ? 0x80E1
+                                      : GL_RGBA,
+                    GL_UNSIGNED_BYTE, NULL);
+    slot->needs_upload = 1;
+    return slot->name;
+}
 
 unsigned fdk__gpu_texture_name(struct fdk_surface *s, void *key, int width,
                                int height, int format_rgba,
@@ -805,48 +978,50 @@ unsigned fdk__gpu_texture_name(struct fdk_surface *s, void *key, int width,
     }
     if (!slot->valid || slot->w != width || slot->h != height ||
         slot->rgba != format_rgba) {
-        if (!slot->valid) {
-            g_gp.GenTextures(1, &slot->name);
-        }
         slot->valid = 1;
         slot->key = key;
         slot->w = width;
         slot->h = height;
         slot->rgba = format_rgba;
-        g_gp.ActiveTexture(GL_TEXTURE0);
-        g_gp.BindTexture(GL_TEXTURE_2D, slot->name);
-        g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        g_gp.PixelStorei(0x0CF5 /* UNPACK_ALIGNMENT */, 1);
-        gl_uint ifmt = format_rgba ? GL_RGBA : GL_LUMINANCE;
-        g_gp.TexImage2D(GL_TEXTURE_2D, 0, (gl_int)ifmt, width, height, 0,
-                        ifmt, GL_UNSIGNED_BYTE, NULL);
+        slot->gl_ok = 0; /* re-realize at the next flush/draw */
         if (created != NULL) {
             *created = 1;
         }
     }
+    if (getenv("FDK_GP_TRACE") != NULL) {
+        fprintf(stderr,
+                "fdk-gpaint: texture_name key=%p %dx%d px=%d glready=%d "
+                "valid=%d\n",
+                key, width, height, pixels != NULL, g->gl_ready,
+                slot->valid);
+    }
     if (pixels != NULL) {
-        g_gp.ActiveTexture(GL_TEXTURE0);
-        g_gp.BindTexture(GL_TEXTURE_2D, slot->name);
-        g_gp.PixelStorei(0x0CF5, 1);
-        if (stride == width * (format_rgba ? 4 : 1)) {
-            g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
-                               format_rgba ? GL_RGBA : GL_LUMINANCE,
-                               GL_UNSIGNED_BYTE, pixels);
-        } else {
-            int bpp = format_rgba ? 4 : 1;
-            for (int row = 0; row < height; row++) {
-                g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, row, width, 1,
-                                   format_rgba ? GL_RGBA : GL_LUMINANCE,
-                                   GL_UNSIGNED_BYTE,
-                                   pixels + (size_t)row * stride);
+        if (g->gl_ready) {
+            gp_tex_realize(g, slot);
+            g_gp.PixelStorei(0x0CF5, 1);
+            gl_uint fmt = format_rgba == 0 ? GL_LUMINANCE
+                          : format_rgba == 2 ? 0x80E1 /* GL_BGRA */
+                                             : GL_RGBA;
+            if (stride == width * (format_rgba ? 4 : 1)) {
+                g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
+                                   fmt, GL_UNSIGNED_BYTE, pixels);
+            } else {
+                for (int row = 0; row < height; row++) {
+                    g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, row, width, 1,
+                                       fmt, GL_UNSIGNED_BYTE,
+                                       pixels + (size_t)row * stride);
+                }
             }
-            (void)bpp;
+            slot->needs_upload = 0;
+        } else {
+            /* No current context: book the pixels; the flush's drain
+             * realizes + uploads before replaying the draw. */
+            slot->pend_px = pixels;
+            slot->pend_stride = stride;
+            slot->needs_upload = 1;
         }
     }
-    return slot->name;
+    return 1; /* booked (the draw path replays through the queue) */
 }
 
 void fdk__gpu_texture_drop(struct fdk_surface *s, void *key) {
@@ -863,35 +1038,164 @@ void fdk__gpu_texture_drop(struct fdk_surface *s, void *key) {
 }
 
 /* Texture quads cannot ride the batch (the batch flush binds the
- * glyph atlas): flush first, bind the texture, draw one quad. */
-static void gp_tex_quad(struct fdk_surface *s, unsigned name, float x,
+ * glyph atlas): each draw is booked in the pending queue and replayed
+ * at the flush's drain — with the texture realized + uploaded first.
+ * This works BOTH before GL bring-up (no context yet) and after. */
+static void gp_tex_book_opaque(struct fdk_surface *s, void *key,
+                               float x, float y, float w, float h,
+                               float u0, float v0, float u1, float v1,
+                               float global_alpha, int opaque);
+
+static void gp_tex_book(struct fdk_surface *s, void *key, float x,
                         float y, float w, float h, float u0, float v0,
                         float u1, float v1, float global_alpha) {
-    struct fdk_gpu_state *g = gp_state(s);
-    if (g == NULL || g->dead || name == 0) {
-        return;
-    }
-    fdk__gpu_flush(s);
-    if (g->dead) {
-        return;
-    }
-    gp_quad(s, x, y, w, h, 4, 0, 0, 0, (fdk_color){ 1, 1, 1, 1 },
-            (fdk_color){ 0, 0, 0, 0 }, u0, v0, u1, v1, global_alpha);
-    g_gp.ActiveTexture(GL_TEXTURE0);
-    g_gp.BindTexture(GL_TEXTURE_2D, name);
-    g_gp.DrawArrays(GL_TRIANGLES, 0, g->vert_count / GP_QUAD_FLOATS);
-    unsigned err = g_gp.GetError();
-    if (err != GL_NO_ERROR) {
-        fprintf(stderr, "fdk-gpaint: GL error 0x%x at texture draw\n", err);
-        g->dead = 1;
-    }
-    g->vert_count = 0;
+    gp_tex_book_opaque(s, key, x, y, w, h, u0, v0, u1, v1, global_alpha,
+                       0);
 }
 
-void fdk__gpu_draw_texture(struct fdk_surface *s, unsigned name,
+static void gp_tex_book_opaque(struct fdk_surface *s, void *key, float x,
+                               float y, float w, float h, float u0,
+                               float v0, float u1, float v1,
+                               float global_alpha, int opaque) {
+    struct fdk_gpu_state *g = gp_state(s);
+    if (g == NULL || g->dead || key == NULL) {
+        return;
+    }
+    if (g->pend_count >= GP_MAX_PEND) {
+        fdk__gpu_flush(s); /* drain makes room; drop on true overflow */
+    }
+    if (g->pend_count >= GP_MAX_PEND) {
+        return;
+    }
+    /* Booking must NOT touch the registry: the caller already
+     * registered the texture with its SOURCE dimensions (re-registering
+     * with the destination size would invalidate the booked pixels). */
+    int found = 0;
+    for (int j = 0; j < GP_TEX_SLOTS; j++) {
+        if (g->tex[j].valid && g->tex[j].key == key) {
+            found = 1;
+            break;
+        }
+    }
+    if (!found) {
+        return;
+    }
+    (void)w;
+    (void)h;
+    struct gp_pend *p = &g->pend[g->pend_count++];
+    p->key = key;
+    p->opaque = opaque;
+    p->cx[0] = x;        p->cy[0] = y;
+    p->cx[1] = x + w;    p->cy[1] = y;
+    p->cx[2] = x + w;    p->cy[2] = y + h;
+    p->cx[3] = x;        p->cy[3] = y + h;
+    p->cu[0] = u0;       p->cv[0] = v0;
+    p->cu[1] = u1;       p->cv[1] = v0;
+    p->cu[2] = u1;       p->cv[2] = v1;
+    p->cu[3] = u0;       p->cv[3] = v1;
+    p->alpha = global_alpha;
+}
+
+/* Drain the pending texture draws (flush calls this with GL up). */
+static void gp_pend_drain(struct fdk_gpu_state *g) {
+    if (g->pend_count == 0) {
+        return;
+    }
+    for (int i = 0; i < g->pend_count; i++) {
+        struct gp_pend *p = &g->pend[i];
+        struct gp_tex_entry *slot = NULL;
+        for (int j = 0; j < GP_TEX_SLOTS; j++) {
+            if (g->tex[j].valid && g->tex[j].key == p->key) {
+                slot = &g->tex[j];
+                break;
+            }
+        }
+        if (slot == NULL) {
+            continue;
+        }
+        unsigned name = gp_tex_realize(g, slot);
+        if (slot->needs_upload && slot->pend_px != NULL) {
+            g_gp.PixelStorei(0x0CF5, 1);
+            gl_uint dfmt = slot->rgba == 0 ? GL_LUMINANCE
+                           : slot->rgba == 2 ? 0x80E1 /* GL_BGRA */
+                                             : GL_RGBA;
+            for (int row = 0; row < slot->h; row++) {
+                g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, row, slot->w, 1,
+                                   dfmt, GL_UNSIGNED_BYTE,
+                                   slot->pend_px +
+                                       (size_t)row * slot->pend_stride);
+            }
+            slot->needs_upload = 0;
+            slot->pend_px = NULL;
+        }
+        /* emit the quad directly and draw with THIS texture bound */
+        int idx[6] = { 0, 1, 2, 0, 2, 3 };
+        float a0[4] = { p->opaque ? 6.0f : 4.0f, 0.0f, 0.0f, 0.0f };
+        float a1[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        float a2[4] = { p->alpha, 0.0f,
+                        p->cx[1] - p->cx[0], p->cy[2] - p->cy[1] };
+        float *v = g->verts;
+        for (int k = 0; k < 6; k++) {
+            int c = idx[k];
+            *v++ = p->cx[c];
+            *v++ = p->cy[c];
+            *v++ = p->cu[c];
+            *v++ = p->cv[c];
+            *v++ = 1.0f;
+            *v++ = 1.0f;
+            *v++ = 1.0f;
+            *v++ = 1.0f;
+            for (int j = 0; j < 4; j++) *v++ = a0[j];
+            for (int j = 0; j < 4; j++) *v++ = a1[j];
+            for (int j = 0; j < 4; j++) *v++ = a2[j];
+            for (int j = 0; j < 4; j++) *v++ = g->clip[j];
+        }
+        g_gp.BindBuffer(GL_ARRAY_BUFFER, g->vbo);
+        g_gp.BufferData(GL_ARRAY_BUFFER,
+                        (gl_sizeiptr)GP_QUAD_FLOATS * GP_QUAD_VERTS *
+                            (gl_sizeiptr)sizeof(float),
+                        g->verts, GL_STREAM_DRAW);
+        for (int a = 0; a < 7; a++) {
+            g_gp.VertexAttribPointer(
+                (gl_uint)a, GP_ATTRS[a].size, GL_FLOAT, 0,
+                GP_QUAD_FLOATS * (int)sizeof(float),
+                (const void *)(intptr_t)(GP_ATTRS[a].offset *
+                                         (int)sizeof(float)));
+            g_gp.EnableVertexAttribArray((gl_uint)a);
+        }
+        g_gp.ActiveTexture(GL_TEXTURE0);
+        g_gp.BindTexture(GL_TEXTURE_2D, name);
+        g_gp.DrawArrays(GL_TRIANGLES, 0, GP_QUAD_VERTS);
+        if (getenv("FDK_GP_TRACE") != NULL) {
+            unsigned char probe[4];
+            g_gp.Finish();
+            g_gp.ReadPixels((int)(p->cx[0] + p->cx[1]) / 2,
+                            (int)p->cy[0], 1, 1, GL_RGBA, GL_UNSIGNED_BYTE,
+                            probe);
+            fprintf(stderr,
+                    "fdk-gpaint: drain draw %d op=%d (%.0f,%.0f)"
+                    "(%.0f,%.0f)(%.0f,%.0f)(%.0f,%.0f) slot %dx%d\n",
+                    i, p->opaque, p->cx[0], p->cy[0], p->cx[1], p->cy[1],
+                    p->cx[2], p->cy[2], p->cx[3], p->cy[3], slot->w,
+                    slot->h);
+        }
+    }
+    g->pend_count = 0;
+    if (getenv("FDK_GP_TRACE") != NULL) {
+        fprintf(stderr, "fdk-gpaint: drained texture draws\n");
+    }
+    unsigned err = g_gp.GetError();
+    if (err != GL_NO_ERROR) {
+        fprintf(stderr, "fdk-gpaint: GL error 0x%x at texture drain\n",
+                err);
+        g->dead = 1;
+    }
+}
+
+void fdk__gpu_draw_texture(struct fdk_surface *s, void *key,
                            fdk_rect dst, float u0, float v0, float u1,
                            float v1, float global_alpha) {
-    gp_tex_quad(s, name, (float)dst.x, (float)dst.y, (float)dst.width,
+    gp_tex_book(s, key, (float)dst.x, (float)dst.y, (float)dst.width,
                 (float)dst.height, u0, v0, u1, v1, global_alpha);
 }
 
@@ -901,11 +1205,12 @@ void fdk__gpu_blend_rgba(struct fdk_surface *s, fdk_rect dst,
     if (gp_state(s) == NULL || dst.width <= 0 || dst.height <= 0) {
         return;
     }
-    unsigned name = fdk__gpu_texture_name(s, (void *)(uintptr_t)rgba,
-                                          dst.width, dst.height, 1, rgba,
-                                          stride, NULL);
-    gp_tex_quad(s, name, (float)dst.x, (float)dst.y, (float)dst.width,
-                (float)dst.height, 0.0f, 0.0f, 1.0f, 1.0f, global_alpha);
+    /* book the pixels too: pre-GL draws upload at drain time */
+    (void)fdk__gpu_texture_name(s, (void *)(uintptr_t)rgba, dst.width,
+                                dst.height, 1, rgba, stride, NULL);
+    gp_tex_book(s, (void *)(uintptr_t)rgba, (float)dst.x, (float)dst.y,
+                (float)dst.width, (float)dst.height, 0.0f, 0.0f, 1.0f,
+                1.0f, global_alpha);
 }
 
 void fdk__gpu_blit(struct fdk_surface *s, fdk_rect dst,
@@ -919,15 +1224,105 @@ void fdk__gpu_blit(struct fdk_surface *s, fdk_rect dst,
         return; /* window-source blit in GPU mode: not supported yet */
     }
     /* own_pixels stride is in fdk_u32 units; the engine wants bytes. */
-    unsigned name = fdk__gpu_texture_name(
-        s, (void *)src, src->fb.width, src->fb.height, 1, px,
-        src->fb.stride * 4, NULL);
+    (void)fdk__gpu_texture_name(s, (void *)src, src->fb.width,
+                                src->fb.height, 2, px, src->fb.stride * 4,
+                                NULL);
     float su0 = (float)src_rect.x / (float)src->fb.width;
     float sv0 = (float)src_rect.y / (float)src->fb.height;
     float su1 = (float)(src_rect.x + src_rect.width) / (float)src->fb.width;
     float sv1 = (float)(src_rect.y + src_rect.height) / (float)src->fb.height;
-    gp_tex_quad(s, name, (float)dst.x, (float)dst.y, (float)dst.width,
-                (float)dst.height, su0, sv0, su1, sv1, 1.0f);
+    gp_tex_book_opaque(s, (void *)src, (float)dst.x, (float)dst.y,
+                       (float)dst.width, (float)dst.height, su0, sv0,
+                       su1, sv1, 1.0f, 1);
+}
+
+/* The affine twin of fdk_surface_blit_transformed: the matrix maps
+ * SOURCE pixels to DESTINATION pixels (x' = m00*x + m01*y + tx, same
+ * row-major layout as the public fdk_matrix). The four corners bake
+ * through it, the UV corners follow the source rect, and the vertex
+ * shader's single Y flip keeps the convention documented in gpaint.h.
+ * Works for ANY invertible affine — rotation/shear included — with no
+ * bounding-box degradation. */
+void fdk__gpu_blit_transformed(struct fdk_surface *s, fdk_matrix m,
+                               const struct fdk_surface *src) {
+    struct fdk_gpu_state *g = gp_state(s);
+    if (g == NULL || g->dead || src == NULL) {
+        return;
+    }
+    const unsigned char *px = (const unsigned char *)src->own_pixels;
+    if (px == NULL) {
+        return; /* window-source blit in GPU mode: not supported yet */
+    }
+    (void)fdk__gpu_texture_name(s, (void *)src, src->fb.width,
+                                src->fb.height, 2, px, src->fb.stride * 4,
+                                NULL);
+    float w = (float)src->fb.width, h = (float)src->fb.height;
+    float sx[4] = { 0, w, w, 0 };
+    float sy[4] = { 0, 0, h, h };
+    float dx[4], dy[4];
+    for (int i = 0; i < 4; i++) {
+        dx[i] = m.m00 * sx[i] + m.m01 * sy[i] + m.tx;
+        dy[i] = m.m10 * sx[i] + m.m11 * sy[i] + m.ty;
+    }
+    /* One quad per corner pair: the batch's gp_quad emits an
+     * axis-aligned rect, so transformed blits book their baked
+     * corners directly (drawn at the flush's drain). */
+    if (g->pend_count >= GP_MAX_PEND) {
+        fdk__gpu_flush(s);
+    }
+    if (g->dead || g->pend_count >= GP_MAX_PEND) {
+        return;
+    }
+    struct gp_pend *p = &g->pend[g->pend_count++];
+    p->key = (void *)src;
+    p->opaque = 1;
+    float su = w > 0 ? 1.0f / w : 0.0f;
+    float sv = h > 0 ? 1.0f / h : 0.0f;
+    for (int i = 0; i < 4; i++) {
+        p->cx[i] = dx[i];
+        p->cy[i] = dy[i];
+        p->cu[i] = sx[i] * su;
+        p->cv[i] = sy[i] * sv;
+    }
+    p->alpha = 1.0f;
+}
+
+/* Test seam: read the CURRENT framebuffer (the caller made the
+ * window's lane context current and drew the frame). Bottom-up GL
+ * rows come back as top-down RGBA8888. Returns 0 on success. */
+int fdk__gpu_engine_readback(struct fdk_surface *s, fdk_u32 *out,
+                             int width, int height) {
+    struct fdk_gpu_state *g = gp_state(s);
+    if (g == NULL || g->dead || out == NULL || width <= 0 ||
+        height <= 0 || !gp_ensure_gl(s) || g_gp.ReadPixels == NULL ||
+        g_gp.Finish == NULL) {
+        fprintf(stderr,
+                "fdk-gpaint: readback precheck (g=%p dead=%d glready=%d "
+                "rp=%p fin=%p lib=%s)\n",
+                (void *)g, g ? g->dead : -1,
+                g ? g->gl_ready : -1, (void *)g_gp.ReadPixels,
+                (void *)g_gp.Finish,
+                g_gp.lib != NULL ? "resolved" : "none");
+        return -1;
+    }
+    g_gp.Finish();
+    unsigned char *rowbuf = malloc((size_t)width * 4u);
+    if (rowbuf == NULL) {
+        return -1;
+    }
+    for (int y = 0; y < height; y++) {
+        g_gp.ReadPixels(0, height - 1 - y, width, 1, GL_RGBA,
+                        GL_UNSIGNED_BYTE, rowbuf);
+        fdk_u32 *dst = out + (size_t)y * width;
+        for (int x = 0; x < width; x++) {
+            dst[x] = (fdk_u32)rowbuf[x * 4] |
+                     ((fdk_u32)rowbuf[x * 4 + 1] << 8) |
+                     ((fdk_u32)rowbuf[x * 4 + 2] << 16) |
+                     ((fdk_u32)rowbuf[x * 4 + 3] << 24);
+        }
+    }
+    free(rowbuf);
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -959,6 +1354,16 @@ void fdk__gpu_flush(struct fdk_surface *s) {
     if (g == NULL || g->dead || g->vert_count == 0) {
         return;
     }
+    if (!gp_ensure_gl(s)) {
+        /* Soft failure (no current context yet — this flush ran from
+         * a clip sync or a texture path before the first present):
+         * KEEP the batch; the next flush with a current context draws
+         * it. A DEAD engine drops everything. */
+        if (g->dead) {
+            g->vert_count = 0;
+        }
+        return;
+    }
     g_gp.Viewport(0, 0, g->width, g->height);
     g_gp.Disable(GL_SCISSOR_TEST); /* clips ride the per-quad data */
     g_gp.Enable(GL_BLEND);
@@ -980,6 +1385,12 @@ void fdk__gpu_flush(struct fdk_surface *s) {
         g_gp.EnableVertexAttribArray((gl_uint)i);
     }
     g_gp.DrawArrays(GL_TRIANGLES, 0, g->vert_count / GP_QUAD_FLOATS);
+    if (getenv("FDK_GP_TRACE") != NULL) {
+        fprintf(stderr, "fdk-gpaint: flush %d quads (%d floats)\n",
+                g->vert_count / GP_QUAD_FLOATS, g->vert_count);
+    }
+    g->vert_count = 0;
+    gp_pend_drain(g); /* texture draws booked before GL was up */
     unsigned err = g_gp.GetError();
     if (err != GL_NO_ERROR) {
         fprintf(stderr,
@@ -988,5 +1399,4 @@ void fdk__gpu_flush(struct fdk_surface *s) {
                 err);
         g->dead = 1;
     }
-    g->vert_count = 0;
 }

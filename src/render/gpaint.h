@@ -60,7 +60,7 @@ void fdk__gpu_texture_drop(struct fdk_surface *s, void *key);
 
 /* Draw one texture quad immediately (texture quads bypass the batch:
  * the batch flush binds the glyph atlas). uvs are 0..1. */
-void fdk__gpu_draw_texture(struct fdk_surface *s, unsigned name,
+void fdk__gpu_draw_texture(struct fdk_surface *s, void *key,
                            fdk_rect dst, float u0, float v0, float u1,
                            float v1, float global_alpha);
 
@@ -71,6 +71,16 @@ void fdk__gpu_draw_texture(struct fdk_surface *s, unsigned name,
 void fdk__gpu_register_window(void *pwindow, struct fdk_surface *s);
 void fdk__gpu_unregister_window(void *pwindow);
 struct fdk_surface *fdk__gpu_surface_for_window(void *pwindow);
+
+/* The affine twin of blit_transformed (any invertible affine —
+ * rotation/shear included; corners baked through fdk_matrix m). */
+void fdk__gpu_blit_transformed(struct fdk_surface *s, fdk_matrix m,
+                               const struct fdk_surface *src);
+
+/* Test seam: readback of the current framebuffer as top-down
+ * RGBA8888. The caller makes the lane context current. */
+int fdk__gpu_engine_readback(struct fdk_surface *s, fdk_u32 *out,
+                             int width, int height);
 
 /* Issue the pending batch. Runs with the window's lane context CURRENT
  * (the caller owns makeCurrent); the caller swaps/presents after. */

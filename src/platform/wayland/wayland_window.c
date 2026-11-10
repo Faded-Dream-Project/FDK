@@ -3266,3 +3266,17 @@ int fdk_wayland_window_query_pointer(fdk_platform_window *pwindow,
            *out_x < (fdk_i32)pwindow->last_size.width &&
            *out_y < (fdk_i32)pwindow->last_size.height;
 }
+
+/* Test seam shim: resolve the GPU-mode surface from the pwindow
+ * registry and read the frame back. */
+fdk_result fdk_wayland_window_gpu_readback(fdk_platform_window *pwindow,
+                                           fdk_u32 *out, int width,
+                                           int height) {
+    struct fdk_surface *s = fdk__gpu_surface_for_window(pwindow);
+    if (pwindow == NULL || pwindow->egl_win == NULL || s == NULL ||
+        s->gpu == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk_wayland_egl_window_readback(pwindow->egl_win, s, out,
+                                           width, height);
+}

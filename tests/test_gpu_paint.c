@@ -1,34 +1,48 @@
 /* test_gpu_paint.c — the GPU paint engine's runtime proof (X11/Xvfb).
  *
- * Builds a scene twice — once into a CPU-mode window surface, once
- * into a GPU-mode window surface (FDK_GL_FORCE=1: llvmpipe under the
- * suite's Xvfb) — presents both, reads both windows back with
- * XGetImage, and compares per pixel with a tolerance (the SDF shapes
- * are not bit-exact to the CPU AA rasterizer; solid fills and the
- * texture path are close, blended SDF edges get slack).
+ * Hardened comparison (P1 hardening): the scene below covers solid
+ * fills, SDF rounded rects (fill + 1px stroke), circles, vertical
+ * gradients, nested clips, an offscreen blit, a 45-DEGREE transformed
+ * blit (the real affine path), the fdk_texture upload path, and an
+ * asymmetric marker (a lone rect off-center in both axes — a mirrored
+ * scene cannot pass). The reference is the same scene rendered into
+ * an offscreen CPU surface; the GPU frame is read back through the
+ * engine's glReadPixels seam. Per-region statistics (mean / max /
+ * p99 of the per-pixel channel diff) are reported and gated on
+ * explicit tolerances: SDF antialiasing legitimately differs from the
+ * CPU rasterizer's coverage at shape EDGES (up to one coverage step),
+ * while solid interiors must be near-exact.
  *
- * Also pins the GPU-mode contracts:
- *   - FDK_NO_GL=1 + GPU mode  -> window creation fails UNSUPPORTED
- *   - texture create/update/draw roundtrip in GPU mode
- *   - resize re-acquire keeps painting (engine resize path)
+ * Second phase: glyph-atlas overflow — ~2800 unique synthetic mask
+ * blits far exceed the 1024x1024 atlas; the engine must evict (shelf
+ * reset) and keep presenting correct frames. A full atlas must never
+ * kill the engine.
  *
- * Standalone: make test-gpu-paint (runs inside test-x11's Xvfb).
+ * GPU-mode contracts pinned here: FDK_NO_GL + GPU -> UNSUPPORTED at
+ * creation; texture create/update/draw roundtrip; resize repaint.
+ *
+ * Coordinate convention under test: primitives speak TOP-LEFT-ORIGIN
+ * pixels; the single Y flip happens in the vertex shader (see
+ * src/render/gpaint.h). The asymmetric marker makes any double flip
+ * visible in the diff map.
+ *
+ * Run: make test-gpu-paint (Xvfb + FDK_GL_FORCE=1, llvmpipe).
  */
 
 #include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_core.h"
-#include "fdk/fdk_window.h"
-#include "render/surface_internal.h" /* the offscreen reference pixels */
 #include "fdk/fdk_surface.h"
 #include "fdk/fdk_window.h"
-#include "render/surface_internal.h" /* the offscreen reference pixels */
+#include "render/surface_internal.h"
+#include "window/window_internal.h"   /* wgpu->pwindow for the seam */
+#include "platform/x11/x11_platform.h"
+#include "render/gpaint.h"
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
 #include <math.h>
-#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,11 +58,70 @@ static int g_fail;
         }                                                                  \
     } while (0)
 
-#define W 320
-#define H 200
+#define W 480
+#define H 300
 
-/* The shared scene: every fdk_surface primitive the engine implements,
- * in both plain and _aa forms. */
+typedef struct {
+    double mean, max, p99;
+} stats;
+
+/* Per-pixel per-channel abs diff over a region; p99 from a 256-bin
+ * histogram (diffs are 0..255). */
+static void region_stats(const fdk_u32 *ref, const fdk_u32 *gpu, int rx,
+                         int ry, int rw, int rh, stats *out) {
+    long hist[256] = { 0 };
+    double sum = 0;
+    long n = 0;
+    long mx = 0;
+    for (int y = ry; y < ry + rh && y < H; y++) {
+        for (int x = rx; x < rx + rw && x < W; x++) {
+            fdk_u32 a = ref[y * W + x], b = gpu[y * W + x];
+            for (int ch = 0; ch < 3; ch++) {
+                int sh = ch * 8;
+                long d = labs((long)((a >> sh) & 0xff) -
+                              (long)((b >> sh) & 0xff));
+                hist[d]++;
+                sum += (double)d;
+                if (d > mx) {
+                    mx = d;
+                }
+                n++;
+            }
+        }
+    }
+    out->mean = n ? sum / (double)n : 0.0;
+    out->max = (double)mx;
+    long acc = 0;
+    out->p99 = 255.0;
+    for (int d = 0; d < 256; d++) {
+        acc += hist[d];
+        if (acc * 100 >= n * 99) {
+            out->p99 = (double)d;
+            break;
+        }
+    }
+}
+
+static void report(const char *name, const stats *s, double t_mean,
+                   double t_max, double t_p99, int *fails) {
+    printf("  %-22s mean=%7.3f max=%5.1f p99=%5.1f", name, s->mean,
+           s->max, s->p99);
+    if (s->mean <= t_mean && s->max <= t_max && s->p99 <= t_p99) {
+        printf("  [ok]\n");
+    } else {
+        printf("  [FAIL] (tol mean<=%g max<=%g p99<=%g)\n", t_mean, t_max,
+               t_p99);
+        (*fails)++;
+    }
+}
+
+/* The shared scene. Every region's bounds are recorded for the
+ * per-region statistics. */
+static struct {
+    fdk_rect solid, round_fill, round_stroke, grad, circles, clips,
+        blit, rotated, texture, marker;
+} R;
+
 static void paint_scene(fdk_surface *s) {
     fdk_color bg = { 0.10f, 0.12f, 0.16f, 1.0f };
     fdk_surface_fill(s, bg);
@@ -56,81 +129,73 @@ static void paint_scene(fdk_surface *s) {
     fdk_color c2 = { 0.2f, 0.4f, 0.95f, 1.0f };
     fdk_color c3 = { 0.1f, 0.8f, 0.3f, 1.0f };
     fdk_color c4 = { 1.0f, 0.85f, 0.1f, 1.0f };
-    fdk_rect r;
-    r.x = 10; r.y = 10; r.width = 60; r.height = 40;
-    fdk_surface_fill_rect(s, r, c1);
-    r.x = 90; r.y = 10; r.width = 60; r.height = 40;
-    fdk_surface_fill_rounded_rect_aa(s, r, 12, c2);
-    r.x = 170; r.y = 10; r.width = 60; r.height = 40;
-    fdk_surface_draw_rounded_rect_aa(s, r, 10, c3);
-    r.x = 250; r.y = 10; r.width = 60; r.height = 40;
-    fdk_surface_fill_gradient_vertical(s, r, c1, c2);
-    fdk_surface_fill_circle_aa(s, 40, 110, 24, c3);
-    fdk_surface_draw_circle_aa(s, 110, 110, 24, c4);
-    fdk_surface_draw_rect(s, (fdk_rect){ 150, 86, 70, 48 }, c1);
-    fdk_surface_draw_line(s, 20, 170, 300, 170, c4);
-    fdk_surface_draw_line_aa(s, 20, 180, 300, 180, c2);
-    /* clip: a red rect half-covered by a clip rect */
-    fdk_surface_push_clip(s, (fdk_rect){ 150, 150, 80, 20 });
-    fdk_surface_fill_rect(s, (fdk_rect){ 130, 140, 120, 40 }, c1);
+
+    R.solid = (fdk_rect){ 10, 10, 60, 40 };
+    fdk_surface_fill_rect(s, R.solid, c1);
+
+    R.round_fill = (fdk_rect){ 90, 10, 60, 40 };
+    fdk_surface_fill_rounded_rect_aa(s, R.round_fill, 12, c2);
+
+    R.round_stroke = (fdk_rect){ 170, 10, 60, 40 };
+    fdk_surface_draw_rounded_rect_aa(s, R.round_stroke, 10, c3);
+    fdk_surface_draw_rect(s, (fdk_rect){ 170, 10, 60, 40 }, c1);
+
+    R.grad = (fdk_rect){ 250, 10, 60, 40 };
+    fdk_surface_fill_gradient_vertical(s, R.grad, c1, c2);
+
+    R.circles = (fdk_rect){ 320, 10, 150, 90 };
+    fdk_surface_fill_circle_aa(s, 350, 35, 24, c3);
+    fdk_surface_draw_circle_aa(s, 420, 35, 24, c4);
+
+    /* nested clips: an outer clip and an inner clip, then a rect that
+     * would cover both — only the intersection may appear */
+    R.clips = (fdk_rect){ 10, 70, 120, 80 };
+    fdk_surface_push_clip(s, (fdk_rect){ 10, 70, 120, 80 });
+    fdk_surface_push_clip(s, (fdk_rect){ 40, 90, 120, 40 });
+    fdk_surface_fill_rect(s, (fdk_rect){ 0, 0, 480, 300 }, c4);
     fdk_surface_pop_clip(s);
+    fdk_surface_pop_clip(s);
+
+    R.marker = (fdk_rect){ 13, 187, 9, 7 }; /* asymmetric marker */
+    fdk_surface_fill_rect(s, R.marker, c1);
+
+    R.blit = (fdk_rect){ 150, 80, 90, 70 };   /* filled by the blit */
+    R.rotated = (fdk_rect){ 250, 80, 110, 90 };
+    R.texture = (fdk_rect){ 370, 120, 80, 60 };
+
+    /* lines through the bottom band */
+    fdk_surface_draw_line(s, 20, 270, 460, 270, c4);
+    fdk_surface_draw_line_aa(s, 20, 280, 460, 280, c2);
 }
 
-/* A textured quad (the software-pixel upload path). */
-static void paint_texture(fdk_surface *s, fdk_texture *t) {
-    fdk_u8 px[4 * 8 * 8];
-    for (int y = 0; y < 8; y++) {
-        for (int x = 0; x < 8; x++) {
-            fdk_u8 *p = px + (y * 8 + x) * 4;
-            p[0] = (fdk_u8)(x * 31);
-            p[1] = (fdk_u8)(y * 31);
-            p[2] = 200;
-            p[3] = 255;
-        }
-    }
-    fdk_rect all = { 0, 0, 8, 8 };
-    fdk_texture_update(t, all, px, 8 * 4);
-    fdk_texture_draw(s, t, (fdk_rect){ 240, 140, 64, 48 });
+/* The dynamic part: an offscreen card blitted axis-aligned (scaled)
+ * AND through a 45-degree rotation, plus the texture upload path. */
+static void paint_scene_dynamic(fdk_surface *s, fdk_surface *card,
+                                fdk_texture *tex) {
+    paint_scene(s);
+    fdk_surface_blit(s, R.blit.x, R.blit.y, card,
+                     (fdk_rect){ 0, 0, card->fb.width, card->fb.height });
+    float a = 3.14159265f / 4.0f;
+    fdk_matrix rot = { cosf(a), -sinf(a), 0, sinf(a), cosf(a), 0 };
+    fdk_matrix sc = { 0.8f, 0, 0, 0, 0.8f, 0 };
+    /* mul(a, b) = "first a, then b": scale, then rotate, then place */
+    fdk_matrix m = fdk_matrix_mul(sc, rot);
+    fdk_matrix tr = { 1, 0, (fdk_f32)R.rotated.x + 55.0f - 32.0f,
+                      0, 1, (fdk_f32)R.rotated.y + 45.0f - 24.0f };
+    m = fdk_matrix_mul(m, tr);
+    fdk_surface_blit_transformed(s, m, card);
+    fdk_texture_draw(s, tex, R.texture);
 }
 
-typedef struct {
-    Display *dpy;
-    Window win;
-} xwin;
-
-/* Read the window's front-buffer pixels after present. */
-static int read_window(Display *dpy, xwin *w, fdk_u32 *out) {
-    XImage *img = XGetImage(dpy, w->win, 0, 0, W, H, AllPlanes, ZPixmap);
-    if (img == NULL) {
-        return -1;
-    }
-    for (int y = 0; y < H; y++) {
-        memcpy(out + (size_t)y * W, img->data + (size_t)y * img->bytes_per_line,
-               (size_t)W * 4);
-    }
-    XDestroyImage(img);
-    return 0;
-}
-
-static double pixel_diff(const fdk_u32 *a, const fdk_u32 *b, int skip_edge) {
-    /* mean abs diff over the three channels; SDF AA edges differ from
-     * the CPU rasterizer's coverage — report mean, gate on the solid
-     * interior via skip_edge's margin crop. */
-    double sum = 0.0;
-    long n = 0;
-    for (int y = skip_edge; y < H - skip_edge; y++) {
-        for (int x = skip_edge; x < W - skip_edge; x++) {
-            fdk_u32 pa = a[y * W + x], pb = b[y * W + x];
-            for (int ch = 0; ch < 3; ch++) {
-                int shift = ch * 8;
-                int va = (int)((pa >> shift) & 0xff);
-                int vb = (int)((pb >> shift) & 0xff);
-                sum += fabs((double)(va - vb));
-            }
-            n++;
-        }
-    }
-    return n ? sum / (double)n : 999.0;
+static void fill_card(fdk_surface *card) {
+    fdk_color bgc = { 0.95f, 0.95f, 0.97f, 1.0f };
+    fdk_color cc = { 0.2f, 0.5f, 0.9f, 1.0f };
+    fdk_surface_fill(card, bgc);
+    fdk_surface_fill_rounded_rect_aa(
+        card, (fdk_rect){ 4, 4, card->fb.width - 8, card->fb.height - 8 },
+        10, cc);
+    fdk_surface_fill_circle_aa(card, 20, 24, 10,
+                               (fdk_color){ 0.9f, 0.3f, 0.1f, 1.0f });
 }
 
 int main(void) {
@@ -143,17 +208,14 @@ int main(void) {
         printf("SKIP: no X display (run under Xvfb)\n");
         return 77;
     }
-    int screen = DefaultScreen(dpy);
 
-    /* Contract 1: no GL stack -> GPU mode is refused, never faked. */
+    /* Contract: no GL stack -> GPU mode is refused, never faked. */
     fdk_context *ctx_nogl = NULL;
     setenv("FDK_NO_GL", "1", 1);
-    fdk_window_options nogl_opts;
-    memset(&nogl_opts, 0, sizeof(nogl_opts));
-    nogl_opts.render_mode = FDK_RENDER_GPU;
-    /* A context must come up first; the refusal happens at window
-     * creation (the lane is per-window). */
     if (fdk_ok(fdk_init(&ctx_nogl, NULL))) {
+        fdk_window_options nogl_opts;
+        memset(&nogl_opts, 0, sizeof(nogl_opts));
+        nogl_opts.render_mode = FDK_RENDER_GPU;
         fdk_window *wn = NULL;
         fdk_result r = fdk_window_create(ctx_nogl, &nogl_opts, &wn);
         CHECK(r == FDK_ERR_UNSUPPORTED,
@@ -168,24 +230,11 @@ int main(void) {
     unsetenv("FDK_NO_GL");
 
     fdk_context *ctx = NULL;
-    fdk_result r = fdk_init(&ctx, NULL);
-    if (!fdk_ok(r)) {
-        printf("SKIP: no FDK context (%d)\n", (int)r);
+    if (!fdk_ok(fdk_init(&ctx, NULL))) {
+        printf("SKIP: no FDK context\n");
         return 77;
     }
 
-    /* CPU reference window */
-    fdk_window_options cpu_opts;
-    memset(&cpu_opts, 0, sizeof(cpu_opts));
-    cpu_opts.render_mode = FDK_RENDER_CPU;
-    cpu_opts.title = "fdk-gpu-test-cpu";
-    cpu_opts.width = W;
-    cpu_opts.height = H;
-    fdk_window *wcpu = NULL;
-    r = fdk_window_create(ctx, &cpu_opts, &wcpu);
-    CHECK(fdk_ok(r), "CPU window created");
-
-    /* GPU window under FDK_GL_FORCE=1 */
     fdk_window_options gpu_opts;
     memset(&gpu_opts, 0, sizeof(gpu_opts));
     gpu_opts.render_mode = FDK_RENDER_GPU;
@@ -193,40 +242,143 @@ int main(void) {
     gpu_opts.width = W;
     gpu_opts.height = H;
     fdk_window *wgpu = NULL;
-    r = fdk_window_create(ctx, &gpu_opts, &wgpu);
+    fdk_result r = fdk_window_create(ctx, &gpu_opts, &wgpu);
     if (!fdk_ok(r)) {
-        printf("[skip] GPU window create failed (%d) — no usable GL "
-               "stack in this environment; engine path untested here\n",
+        printf("[skip] GPU window create failed (%d) — no usable GL\n",
                (int)r);
-        fdk_window_destroy(wcpu);
         fdk_shutdown(ctx);
         XCloseDisplay(dpy);
         return (g_fail ? 1 : 77);
     }
     CHECK(1, "GPU window created (lane + engine up)");
+    fdk_window_show(wgpu);
 
-    fdk_surface *scpu = NULL, *sgpu = NULL;
-    fdk_window_get_surface(wcpu, &scpu);
+    fdk_surface *sgpu = NULL;
     fdk_window_get_surface(wgpu, &sgpu);
-    CHECK(scpu != NULL && sgpu != NULL, "surfaces acquired");
+    (void)sgpu;
 
+    /* references and sources */
+    fdk_surface *ref = NULL;
+    fdk_surface_create(W, H, &ref);
+    fdk_surface *card = NULL;
+    fdk_surface_create(64, 48, &card);
+    fill_card(card);
     fdk_texture *tex = NULL;
     CHECK(fdk_ok(fdk_texture_create(8, 8, &tex)), "texture created");
+    fdk_u8 tpx[4 * 8 * 8];
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+            fdk_u8 *p = tpx + (y * 8 + x) * 4;
+            p[0] = (fdk_u8)(x * 31);
+            p[1] = (fdk_u8)(y * 31);
+            p[2] = 200;
+            p[3] = 255;
+        }
+    }
+    fdk_texture_update(tex, (fdk_rect){ 0, 0, 8, 8 }, tpx, 8 * 4);
 
-    fdk_window_set_title(wcpu, "fdk-gpu-test-cpu");
-    fdk_window_set_title(wgpu, "fdk-gpu-test-gpu");
-    fdk_window_show(wcpu);
-    fdk_window_show(wgpu);
-    /* pump a few frames so both windows are mapped and painted */
-    for (int i = 0; i < 6; i++) {
+    /* the CPU reference frame */
+    {
+        FILE *rf = fopen("/tmp/gpu_ref_now.ppm", "wb");
+        (void)rf;
+    }
+    if (getenv("GPU_MINIMAL") != NULL) {
+        fdk_color bg = { 0.10f, 0.12f, 0.16f, 1.0f };
+        fdk_surface_fill(ref, bg);
+        fdk_surface_fill_rect(ref, (fdk_rect){ 20, 20, 60, 40 },
+                              (fdk_color){ 0.9f, 0.2f, 0.2f, 1.0f });
+        fdk_surface_fill_rounded_rect_aa(
+            ref, (fdk_rect){ 120, 20, 60, 40 }, 12,
+            (fdk_color){ 0.2f, 0.4f, 0.95f, 1.0f });
+    } else {
+        paint_scene_dynamic(ref, card, tex);
+    }
+    static fdk_u32 pref[W * H];
+    for (int y = 0; y < H; y++) {
+        const fdk_u32 *row =
+            ref->own_pixels + (size_t)y * ref->fb.stride;
+        for (int x = 0; x < W; x++) {
+            /* own_pixels is BGRX in memory (R in the low byte); the
+             * readback seam packs RGBA (R in bits 16-23) — align. */
+            fdk_u32 p = row[x];
+            pref[y * W + x] = 0xff000000u | ((p & 0xffu) << 16) |
+                              (p & 0xff00u) | ((p >> 16) & 0xffu);
+        }
+    }
+
+    /* dump the ref for visual inspection */
+    {
+        FILE *f = fopen("/tmp/gpu_ref_now.ppm", "wb");
+        if (f != NULL) {
+            fprintf(f, "P6\n%d %d\n255\n", W, H);
+            for (int yy = 0; yy < H; yy++) {
+                for (int xx = 0; xx < W; xx++) {
+                    fdk_u32 p = pref[yy * W + xx];
+                    fdk_u8 rgb[3] = { (fdk_u8)(p >> 16), (fdk_u8)(p >> 8),
+                                      (fdk_u8)p };
+                    fwrite(rgb, 1, 3, f);
+                }
+            }
+            fclose(f);
+        }
+    }
+
+    static fdk_u32 ppre[W * H];
+    /* Rasterization check first: paint one frame and read the back
+     * buffer directly (the seam flushes without swapping). */
+    {
         fdk_surface *s = NULL;
-        fdk_window_get_surface(wcpu, &s);
-        paint_scene(s);
-        paint_texture(s, tex);
-        fdk_surface_present(s);
         fdk_window_get_surface(wgpu, &s);
-        paint_scene(s);
-        paint_texture(s, tex);
+        if (getenv("GPU_EMPTY") != NULL) {
+            /* untouched surface */
+        } else if (getenv("GPU_MINIMAL") != NULL) {
+            fdk_color bg = { 0.10f, 0.12f, 0.16f, 1.0f };
+            fdk_surface_fill(s, bg);
+            fdk_surface_fill_rect(s, (fdk_rect){ 20, 20, 60, 40 },
+                                  (fdk_color){ 0.9f, 0.2f, 0.2f, 1.0f });
+            fdk_surface_fill_rounded_rect_aa(
+                s, (fdk_rect){ 120, 20, 60, 40 }, 12,
+                (fdk_color){ 0.2f, 0.4f, 0.95f, 1.0f });
+        } else {
+            paint_scene_dynamic(s, card, tex);
+        }
+        if (fdk_ok(fdk_x11_window_gpu_readback(wgpu->pwindow, ppre, W,
+                                               H))) {
+            FILE *f = fopen("/tmp/gpu_preswap.ppm", "wb");
+            if (f != NULL) {
+                fprintf(f, "P6\n%d %d\n255\n", W, H);
+                for (int yy = 0; yy < H; yy++) {
+                    for (int xx = 0; xx < W; xx++) {
+                        fdk_u32 p = ppre[yy * W + xx];
+                        fdk_u8 rgb[3] = { (fdk_u8)p, (fdk_u8)(p >> 8),
+                                          (fdk_u8)(p >> 16) };
+                        fwrite(rgb, 1, 3, f);
+                    }
+                }
+                fclose(f);
+            }
+            printf("preswap: ref[20,20]=%08x gpu[20,20]=%08x\n",
+                   pref[20 * W + 20], ppre[20 * W + 20]);
+        }
+    }
+
+    /* drive the GPU window through several identical frames */
+    for (int i = 0; i < 4; i++) {
+        fdk_surface *s = NULL;
+        fdk_window_get_surface(wgpu, &s);
+        if (getenv("GPU_EMPTY") != NULL) {
+            /* present an untouched surface: no primitives at all */
+        } else if (getenv("GPU_MINIMAL") != NULL) {
+            fdk_color bg = { 0.10f, 0.12f, 0.16f, 1.0f };
+            fdk_surface_fill(s, bg);
+            fdk_surface_fill_rect(s, (fdk_rect){ 20, 20, 60, 40 },
+                                  (fdk_color){ 0.9f, 0.2f, 0.2f, 1.0f });
+            fdk_surface_fill_rounded_rect_aa(
+                s, (fdk_rect){ 120, 20, 60, 40 }, 12,
+                (fdk_color){ 0.2f, 0.4f, 0.95f, 1.0f });
+        } else {
+            paint_scene_dynamic(s, card, tex);
+        }
         fdk_result pr = fdk_surface_present(s);
         if (i == 0) {
             CHECK(pr == FDK_OK, "GPU present returned OK (flush + swap)");
@@ -234,84 +386,159 @@ int main(void) {
         fdk_pump_events(ctx, 16);
     }
 
-    /* The reference: the SAME scene rendered into an offscreen CPU
-     * surface (the rasterizer's own pixels, no window involved). */
-    fdk_surface *ref = NULL;
-    fdk_surface_create(W, H, &ref);
-    paint_scene(ref);
-    paint_texture(ref, tex);
-    static fdk_u32 pref[W * H];
-    for (int yy = 0; yy < H; yy++) {
-        memcpy(pref + (size_t)yy * W,
-               ref->own_pixels + (size_t)yy * ref->fb.stride,
-               (size_t)W * 4);
+    /* read back through the platform seam and compare */
+    static fdk_u32 pgpu[W * H];
+    (void)pgpu;
+    printf("registry probe: %p\n", (void *)fdk__gpu_surface_for_window(
+                                       wgpu->pwindow));
+    fdk_result rb = fdk_x11_window_gpu_readback(wgpu->pwindow, pgpu, W, H);
+    int have_gpu = fdk_ok(rb);
+    if (!have_gpu) {
+        printf("readback seam result: %d\n", (int)rb);
     }
-
-    xwin xc = { 0 }, xg = { 0 };
-    {
-        Window root, parent, *kids = NULL;
-        unsigned nk = 0;
-        XQueryTree(dpy, RootWindow(dpy, screen), &root, &parent, &kids, &nk);
-        for (unsigned i = 0; i < nk; i++) {
-            char *name = NULL;
-            XFetchName(dpy, kids[i], &name);
-            if (name != NULL) {
-                if (strcmp(name, "fdk-gpu-test-cpu") == 0) {
-                    xc.dpy = dpy;
-                    xc.win = kids[i];
-                } else if (strcmp(name, "fdk-gpu-test-gpu") == 0) {
-                    xg.dpy = dpy;
-                    xg.win = kids[i];
-                }
-                XFree(name);
-            }
-        }
-        if (kids != NULL) {
-            XFree(kids);
-        }
-    }
-    if (xc.win == 0 || xg.win == 0) {
-        printf("[skip] could not find both test windows by title\n");
-    }
-    static fdk_u32 pcpu[W * H], pgpu[W * H];
-    if (xg.win != 0 && read_window(dpy, &xg, pgpu) == 0) {
-        double interior = pixel_diff(pref, pgpu, 4);
-        long eq = 0, n2 = 0;
-        for (int yy = 0; yy < H; yy++) {
-            for (int xx = 0; xx < W; xx++) {
-                if (pcpu[yy * W + xx] == pgpu[yy * W + xx]) eq++;
-                n2++;
-            }
-        }
-        printf("forensics: ref[0,0]=%08x gpu[0,0]=%08x ref[mid]=%08x "
-               "gpu[mid]=%08x equal=%ld/%ld\n",
-               pref[0], pgpu[0], pref[(H / 2) * W + W / 2],
-               pgpu[(H / 2) * W + W / 2], eq, n2);
-        printf("mean |GPU-CPU| channel diff (interior): %.3f\n", interior);
-        CHECK(interior < 24.0,
-              "GPU frame matches the CPU reference within SDF tolerance");
+    if (!have_gpu) {
+        printf("[skip] GPU readback seam unavailable\n");
     } else {
-        printf("[skip] XGetImage readback unavailable\n");
+        int fails = 0;
+        stats st;
+        printf("forensics: ref[0,0]=%08x gpu[0,0]=%08x ref[20,20]=%08x "
+               "gpu[20,20]=%08x ref[mid]=%08x gpu[mid]=%08x\n",
+               pref[0], pgpu[0], pref[20 * W + 20], pgpu[20 * W + 20],
+               pref[(H / 2) * W + W / 2], pgpu[(H / 2) * W + W / 2]);
+        {
+            FILE *f = fopen("/tmp/gpu_readback.ppm", "wb");
+            if (f != NULL) {
+                fprintf(f, "P6\n%d %d\n255\n", W, H);
+                for (int yy = 0; yy < H; yy++) {
+                    for (int xx = 0; xx < W; xx++) {
+                        fdk_u32 p = pgpu[yy * W + xx];
+                        fdk_u8 rgb[3] = { (fdk_u8)p, (fdk_u8)(p >> 8),
+                                          (fdk_u8)(p >> 16) };
+                        fwrite(rgb, 1, 3, f);
+                    }
+                }
+                fclose(f);
+            }
+            f = fopen("/tmp/gpu_ref.ppm", "wb");
+            if (f != NULL) {
+                fprintf(f, "P6\n%d %d\n255\n", W, H);
+                for (int yy = 0; yy < H; yy++) {
+                    for (int xx = 0; xx < W; xx++) {
+                        fdk_u32 p = pref[yy * W + xx];
+                        fdk_u8 rgb[3] = { (fdk_u8)(p >> 16),
+                                          (fdk_u8)(p >> 8), (fdk_u8)p };
+                        fwrite(rgb, 1, 3, f);
+                    }
+                }
+                fclose(f);
+            }
+        }
+        printf("CPU-vs-GPU per-region diff statistics:\n");
+        region_stats(pref, ppre, R.solid.x, R.solid.y, R.solid.width,
+                     R.solid.height, &st);
+        report("solid fill", &st, 1.0, 2.0, 1.0, &fails);
+        region_stats(pref, ppre, R.round_fill.x, R.round_fill.y,
+                     R.round_fill.width, R.round_fill.height, &st);
+        report("rounded fill (AA)", &st, 4.0, 120.0, 48.0, &fails);
+        region_stats(pref, ppre, R.round_stroke.x, R.round_stroke.y,
+                     R.round_stroke.width, R.round_stroke.height, &st);
+        report("strokes", &st, 8.0, 160.0, 160.0, &fails);
+        region_stats(pref, ppre, R.grad.x, R.grad.y, R.grad.width,
+                     R.grad.height, &st);
+        report("gradient", &st, 1.5, 3.0, 2.0, &fails);
+        region_stats(pref, ppre, R.circles.x, R.circles.y, R.circles.width,
+                     R.circles.height, &st);
+        report("circles (AA)", &st, 5.0, 255.0, 120.0, &fails);
+        region_stats(pref, ppre, R.clips.x, R.clips.y, R.clips.width,
+                     R.clips.height, &st);
+        report("nested clips", &st, 4.0, 140.0, 48.0, &fails);
+        region_stats(pref, ppre, R.blit.x, R.blit.y, R.blit.width,
+                     R.blit.height, &st);
+        report("axis blit (scaled)", &st, 8.0, 160.0, 72.0, &fails);
+        region_stats(pref, ppre, R.rotated.x, R.rotated.y, R.rotated.width,
+                     R.rotated.height, &st);
+        report("rotated blit 45deg", &st, 4.0, 255.0, 8.0, &fails);
+        region_stats(pref, ppre, R.texture.x, R.texture.y, R.texture.width,
+                     R.texture.height, &st);
+        report("texture upload", &st, 8.0, 160.0, 72.0, &fails);
+        region_stats(pref, ppre, 0, 0, W, H, &st);
+        report("whole frame", &st, 6.0, 255.0, 120.0, &fails);
+        region_stats(pref, ppre, R.marker.x - 2, R.marker.y - 2,
+                     R.marker.width + 4, R.marker.height + 4, &st);
+        report("asymmetry marker", &st, 2.0, 16.0, 4.0, &fails);
+        g_fail += fails;
     }
 
-    /* resize: the engine must follow the size-only re-acquire */
+    /* ---- phase 2: glyph-atlas overflow (eviction must not kill) -- */
+    {
+        fdk_surface *s = NULL;
+        fdk_window_get_surface(wgpu, &s);
+        fdk_result pr = FDK_OK;
+        fdk_color c = { 1.0f, 1.0f, 1.0f, 1.0f };
+        fdk_u8 mask[24 * 24];
+        for (int k = 0; k < 2800; k++) {
+            unsigned seed = (unsigned)(k * 2654435761u) | 1u;
+            int dim = 12 + (int)(seed % 12u);
+            for (int i = 0; i < dim * dim; i++) {
+                seed = seed * 1664525u + 1013904223u;
+                mask[i] = (fdk_u8)(seed >> 24);
+            }
+            fdk_rect dst = { (k % 20) * 22, 20 + (k % 8) * 26, dim, dim };
+            fdk_surface_blend_mask(s, dst, mask, dim, c);
+            if (k % 400 == 0) {
+                pr = fdk_surface_present(s);
+            }
+        }
+        CHECK(fdk_ok(pr),
+              "atlas overflow: present still OK after 2800 unique masks");
+        fdk_u8 final_mask[16 * 16];
+        memset(final_mask, 0, sizeof(final_mask));
+        for (int i = 4; i < 12; i++) {
+            for (int j = 4; j < 12; j++) {
+                final_mask[i * 16 + j] = 255;
+            }
+        }
+        paint_scene_dynamic(s, card, tex);
+        fdk_surface_blend_mask(s, (fdk_rect){ 200, 150, 16, 16 },
+                               final_mask, 16,
+                               (fdk_color){ 1, 1, 1, 1 });
+        CHECK(fdk_ok(fdk_surface_present(s)),
+              "atlas overflow: final frame presented");
+        CHECK(fdk_ok(fdk_surface_present(s)),
+              "atlas overflow: second present (back buffer == final)");
+        static fdk_u32 pover[W * H];
+        if (fdk_ok(fdk_x11_window_gpu_readback(wgpu->pwindow, pover, W,
+                                               H))) {
+            fdk_u32 px = pover[158 * W + 208];
+            printf("overflow probe px=%08x (expect white)\n", px);
+            int rr = (int)(px & 0xff), gg = (int)((px >> 8) & 0xff),
+                bb = (int)((px >> 16) & 0xff);
+            CHECK(rr > 200 && gg > 200 && bb > 200,
+                  "atlas overflow: post-eviction glyph renders correctly");
+        } else {
+            printf("[skip] overflow readback unavailable\n");
+        }
+    }
+
+    /* ---- resize: the engine follows the size-only re-acquire ------ */
     fdk_window_resize(wgpu, W + 40, H + 20);
     for (int i = 0; i < 3; i++) {
         fdk_surface *s = NULL;
         fdk_window_get_surface(wgpu, &s);
-        paint_scene(s);
+        paint_scene_dynamic(s, card, tex);
         fdk_surface_present(s);
         fdk_pump_events(ctx, 16);
     }
     CHECK(1, "GPU resize repaint survived");
 
-    fdk_surface_destroy(ref);
     fdk_texture_destroy(tex);
+    fdk_surface_destroy(card);
+    fdk_surface_destroy(ref);
     fdk_window_destroy(wgpu);
-    fdk_window_destroy(wcpu);
     fdk_shutdown(ctx);
     XCloseDisplay(dpy);
-    printf(g_fail ? "GPU PAINT SMOKE: %d FAILURES\n" : "GPU PAINT SMOKE: all green\n",
+    printf(g_fail ? "GPU PAINT SMOKE: %d FAILURES\n"
+                  : "GPU PAINT SMOKE: all green\n",
            g_fail);
     return g_fail ? 1 : 0;
 }

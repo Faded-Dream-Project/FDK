@@ -1061,6 +1061,11 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
                                            fdk_platform_framebuffer *out_fb);
 fdk_result fdk_x11_window_gpu_flush(fdk_platform_window *pwindow,
                                     void *surface);
+
+/* Test seam: GPU-frame readback for the render tests. */
+fdk_result fdk_x11_window_gpu_readback(fdk_platform_window *pwindow,
+                                       fdk_u32 *out, int width,
+                                       int height);
 fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
                                   const fdk_platform_damage *damage);
 

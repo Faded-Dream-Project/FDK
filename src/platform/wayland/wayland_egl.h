@@ -156,4 +156,9 @@ void fdk__wayland_egl_test_pack_rows(fdk_u32 *dst, const fdk_u32 *src,
 fdk_result fdk_wayland_egl_window_paint_flush(
     struct fdk_wayland_egl_window *ewin, void *surface);
 
+/* Test seam: GPU-frame readback (see src/render/gpaint.h). */
+fdk_result fdk_wayland_egl_window_readback(
+    struct fdk_wayland_egl_window *ewin, void *surface, fdk_u32 *out,
+    int width, int height);
+
 #endif /* FDK_WAYLAND_EGL_H */

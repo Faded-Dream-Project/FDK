@@ -124,6 +124,11 @@ int fdk_x11_gl_window_present(struct fdk_x11_gl_window *gwin,
 fdk_result fdk_x11_gl_window_paint_flush(struct fdk_x11_gl_window *gwin,
                                          void *surface);
 
+/* Test seam: GPU-frame readback (see src/render/gpaint.h). */
+fdk_result fdk_x11_gl_window_readback(struct fdk_x11_gl_window *gwin,
+                                      void *surface, fdk_u32 *out,
+                                      int width, int height);
+
 /* TEST SEAM (not exported by the library's version script): clears
  * the process-wide self-check failure stamp — the verdict a poisoned
  * run declared. The test suite calls this after exercising the

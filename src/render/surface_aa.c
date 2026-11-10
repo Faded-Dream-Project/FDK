@@ -66,6 +66,9 @@ void fdk_surface_draw_line_aa(fdk_surface *surface,
                             (fdk_f32)x1, (fdk_f32)y1, color, 1.0f, 1);
         return;
     }
+    if (surface->gpu_failed) {
+        return;
+    }
 
     /* Axis-aligned lines collapse to exact 1px coverage — delegate to
      * the same span logic the crisp variant produces (verified by
@@ -161,6 +164,9 @@ void fdk_surface_draw_circle_aa(fdk_surface *surface,
                               (fdk_f32)radius, color, 1.0f, 1);
         return;
     }
+    if (surface->gpu_failed) {
+        return;
+    }
 
     /* Pixel-center distances to the ideal circle; coverage is the
      * fraction of a 1px-wide ring centered on radius r. */
@@ -197,6 +203,9 @@ void fdk_surface_fill_circle_aa(fdk_surface *surface,
     if (surface->gpu != NULL) {
         fdk__gpu_fill_circle(surface, (fdk_f32)cx, (fdk_f32)cy,
                               (fdk_f32)radius, color, 1);
+        return;
+    }
+    if (surface->gpu_failed) {
         return;
     }
 
@@ -236,6 +245,9 @@ void fdk_surface_fill_rounded_rect_aa(fdk_surface *surface, fdk_rect rect,
     }
     if (surface->gpu != NULL) {
         fdk__gpu_fill_rounded_rect(surface, rect, corner_radius, color, 1);
+        return;
+    }
+    if (surface->gpu_failed) {
         return;
     }
 
@@ -328,6 +340,9 @@ void fdk_surface_draw_rounded_rect_aa(fdk_surface *surface, fdk_rect rect,
     }
     if (surface->gpu != NULL) {
         fdk__gpu_draw_rounded_rect(surface, rect, corner_radius, color, 1, 1);
+        return;
+    }
+    if (surface->gpu_failed) {
         return;
     }
 

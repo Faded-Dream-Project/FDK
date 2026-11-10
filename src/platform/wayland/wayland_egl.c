@@ -2431,3 +2431,25 @@ void *fdk_wayland_gl_display(fdk_platform_connection *conn) {
     return (conn != NULL && conn->egl != NULL) ? (void *)conn->egl->egl_display
                                                : NULL;
 }
+
+/* Test seam: readback of the GPU frame. makeCurrent, then the
+ * engine's glReadPixels path (top-down RGBA8888 into `out`). */
+fdk_result fdk_wayland_egl_window_readback(
+    struct fdk_wayland_egl_window *ewin, void *surface_ptr, fdk_u32 *out,
+    int width, int height) {
+    if (ewin == NULL || surface_ptr == NULL || ewin->surface == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_wayland_egl *egl = ewin->egl;
+    fdk_surface *s = (fdk_surface *)surface_ptr;
+    if (s->gpu == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (!egl->fn.eglMakeCurrent(egl->egl_display, ewin->surface,
+                                ewin->surface, ewin->ctx)) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk__gpu_engine_readback(s, out, width, height) == 0
+               ? FDK_OK
+               : FDK_ERR_UNSUPPORTED;
+}

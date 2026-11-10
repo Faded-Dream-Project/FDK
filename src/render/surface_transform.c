@@ -290,10 +290,9 @@ fdk_result fdk_surface_blit_transformed(fdk_surface *dst, fdk_matrix m,
             fdk__gpu_blit(dst, dr, src, src_bounds);
             return FDK_OK;
         }
-        FDK_WARN("GPU mode: transformed blit with rotation/shear falls "
-                 "back to its bounding box\n");
-        fdk_rect src_bounds2 = { 0, 0, src->fb.width, src->fb.height };
-        fdk__gpu_blit(dst, src_bounds2, src, src_bounds2);
+        /* General affine: corners + UVs bake through the matrix in
+         * the engine — rotation/shear draw exactly, no degradation. */
+        fdk__gpu_blit_transformed(dst, m, src);
         return FDK_OK;
     }
 

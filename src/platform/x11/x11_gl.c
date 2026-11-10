@@ -1187,3 +1187,32 @@ fdk_result fdk_x11_gl_window_paint_flush(struct fdk_x11_gl_window *gwin,
     gl->fn.glXSwapBuffers(gl->conn->display, gwin->xwindow);
     return FDK_OK;
 }
+
+/* Test seam: readback of the GPU frame. makeCurrent, then the
+ * engine's glReadPixels path (top-down RGBA8888 into `out`). */
+fdk_result fdk_x11_gl_window_readback(struct fdk_x11_gl_window *gwin,
+                                      void *surface_ptr, fdk_u32 *out,
+                                      int width, int height) {
+    if (gwin == NULL || surface_ptr == NULL || gwin->ctx == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_x11_gl *gl = gwin->gl;
+    fdk_surface *s = (fdk_surface *)surface_ptr;
+    if (s->gpu == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (!gl->fn.glXMakeCurrent(gl->conn->display, gwin->xwindow,
+                               gwin->ctx)) {
+        fprintf(stderr, "fdk-gpaint-seam: glXMakeCurrent failed\n");
+        return FDK_ERR_UNSUPPORTED;
+    }
+    /* Draw whatever is pending straight into the back buffer, then
+     * read BEFORE any swap: this isolates rasterization from present
+     * semantics (post-swap back-buffer content is driver-defined). */
+    fdk__gpu_flush(s);
+    int rc = fdk__gpu_engine_readback(s, out, width, height);
+    if (rc != 0) {
+        fprintf(stderr, "fdk-gpaint-seam: engine readback rc=%d\n", rc);
+    }
+    return rc == 0 ? FDK_OK : FDK_ERR_UNSUPPORTED;
+}

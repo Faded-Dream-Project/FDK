@@ -628,6 +628,9 @@ fdk_result fdk_surface_push_clip(fdk_surface *surface, fdk_rect clip) {
     surface->clip_stack[surface->clip_depth] = clip;
     surface->clip_depth++;
     recompute_clip(surface);
+    if (surface->gpu != NULL) {
+        fdk__gpu_sync_clip(surface);
+    }
     return FDK_OK;
 }
 
@@ -637,6 +640,9 @@ void fdk_surface_pop_clip(fdk_surface *surface) {
     }
     surface->clip_depth--;
     recompute_clip(surface);
+    if (surface->gpu != NULL) {
+        fdk__gpu_sync_clip(surface);
+    }
 }
 
 fdk_rect fdk_surface_get_clip(fdk_surface *surface) {
@@ -938,6 +944,9 @@ void fdk_surface_fill(fdk_surface *surface, fdk_color color) {
         fdk__gpu_fill(surface, color);
         return;
     }
+    if (surface->gpu_failed) {
+        return;
+    }
 
     int x0 = surface->clip_x0;
     int y0 = surface->clip_y0;
@@ -1196,6 +1205,9 @@ void fdk_surface_fill_rect(fdk_surface *surface, fdk_rect rect,
         fdk__gpu_fill_rect(surface, rect, color);
         return;
     }
+    if (surface->gpu_failed) {
+        return;
+    }
 
     int x0, y0, x1, y1;
     if (!clip_and_damage(surface, rect, &x0, &y0, &x1, &y1)) {
@@ -1248,6 +1260,9 @@ void fdk_surface_draw_rect(fdk_surface *surface, fdk_rect rect,
     }
     if (surface->gpu != NULL) {
         fdk__gpu_draw_rect(surface, rect, color, 1);
+        return;
+    }
+    if (surface->gpu_failed) {
         return;
     }
 
@@ -1313,6 +1328,9 @@ void fdk_surface_fill_gradient_vertical(fdk_surface *surface,
         fdk__gpu_fill_gradient_vertical(surface, rect, top, bottom);
         return;
     }
+    if (surface->gpu_failed) {
+        return;
+    }
 
     int x0, y0, x1, y1;
     if (!clip_and_damage(surface, rect, &x0, &y0, &x1, &y1)) {
@@ -1358,6 +1376,9 @@ void fdk_surface_draw_line(fdk_surface *surface,
     if (surface->gpu != NULL) {
         fdk__gpu_draw_line(surface, (fdk_f32)x0, (fdk_f32)y0,
                             (fdk_f32)x1, (fdk_f32)y1, color, 1.0f, 0);
+        return;
+    }
+    if (surface->gpu_failed) {
         return;
     }
 
@@ -1450,6 +1471,9 @@ void fdk_surface_draw_circle(fdk_surface *surface,
                               (fdk_f32)radius, color, 1.0f, 0);
         return;
     }
+    if (surface->gpu_failed) {
+        return;
+    }
 
     fdk_rect damaged;
     if (!circle_span(surface, cx, cy, radius, &damaged)) {
@@ -1495,6 +1519,9 @@ void fdk_surface_fill_circle(fdk_surface *surface,
                               (fdk_f32)radius, color, 0);
         return;
     }
+    if (surface->gpu_failed) {
+        return;
+    }
 
     fdk_rect damaged;
     if (!circle_span(surface, cx, cy, radius, &damaged)) {
@@ -1525,6 +1552,9 @@ void fdk_surface_fill_rounded_rect(fdk_surface *surface, fdk_rect rect,
     }
     if (surface->gpu != NULL) {
         fdk__gpu_fill_rounded_rect(surface, rect, corner_radius, color, 0);
+        return;
+    }
+    if (surface->gpu_failed) {
         return;
     }
 
@@ -1609,6 +1639,9 @@ void fdk_surface_draw_rounded_rect(fdk_surface *surface, fdk_rect rect,
         fdk__gpu_draw_rounded_rect(surface, rect, corner_radius, color, 1, 0);
         return;
     }
+    if (surface->gpu_failed) {
+        return;
+    }
 
     fdk_i32 max_radius =
         (rect.width < rect.height ? rect.width : rect.height) / 2;
@@ -1690,6 +1723,9 @@ void fdk_surface_blend_mask(fdk_surface *surface, fdk_rect rect,
         fdk__gpu_blend_mask(surface, rect, mask, mask_stride, color, 1.0f);
         return;
     }
+    if (surface->gpu_failed) {
+        return;
+    }
 
     int x0, y0, x1, y1;
     if (!clip_rect(surface, rect, &x0, &y0, &x1, &y1)) {
@@ -1763,6 +1799,9 @@ void fdk_surface_blend_rgba(fdk_surface *surface, fdk_rect rect,
     }
     if (surface->gpu != NULL) {
         fdk__gpu_blend_rgba(surface, rect, rgba, rgba_stride, 1.0f);
+        return;
+    }
+    if (surface->gpu_failed) {
         return;
     }
 
@@ -2336,8 +2375,89 @@ fdk_result fdk_texture_draw(fdk_surface *surface, fdk_texture *texture,
         dst.height <= 0) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
-    fdk_surface_blend_rgba(surface, dst, texture->pixels,
-                           texture->width * 4);
+    if (surface->gpu != NULL || surface->gpu_failed) {
+        if (surface->gpu_failed) {
+            return FDK_ERR_UNSUPPORTED;
+        }
+        /* GPU path: book the pixels (the flush drain realizes +
+         * uploads + draws in the lane context). */
+        fdk__gpu_texture_name(surface, texture, texture->width,
+                              texture->height, 1, texture->pixels,
+                              texture->width * 4, NULL);
+        fdk__gpu_draw_texture(surface, texture, dst, 0.0f, 0.0f, 1.0f,
+                              1.0f, 1.0f);
+        return FDK_OK;
+    }
+    if (!fdk_ok(surface_acquire(surface))) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    /* CPU path: nearest-neighbor scale from the RGBA texture with
+     * straight-alpha source-over (blend_rgba is 1:1 — its stride
+     * sanity check rejects a scaled destination rect). */
+    int x0 = surface->clip_x0 > dst.x ? surface->clip_x0 : dst.x;
+    int y0 = surface->clip_y0 > dst.y ? surface->clip_y0 : dst.y;
+    int x1 = surface->clip_x1 < dst.x + dst.width ? surface->clip_x1
+                                                  : dst.x + dst.width;
+    int y1 = surface->clip_y1 < dst.y + dst.height ? surface->clip_y1
+                                                   : dst.y + dst.height;
+    if (x0 >= x1 || y0 >= y1) {
+        return FDK_OK;
+    }
+    bool argb = surface->format == FDK_SURFACE_FORMAT_ARGB8888;
+    for (int y = y0; y < y1; y++) {
+        int sy = (int)((float)(y - dst.y) * (float)texture->height /
+                       (float)dst.height);
+        if (sy >= texture->height) {
+            sy = texture->height - 1;
+        }
+        const fdk_u8 *srow =
+            texture->pixels + (size_t)sy * (size_t)texture->width * 4u;
+        fdk_u32 *drow = surface->fb.pixels +
+                        (size_t)y * (size_t)surface->fb.stride +
+                        (size_t)x0;
+        for (int x = x0; x < x1; x++) {
+            int sx = (int)((float)(x - dst.x) * (float)texture->width /
+                           (float)dst.width);
+            if (sx >= texture->width) {
+                sx = texture->width - 1;
+            }
+            const fdk_u8 *t = srow + (size_t)sx * 4u;
+            fdk_u32 sa = t[3];
+            if (sa == 0) {
+                continue;
+            }
+            if (sa == 255 && argb) {
+                drow[x - x0] = ((fdk_u32)sa << 24) |
+                               ((fdk_u32)t[0] << 16) |
+                               ((fdk_u32)t[1] << 8) | (fdk_u32)t[2];
+                continue;
+            }
+            float a = (float)sa / 255.0f;
+            fdk_u32 dp = drow[x - x0];
+            float dr = (float)((dp >> 16) & 0xFFu);
+            float dg = (float)((dp >> 8) & 0xFFu);
+            float db = (float)(dp & 0xFFu);
+            float sr = (float)t[0];
+            float sg = (float)t[1];
+            float sb = (float)t[2];
+            float orr = sr * a + dr * (1.0f - a);
+            float og = sg * a + dg * (1.0f - a);
+            float ob = sb * a + db * (1.0f - a);
+            fdk_u32 oa = 0xFF000000u;
+            if (argb) {
+                float da = (float)((dp >> 24) & 0xFFu);
+                oa = (fdk_u32)(unsigned char)(sa + da * (1.0f - a) + 0.5f)
+                     << 24;
+            }
+            drow[x - x0] = oa |
+                           ((fdk_u32)((unsigned char)(orr + 0.5f)) << 16) |
+                           ((fdk_u32)((unsigned char)(og + 0.5f)) << 8) |
+                           (fdk_u32)(unsigned char)(ob + 0.5f);
+        }
+    }
+    fdk__surface_damage_add(surface, (fdk_rect){ .x = x0, .y = y0,
+                                                 .width = x1 - x0,
+                                                 .height = y1 - y0 });
     return FDK_OK;
 }
 

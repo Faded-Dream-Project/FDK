@@ -1186,6 +1186,11 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
                                       const fdk_platform_damage *damage);
 fdk_result fdk_wayland_window_gpu_flush(fdk_platform_window *pwindow,
                                         void *surface);
+
+/* Test seam: GPU-frame readback for the render tests. */
+fdk_result fdk_wayland_window_gpu_readback(fdk_platform_window *pwindow,
+                                           fdk_u32 *out, int width,
+                                           int height);
 int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow);
 
 /* The window_ever_presented ops entry: nonzero once a render buffer

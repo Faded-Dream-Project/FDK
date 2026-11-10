@@ -6,6 +6,7 @@
 #include "core/log_internal.h"
 
 #include <X11/Xutil.h> /* XDestroyImage macro, XCreateImage */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -419,6 +420,17 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
         if (staging != NULL) {
             pwindow->render_size.width = w;
             pwindow->render_size.height = h;
+            if (pwindow->render_mode == FDK_RENDER_GPU) {
+                /* GPU paint mode: the engine owns the frame — a
+                 * size-only framebuffer (no CPU pixels; the staging
+                 * buffer stays as the lane's downgrade target, unused
+                 * while GPU mode holds). */
+                out_fb->pixels = NULL;
+                out_fb->width = w;
+                out_fb->height = h;
+                out_fb->stride = 0;
+                return FDK_OK;
+            }
             out_fb->pixels = staging;
             out_fb->width = w;
             out_fb->height = h;
@@ -888,4 +900,23 @@ int fdk_x11_window_render_path(fdk_platform_window *pwindow) {
      * never-engaged and downgraded windows — the honest, current
      * answer, read live off the backend's own state). */
     return (pwindow != NULL && pwindow->gl_win != NULL) ? 1 : 0;
+}
+
+/* Test seam shim: resolve the GPU-mode surface from the pwindow
+ * registry and read the frame back. */
+fdk_result fdk_x11_window_gpu_readback(fdk_platform_window *pwindow,
+                                       fdk_u32 *out, int width,
+                                       int height) {
+    struct fdk_surface *s = fdk__gpu_surface_for_window(pwindow);
+    if (pwindow == NULL || pwindow->gl_win == NULL || s == NULL ||
+        s->gpu == NULL) {
+        fprintf(stderr,
+                "fdk-gpaint-seam: shim guard (pw=%p gl_win=%p s=%p "
+                "gpu=%p)\n",
+                (void *)pwindow, pwindow ? (void *)pwindow->gl_win : NULL,
+                (void *)s, s ? s->gpu : NULL);
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk_x11_gl_window_readback(pwindow->gl_win, s, out, width,
+                                      height);
 }
