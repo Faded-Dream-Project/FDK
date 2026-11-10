@@ -1,4 +1,25 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## P1.2: explicit texture filter — fdk_texture_draw_ex
+
+- NEW public API (fdk_surface.h): `fdk_texture_filter`
+  (FDK_FILTER_NEAREST / FDK_FILTER_LINEAR) and
+  `fdk_texture_draw_ex(surface, tex, dst, filter)`.
+  `fdk_texture_draw` keeps its signature and is documented as the
+  NEAREST default.
+- Both backends implement the SAME sampler: the CPU gained a 4-tap
+  edge-clamped bilinear (straight-alpha, channels interpolated
+  independently, exactly like GL_LINEAR on the engine's straight-alpha
+  texels); the GPU drain now sets the sampler per draw (pend slots
+  never share texture objects with the glyph atlas, so the batch path
+  is untouched) and texture objects are realized NEAREST — the
+  engine's documented default.
+- Blits: axis blits stay NEAREST (the CPU maps nearest); the
+  TRANSFORMED blit books LINEAR (the CPU's transformed path is
+  bilinear).
+- Measured interior agreement CPU-vs-GPU: texture nearest 0.000,
+  texture linear 0.000, axis blit 0.000, rotated blit 0.000 (the
+  0-1 LSB contract holds at 0). The smoke now gates both filter
+  regions; edge tolerances unchanged and evidence-based.
 ## P1 close-out: the circle half-pixel bug, the cross-section tool
 
 - tests/crosssection.c + make test-crosssection: dumps 1px-wide

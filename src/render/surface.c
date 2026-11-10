@@ -2375,8 +2375,50 @@ fdk_result fdk_texture_update(fdk_texture *texture, fdk_rect rect,
 
 fdk_result fdk_texture_draw(fdk_surface *surface, fdk_texture *texture,
                             fdk_rect dst) {
+    return fdk_texture_draw_ex(surface, texture, dst, FDK_FILTER_NEAREST);
+}
+
+/* CPU bilinear sampler: the same 4-tap, edge-clamped, straight-alpha
+ * interpolation GL_LINEAR performs (channels interpolated
+ * independently — the GPU does the same on straight-alpha texels, so
+ * the two samplers agree to rounding). */
+static void texture_sample_linear(const fdk_texture *t, float fx,
+                                  float fy, fdk_u8 *out) {
+    if (fx < 0.0f) {
+        fx = 0.0f;
+    }
+    if (fy < 0.0f) {
+        fy = 0.0f;
+    }
+    if (fx > (float)t->width - 1.0f) {
+        fx = (float)t->width - 1.0f;
+    }
+    if (fy > (float)t->height - 1.0f) {
+        fy = (float)t->height - 1.0f;
+    }
+    int x0 = (int)fx, y0 = (int)fy;
+    int x1 = x0 + 1 < t->width ? x0 + 1 : t->width - 1;
+    int y1 = y0 + 1 < t->height ? y0 + 1 : t->height - 1;
+    float ax = fx - (float)x0, ay = fy - (float)y0;
+    const fdk_u8 *p00 = t->pixels + ((size_t)y0 * t->width + x0) * 4u;
+    const fdk_u8 *p10 = t->pixels + ((size_t)y0 * t->width + x1) * 4u;
+    const fdk_u8 *p01 = t->pixels + ((size_t)y1 * t->width + x0) * 4u;
+    const fdk_u8 *p11 = t->pixels + ((size_t)y1 * t->width + x1) * 4u;
+    for (int ch = 0; ch < 4; ch++) {
+        float top = (float)p00[ch] * (1.0f - ax) + (float)p10[ch] * ax;
+        float bot = (float)p01[ch] * (1.0f - ax) + (float)p11[ch] * ax;
+        float v = top * (1.0f - ay) + bot * ay + 0.5f;
+        out[ch] = (fdk_u8)(v > 255.0f ? 255.0f : v);
+    }
+}
+
+fdk_result fdk_texture_draw_ex(fdk_surface *surface, fdk_texture *texture,
+                               fdk_rect dst, fdk_texture_filter filter) {
     if (surface == NULL || texture == NULL || dst.width <= 0 ||
         dst.height <= 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (filter != FDK_FILTER_NEAREST && filter != FDK_FILTER_LINEAR) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     if (surface->gpu != NULL || surface->gpu_failed) {
@@ -2389,7 +2431,7 @@ fdk_result fdk_texture_draw(fdk_surface *surface, fdk_texture *texture,
                               texture->height, 1, texture->pixels,
                               texture->width * 4, NULL);
         fdk__gpu_draw_texture(surface, texture, dst, 0.0f, 0.0f, 1.0f,
-                              1.0f, 1.0f);
+                              1.0f, 1.0f, (int)filter);
         return FDK_OK;
     }
     if (!fdk_ok(surface_acquire(surface))) {
@@ -2408,24 +2450,44 @@ fdk_result fdk_texture_draw(fdk_surface *surface, fdk_texture *texture,
         return FDK_OK;
     }
     bool argb = surface->format == FDK_SURFACE_FORMAT_ARGB8888;
+    const int linear = filter == FDK_FILTER_LINEAR;
     for (int y = y0; y < y1; y++) {
-        int sy = (int)((float)(y - dst.y) * (float)texture->height /
+        int sy = 0;
+        const fdk_u8 *srow = NULL;
+        fdk_u8 lin[4];
+        if (!linear) {
+            sy = (int)((float)(y - dst.y) * (float)texture->height /
                        (float)dst.height);
-        if (sy >= texture->height) {
-            sy = texture->height - 1;
+            if (sy >= texture->height) {
+                sy = texture->height - 1;
+            }
+            srow = texture->pixels +
+                   (size_t)sy * (size_t)texture->width * 4u;
         }
-        const fdk_u8 *srow =
-            texture->pixels + (size_t)sy * (size_t)texture->width * 4u;
         fdk_u32 *drow = surface->fb.pixels +
                         (size_t)y * (size_t)surface->fb.stride +
                         (size_t)x0;
         for (int x = x0; x < x1; x++) {
-            int sx = (int)((float)(x - dst.x) * (float)texture->width /
-                           (float)dst.width);
-            if (sx >= texture->width) {
-                sx = texture->width - 1;
+            const fdk_u8 *t;
+            if (linear) {
+                texture_sample_linear(
+                    texture,
+                    ((float)x + 0.5f) * (float)texture->width /
+                            (float)dst.width -
+                        0.5f,
+                    ((float)y + 0.5f) * (float)texture->height /
+                            (float)dst.height -
+                        0.5f,
+                    lin);
+                t = lin;
+            } else {
+                int sx = (int)((float)(x - dst.x) * (float)texture->width /
+                               (float)dst.width);
+                if (sx >= texture->width) {
+                    sx = texture->width - 1;
+                }
+                t = srow + (size_t)sx * 4u;
             }
-            const fdk_u8 *t = srow + (size_t)sx * 4u;
             fdk_u32 sa = t[3];
             if (sa == 0) {
                 continue;

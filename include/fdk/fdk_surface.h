@@ -690,11 +690,30 @@ fdk_result fdk_texture_create(fdk_i32 width, fdk_i32 height,
 fdk_result fdk_texture_update(fdk_texture *texture, fdk_rect rect,
                               const void *pixels, fdk_i32 stride_bytes);
 
+/* Sampling filter for fdk_texture_draw_ex — honored IDENTICALLY by
+ * the CPU path and the GPU lane: NEAREST maps destination pixels to
+ * source texels (the classic software-scaler look), LINEAR
+ * bilinearly interpolates the 4 surrounding texels (edge-clamped).
+ * The default for fdk_texture_draw is NEAREST. */
+typedef enum {
+    FDK_FILTER_NEAREST = 0,
+    FDK_FILTER_LINEAR = 1
+} fdk_texture_filter;
+
 /* Composites the whole texture into dst (scaled to fit) with
  * straight-alpha source-over, identically in CPU/HYBRID/GPU modes.
- * Runs inside the surface's clip, like every drawing helper. */
+ * Runs inside the surface's clip, like every drawing helper.
+ * Filter: NEAREST (the documented default of fdk_texture_draw). */
 fdk_result fdk_texture_draw(fdk_surface *surface, fdk_texture *texture,
                             fdk_rect dst);
+
+/* The same composite with an explicit filter (see the enum above).
+ * Both backends implement the same sampler; a frame diffed between
+ * CPU and GPU render modes must agree to 0-1 LSB per channel in the
+ * texture's interior. */
+fdk_result fdk_texture_draw_ex(fdk_surface *surface, fdk_texture *texture,
+                               fdk_rect dst,
+                               fdk_texture_filter filter);
 
 /* Frees the texture. GL-side copies die with the windows that
  * cached them. */

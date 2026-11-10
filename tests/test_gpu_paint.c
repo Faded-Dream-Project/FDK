@@ -219,7 +219,7 @@ static void report(const char *name, const stats *s, double t_mean,
  * per-region statistics. */
 static struct {
     fdk_rect solid, round_fill, round_stroke, grad, circles, clips,
-        blit, rotated, texture, marker;
+        blit, rotated, texture, texlin, marker;
 } R;
 
 static void paint_scene(fdk_surface *s) {
@@ -558,10 +558,12 @@ int main(void) {
              * far past these gates. */
             { "axis blit", R.blit, 4.0, 32.0, 8.0, 160.0, 72.0 },
             { "rotated blit", R.rotated, 4.0, 32.0, 10.0, 255.0, 255.0 },
-                        /* per-backend filter model: the GPU samples GL_LINEAR,
-             * the CPU maps nearest — interpolation differences, not a
-             * geometry offset (the marker + fills pin geometry). */
-            { "texture upload", R.texture, 5.0, 16.0, 12.0, 16.0, 16.0 },
+                        /* NEAREST on both sides (the engine default): the
+             * interior must be exact. */
+            { "texture nearest", R.texture, 0.0, 0.0, 4.0, 32.0, 8.0 },
+            /* LINEAR on both sides: the same bilinear sampler; the
+             * interior agreement contract is 0-1 LSB per channel. */
+            { "texture linear", R.texlin, 1.0, 1.0, 2.0, 4.0, 2.0 },
         };
         for (size_t i = 0; i < sizeof(regs) / sizeof(regs[0]); i++) {
             region_stats_split(pref, ppre, regs[i].r.x, regs[i].r.y,

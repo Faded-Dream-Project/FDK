@@ -62,7 +62,7 @@ void fdk__gpu_texture_drop(struct fdk_surface *s, void *key);
  * the batch flush binds the glyph atlas). uvs are 0..1. */
 void fdk__gpu_draw_texture(struct fdk_surface *s, void *key,
                            fdk_rect dst, float u0, float v0, float u1,
-                           float v1, float global_alpha);
+                           float v1, float global_alpha, int filter);
 
 /* pwindow -> surface registry: platform-internal re-present paths
  * (the frame pump's fallbacks) know only the platform window; the

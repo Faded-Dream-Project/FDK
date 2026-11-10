@@ -371,6 +371,7 @@ struct gp_pend {
     float cx[4], cy[4]; /* destination corners, top-left pixels */
     float cu[4], cv[4]; /* texture coordinates per corner */
     float alpha;
+    int filter; /* 0 = NEAREST (default), 1 = LINEAR; set per draw */
 };
 
 struct fdk_gpu_state {
@@ -382,6 +383,7 @@ struct fdk_gpu_state {
     int dead;
 
     int width, height;
+    int pend_filter_cur; /* sampler state last set on a pend slot */
     int es;      /* GLES flavor (precision stmt + LUMINANCE atlas) */
     int gl_ready; /* GL objects built (needs a CURRENT context; built
                    * lazily at the first flush/atlas/texture call) */
@@ -933,8 +935,11 @@ static unsigned gp_tex_realize(struct fdk_gpu_state *g,
     slot->gl_ok = 1;
     g_gp.ActiveTexture(GL_TEXTURE0);
     g_gp.BindTexture(GL_TEXTURE_2D, slot->name);
-    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    /* NEAREST: the engine's documented default sampler (the CPU maps
+     * nearest); fdk_texture_draw_ex(LINEAR) quads flip it per draw in
+     * the drain. */
+    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     g_gp.PixelStorei(0x0CF5 /* UNPACK_ALIGNMENT */, 1);
@@ -1056,6 +1061,18 @@ static void gp_tex_book(struct fdk_surface *s, void *key, float x,
                        0);
 }
 
+static void gp_tex_book_f(struct fdk_surface *s, void *key, float x,
+                          float y, float w, float h, float u0, float v0,
+                          float u1, float v1, float global_alpha,
+                          int filter) {
+    gp_tex_book_opaque(s, key, x, y, w, h, u0, v0, u1, v1, global_alpha,
+                       0);
+    struct fdk_gpu_state *gs = gp_state(s);
+    if (gs != NULL && gs->pend_count > 0) {
+        gs->pend[gs->pend_count - 1].filter = filter;
+    }
+}
+
 static void gp_tex_book_opaque(struct fdk_surface *s, void *key, float x,
                                float y, float w, float h, float u0,
                                float v0, float u1, float v1,
@@ -1086,6 +1103,7 @@ static void gp_tex_book_opaque(struct fdk_surface *s, void *key, float x,
     (void)w;
     (void)h;
     struct gp_pend *p = &g->pend[g->pend_count++];
+    p->filter = 0;
     p->key = key;
     p->opaque = opaque;
     p->cx[0] = x;        p->cy[0] = y;
@@ -1168,6 +1186,18 @@ static void gp_pend_drain(struct fdk_gpu_state *g) {
         }
         g_gp.ActiveTexture(GL_TEXTURE0);
         g_gp.BindTexture(GL_TEXTURE_2D, name);
+        /* Per-draw sampler: NEAREST is the engine default (the CPU's
+         * blits and fdk_texture_draw map nearest); LINEAR is set on
+         * demand for fdk_texture_draw_ex(LINEAR) quads. Pend slots
+         * never share a texture object with the glyph atlas, so this
+         * cannot disturb the batch path. */
+        if (p->filter != g->pend_filter_cur) {
+            g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                               p->filter ? GL_LINEAR : GL_NEAREST);
+            g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                               p->filter ? GL_LINEAR : GL_NEAREST);
+            g->pend_filter_cur = p->filter;
+        }
         g_gp.DrawArrays(GL_TRIANGLES, 0, GP_QUAD_VERTS);
         if (getenv("FDK_GP_TRACE") != NULL) {
             unsigned char probe[4];
@@ -1197,9 +1227,10 @@ static void gp_pend_drain(struct fdk_gpu_state *g) {
 
 void fdk__gpu_draw_texture(struct fdk_surface *s, void *key,
                            fdk_rect dst, float u0, float v0, float u1,
-                           float v1, float global_alpha) {
-    gp_tex_book(s, key, (float)dst.x, (float)dst.y, (float)dst.width,
-                (float)dst.height, u0, v0, u1, v1, global_alpha);
+                           float v1, float global_alpha, int filter) {
+    gp_tex_book_f(s, key, (float)dst.x, (float)dst.y, (float)dst.width,
+                  (float)dst.height, u0, v0, u1, v1, global_alpha,
+                  filter);
 }
 
 void fdk__gpu_blend_rgba(struct fdk_surface *s, fdk_rect dst,
@@ -1277,6 +1308,10 @@ void fdk__gpu_blit_transformed(struct fdk_surface *s, fdk_matrix m,
         return;
     }
     struct gp_pend *p = &g->pend[g->pend_count++];
+    /* The CPU's transformed blit bilinearly interpolates; the GPU
+     * must sample LINEAR to match it (the axis blit maps nearest and
+     * stays NEAREST). */
+    p->filter = 1;
     p->key = (void *)src;
     p->opaque = 1;
     float su = w > 0 ? 1.0f / w : 0.0f;
