@@ -925,6 +925,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
  * add-on's role handshake owns the first commit) in a registered
  * pwindow with the render-slot machinery. See
  * platform_internal.h's ext_surface_adopt contract. */
+void *fdk_wayland_gl_display(fdk_platform_connection *conn);
 /* ---- the first-class layer-shell role (wayland_layer.c, WI4) ---- */
 int fdk_wayland_layer_shell_available(fdk_platform_connection *conn);
 fdk_result fdk_wayland_layer_surface_create(

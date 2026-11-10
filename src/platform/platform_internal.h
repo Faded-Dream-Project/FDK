@@ -859,6 +859,11 @@ typedef struct fdk_platform_ops {
      * returns the public ext surface. set(): one selector op for the
      * post-create role adjustments. All NULL on X11 — the capability
      * reports false and the public API answers UNSUPPORTED. */
+    /* OPTIONAL (1.0.0, WI3): the GPU lane's native display — the
+     * EGLDisplay (Wayland) / X Display* for GLX (X11) — when the lane
+     * actually loaded for this connection; NULL otherwise. The
+     * add-on-facing cap is FDK_EXT_CAP_GL. */
+    void *(*ext_gl_display)(fdk_platform_connection *conn);
     int (*ext_layer_shell_available)(fdk_platform_connection *conn);
     fdk_result (*ext_layer_surface_create)(
         fdk_context *ctx, fdk_platform_connection *conn,

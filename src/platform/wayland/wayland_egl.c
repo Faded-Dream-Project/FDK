@@ -2380,3 +2380,14 @@ void fdk__wayland_egl_test_pack_rows(fdk_u32 *dst, const fdk_u32 *src,
                                      int rh) {
     lane_pack_rows(dst, src, stride, x, y, rw, rh);
 }
+
+
+/* ---- FDK_EXT_CAP_GL (1.0.0): the loaded lane's EGLDisplay -----------------
+ * (wayland_egl.h's "no backend leakage" note keeps EGL types inside
+ * this file — the accessor hands the DISPLAY out as void*, the
+ * documented cast target of fdk_extend.h's GL recipe.) */
+
+void *fdk_wayland_gl_display(fdk_platform_connection *conn) {
+    return (conn != NULL && conn->egl != NULL) ? (void *)conn->egl->egl_display
+                                               : NULL;
+}

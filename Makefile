@@ -474,9 +474,9 @@ $(STATIC_LIB): $(LIB_OBJS)
 	@rm -f $@
 	$(AR) rcs $@ $^
 
-$(SHARED_LIB): $(LIB_OBJS_PIC) $(EXPORT_MAP)
+$(SHARED_LIB): $(LIB_OBJS_PIC) $(EXPORT_MAP) $(EXPORT_MAP).unstable
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -fPIC -shared -Wl,-soname,$(FDK_SONAME) -Wl,--version-script=$(EXPORT_MAP) -o $@ $(LIB_OBJS_PIC) $(LDFLAGS)
+	$(CC) $(CFLAGS) -fPIC -shared -Wl,-soname,$(FDK_SONAME) -Wl,--version-script=$(EXPORT_MAP) -Wl,--version-script=$(EXPORT_MAP).unstable -o $@ $(LIB_OBJS_PIC) $(LDFLAGS)
 	@# the SONAME link in-tree: anything linking -lfdk needs
 	# libfdk.so.<major> at RUN time, not just at install time
 	# (any dlopen consumer resolves the same libfdk.so.1 —
@@ -491,13 +491,24 @@ $(SHARED_LIB): $(LIB_OBJS_PIC) $(EXPORT_MAP)
 # dependency beyond what the build already uses.
 $(EXPORT_MAP): $(STATIC_LIB) $(wildcard include/fdk/*.h) Makefile
 	@echo "== generating $(EXPORT_MAP) (public API only; internals stay local) =="
-	@printf '{\n  global:\n' > $@
+	@printf 'FDK_1.0 {\n  global:\n' > $@
 	@{ nm --defined-only $(STATIC_LIB) \
 	           | awk '$$2 ~ /^[TDBRW]$$/ { print $$3 }' | sort -u; \
 	   grep -hoE '\bfdk_[a-z0-9_]+[[:space:]]*\(' include/fdk/*.h \
 	           | tr -d ' (' | sort -u; } \
-	  | sort | uniq -d | sed 's/^/    /; s/$$/;/' >> $@
-	@printf '  local:\n    *;\n};\n' >> $@
+	  | sort | uniq -d | grep -v '^fdk_unstable_' \
+	  | sed 's/^/      /; s/$$/;/' >> $@
+	@printf '  };\n  local:\n    *;\n};\n' >> $@
+	@# The EXPLICITLY UNSTABLE tier (include/fdk/unstable.h) gets its
+	@# own version node: same linkage rules, a separate compatibility
+	@# promise — "may break any release". verify-exports checks it.
+	@printf 'FDK_UNSTABLE {\n  global:\n' > $(EXPORT_MAP).unstable
+	@{ nm --defined-only $(STATIC_LIB) \
+	           | awk '$$2 ~ /^[TDBRW]$$/ { print $$3 }' | sort -u; \
+	   grep -hoE '\bfdk_unstable_[a-z0-9_]+[[:space:]]*\(' \
+	           include/fdk/unstable.h | tr -d ' (' | sort -u; } \
+	  | sort | uniq -d | sed 's/^/    /; s/$$/;/' >> $(EXPORT_MAP).unstable
+	@printf '};\n' >> $(EXPORT_MAP).unstable
 
 # Belt-and-braces check for the one blind spot the map generator has
 # (a declaration whose name/paren wrapped across lines would be missed
@@ -529,7 +540,10 @@ verify-exports: $(SHARED_LIB)
 	        fi; \
 	done; \
 	[ $$missing -eq 0 ] || exit 1; \
-	echo "EXPORT VERIFICATION OK: the .so exports exactly the public API"
+	echo "EXPORT VERIFICATION OK: the .so exports exactly the public API"; \
+	unstable=$$(printf '%s\n' "$$exports" | grep '^fdk_unstable_' || true); \
+	[ -n "$$unstable" ] && echo "unstable tier: $$(printf '%s\n' "$$unstable" | wc -l) symbol(s) in the FDK_UNSTABLE node"; \
+	true
 
 # Tests may include src/ internal headers (precedent: window_internal.h,
 # widget_internal.h, ...) and some of those embed third-party headers

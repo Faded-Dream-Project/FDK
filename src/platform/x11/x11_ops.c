@@ -67,6 +67,7 @@ static const fdk_platform_ops g_x11_ops = {
     .window_set_modal = fdk_x11_window_set_modal,
     .window_set_drop_formats = fdk_x11_window_set_drop_formats,
     .drag_begin = fdk_x11_drag_begin,
+    .ext_gl_display = fdk_x11_gl_display,
     .ext_surface_adopt = fdk_x11_ext_surface_adopt,
     .native_display = fdk_x11_native_display,
     .ext_surface_native = fdk_x11_ext_surface_native,

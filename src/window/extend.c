@@ -143,6 +143,13 @@ int fdk_ext_has_capability(fdk_context *ctx, fdk_ext_capability cap) {
              * the add-on's own protocol negotiation, which FDK cannot
              * vouch for. */
             return fdk_ext_active_backend(ctx) == FDK_EXT_BACKEND_X11;
+        case FDK_EXT_CAP_GL:
+            /* True when the GPU present lane actually LOADED on this
+             * connection (hardware GL; the software-renderer refusal
+             * reports false — honest). The optional op carries the
+             * per-backend truth. */
+            return ops->ext_gl_display != NULL &&
+                   ops->ext_gl_display(ctx->conn) != NULL;
         case FDK_EXT_CAP_LAYER_SHELL:
             /* The first-class layer role: Wayland + the compositor's
              * zwlr_layer_shell_v1 (the optional ops carry the truth;

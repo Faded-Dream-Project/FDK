@@ -53,6 +53,7 @@ static const fdk_platform_ops g_wayland_ops = {
     .native_display = fdk_wayland_native_display,
     .ext_surface_native = fdk_wayland_ext_surface_native,
     .ext_surface_resized = fdk_wayland_ext_surface_resized,
+    .ext_gl_display = fdk_wayland_gl_display,
     .ext_layer_shell_available = fdk_wayland_layer_shell_available,
     .ext_layer_surface_create = fdk_wayland_layer_surface_create,
     .ext_layer_surface_set = fdk_wayland_layer_surface_set,

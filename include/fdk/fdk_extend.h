@@ -159,6 +159,17 @@ typedef enum fdk_ext_capability {
      * (the add-on may still bind its own layer shell through the
      * documented native accessors in fdk/ext/wayland.h). */
     FDK_EXT_CAP_LAYER_SHELL   = 8,
+    /* 1.0.0: the GPU lane is loaded for this context's connection
+     * (the EGL/GLX presentation lane actually initialized — hardware
+     * GL, not a refused software renderer). The GL-programming recipe
+     * for add-ons rides the existing native accessors: create your
+     * EGLDisplay/GLX context on fdk_ext_get_native_display()'s
+     * handle, your EGLSurface/wl_egl_window on
+     * fdk_ext_surface_native()'s — the display handles are the SAME
+     * connection FDK drives. Present arbitration (an add-on-owned
+     * present path per surface) is the next increment; until then
+     * FDK's present owns the surface's buffers. */
+    FDK_EXT_CAP_GL            = 9,
 } fdk_ext_capability;
 
 /* Returns nonzero when `ctx`'s connected backend has `cap`.

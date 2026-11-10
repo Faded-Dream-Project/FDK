@@ -715,6 +715,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
  * out) in a registered pwindow: FDK's event mask, XIC when an XIM
  * exists, real geometry via XGetGeometry. See platform_internal.h's
  * ext_surface_adopt contract. */
+void *fdk_x11_gl_display(fdk_platform_connection *conn);
 fdk_result fdk_x11_ext_surface_adopt(fdk_platform_connection *conn,
                                      const fdk_ext_native_handle *native,
                                      fdk_platform_window **out_pwindow);

@@ -493,3 +493,13 @@ fdk_result fdk_ext_x11_set_struts(fdk_window *window,
     XFlush(dpy);
     return FDK_OK;
 }
+
+
+/* ---- FDK_EXT_CAP_GL (1.0.0): GLX rides the X Display ---------------------- */
+
+void *fdk_x11_gl_display(fdk_platform_connection *conn) {
+    /* GLX uses the same Xlib Display; the lane's presence is the
+     * conn's gl handle (loaded once, refused for software renderers). */
+    return (conn != NULL && conn->gl != NULL) ? (void *)conn->display
+                                              : NULL;
+}
