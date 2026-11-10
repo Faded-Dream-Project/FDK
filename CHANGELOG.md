@@ -1,4 +1,32 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## D9 applied: the shared pwindow init (the 0xe5 class closed)
+
+- The two-output lock flow (the un-pinned test: two headless outputs,
+  a lock screen per output, both presented, locked, ordered teardown,
+  unlock) is CLEAN under ASan and LSan: both adopted windows keep
+  their surface fields intact through create, present, configure and
+  destroy. Valgrind is not installable in this sandbox (no package
+  repo); ASan covers the same invalid-read/write class the 0xe5 crash
+  exercised, plus the leak hunt.
+- ROOT CAUSE (evidence-based): the corrupting runs straddled the
+  `owned`-field addition to the internal kind struct — an ABI shift —
+  while object files compiled against the old and new layouts mixed
+  in one binary (the field at the old offset became the small integer
+  the destroy path then read). The LATENT cause was the adopt path's
+  52-line hand-mirrored copy of window_create's field inits: any
+  struct change could silently diverge the two paths. Both are now
+  closed structurally: fdk_wayland_pwindow_shared_init() is the ONE
+  init block, called by window_create and the ext-surface adopt alike
+  (D9, owner-approved). The regression is the un-pinned two-output
+  lock flow itself (it failed on every corrupting run and passes
+  now); the structural guard is that the two paths share one block,
+  so the drift cannot reopen.
+- During the refactor the surface-creation lines were briefly cut
+  from window_create (caught by the suite's own first window create:
+  SEGV on a NULL proxy); restored with the original failure path
+  (free without unregister — registration happens later, with the
+  shell role).
+- The instrumentation (adopt/destroy fprintf probes) is removed.
 ## CI-first: the b28b442 run's verdict, two real fixes, the timeouts
 
 - The b28b442 run: 6 jobs hung ~24h on dead runners (cancelled);

@@ -930,6 +930,8 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn);
 int fdk_wayland_get_event_fd(fdk_platform_connection *conn);
 int fdk_wayland_dispatch_pending(fdk_platform_connection *conn);
 
+void fdk_wayland_pwindow_shared_init(fdk_platform_window *pwindow,
+                                     fdk_platform_connection *conn);
 fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
                                       const fdk_window_options *options,
                                       fdk_platform_window *parent,

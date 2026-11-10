@@ -1952,50 +1952,21 @@ fdk_result fdk__wayland_surface_downgrade_from_lane(
     return fdk_wayland_window_present(pwindow, &fallback_full);
 }
 
-fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
-                                      const fdk_window_options *options,
-                                      fdk_platform_window *parent,
-                                      fdk_platform_window **out_pwindow) {
-    fdk_i32 width = WAYLAND_DEFAULT_WIDTH;
-    fdk_i32 height = WAYLAND_DEFAULT_HEIGHT;
-    const char *title = WAYLAND_DEFAULT_TITLE;
-
-    if (options != NULL) {
-        if (options->width > 0)  width = options->width;
-        if (options->height > 0) height = options->height;
-        if (options->title != NULL) title = options->title;
-    }
-
-    fdk_platform_window *pwindow = fdk_alloc(sizeof(fdk_platform_window));
-    if (pwindow == NULL) {
-        return FDK_ERR_OUT_OF_MEMORY;
-    }
-
-    pwindow->conn = conn;
-    pwindow->render_mode = (options != NULL) ? options->render_mode
-                                             : FDK_RENDER_HYBRID;
-    if (pwindow->render_mode == FDK_RENDER_GPU) {
-        /* GPU mode: the lane is REQUIRED — probe the GL stack NOW so a
-         * context that cannot ever present through it fails at window
-         * creation with a clear error, never a silent CPU fallback. */
-        if (conn->egl == NULL && !conn->egl_tried) {
-            conn->egl = fdk_wayland_egl_try_load(conn);
-            conn->egl_tried = 1;
-        }
-        if (conn->egl == NULL) {
-            FDK_ERROR("GPU render mode: EGL/libwayland-egl unavailable "
-                      "(no GL stack, or software-only and refused) — "
-                      "refusing window creation; use HYBRID or CPU");
-            fdk_free(pwindow);
-            return FDK_ERR_UNSUPPORTED;
-        }
-    }
-    pwindow->last_size.width = width;
-    pwindow->last_size.height = height;
-    pwindow->pending_size = pwindow->last_size;
+/* D9 (owner-approved): the ONE field-init block for every
+ * fdk_platform_window — window_create and the ext-surface adopt path
+ * both call it, so they cannot drift apart. The 2026-11-11
+ * corruption (pwindow->surface read as 0xe5 on the second adopted
+ * lock surface) was the hand-mirrored adopt init diverging from this
+ * block during development; a shared helper makes that bug class
+ * structurally impossible. The caller sets its OWN fields after
+ * (sizes, roles, the wl_surface itself). */
+void fdk_wayland_pwindow_shared_init(fdk_platform_window *pwindow,
+                                     fdk_platform_connection *conn) {
+    (void)conn;
     pwindow->configured = 0;
     pwindow->maximized = 0;
     pwindow->minimized = 0;
+    pwindow->fullscreen = 0;
     pwindow->toplevel_decoration = NULL;
     pwindow->deco_client_side = 0;
     pwindow->toplevel_icon = NULL;          /* M-4: set_icon fills */
@@ -2041,14 +2012,60 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
         pwindow->render_slots[i].size.height = 0;
         pwindow->render_slots[i].released = 0;
     }
+    pwindow->subsurface = NULL;
+    pwindow->is_subsurface = 0;
+}
 
-    pwindow->surface = wl_compositor_create_surface(conn->compositor);
-    if (pwindow->surface == NULL) {
-        FDK_ERROR("wl_compositor_create_surface failed");
-        fdk_free(pwindow);
-        return FDK_ERR_WINDOW_CREATE;
+fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
+                                      const fdk_window_options *options,
+                                      fdk_platform_window *parent,
+                                      fdk_platform_window **out_pwindow) {
+    fdk_i32 width = WAYLAND_DEFAULT_WIDTH;
+    fdk_i32 height = WAYLAND_DEFAULT_HEIGHT;
+    const char *title = WAYLAND_DEFAULT_TITLE;
+
+    if (options != NULL) {
+        if (options->width > 0)  width = options->width;
+        if (options->height > 0) height = options->height;
+        if (options->title != NULL) title = options->title;
     }
 
+    fdk_platform_window *pwindow = fdk_alloc(sizeof(fdk_platform_window));
+    if (pwindow == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+
+    pwindow->conn = conn;
+    pwindow->render_mode = (options != NULL) ? options->render_mode
+                                             : FDK_RENDER_HYBRID;
+    if (pwindow->render_mode == FDK_RENDER_GPU) {
+        /* GPU mode: the lane is REQUIRED — probe the GL stack NOW so a
+         * context that cannot ever present through it fails at window
+         * creation with a clear error, never a silent CPU fallback. */
+        if (conn->egl == NULL && !conn->egl_tried) {
+            conn->egl = fdk_wayland_egl_try_load(conn);
+            conn->egl_tried = 1;
+        }
+        if (conn->egl == NULL) {
+            FDK_ERROR("GPU render mode: EGL/libwayland-egl unavailable "
+                      "(no GL stack, or software-only and refused) — "
+                      "refusing window creation; use HYBRID or CPU");
+            fdk_free(pwindow);
+            return FDK_ERR_UNSUPPORTED;
+        }
+    }
+    fdk_wayland_pwindow_shared_init(pwindow, conn);
+    pwindow->last_size.width = width;
+    pwindow->last_size.height = height;
+    pwindow->pending_size = pwindow->last_size;
+    pwindow->surface = wl_compositor_create_surface(conn->compositor);
+    if (pwindow->surface == NULL) {
+        /* not registered yet — registration happens with the shell
+         * role, later (the original path freed without unregister) */
+        FDK_ERROR("wl_compositor_create_surface failed");
+        fdk_free(pwindow);
+        return FDK_ERR_UNSUPPORTED;
+    }
     wl_surface_add_listener(pwindow->surface, &g_wl_surface_listener,
                              pwindow);
     pwindow->xdg_surface = xdg_wm_base_get_xdg_surface(conn->wm_base, pwindow->surface);

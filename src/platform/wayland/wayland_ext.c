@@ -84,57 +84,15 @@ fdk_result fdk_wayland_ext_surface_adopt(fdk_platform_connection *conn,
     pwindow->xdg_popup = NULL;
     pwindow->input_transparent = 0;
     pwindow->drop_formats = 0;
+    /* D9: the ONE shared field-init block (window_create uses the
+     * same) — the sizes here are the adopt-specific pre-configure
+     * stance; everything else comes from the shared helper. */
+    fdk_wayland_pwindow_shared_init(pwindow, conn);
     pwindow->last_size.width = 1; /* unknown until the add-on reports
                                    * its role's configure (never 0: the
                                    * buffer math divides/multiplies) */
     pwindow->last_size.height = 1;
     pwindow->pending_size = pwindow->last_size;
-    pwindow->configured = 0; /* the pre-configure gate applies to ext
-                              * surfaces too — flipped by the resized
-                              * op (notify_configure) below */
-    pwindow->maximized = 0;
-    pwindow->minimized = 0;
-    pwindow->fullscreen = 0;
-    pwindow->toplevel_decoration = NULL;
-    pwindow->deco_client_side = 0;
-    pwindow->buffer = NULL;
-    pwindow->buffer_size.width = 0;
-    pwindow->buffer_size.height = 0;
-    pwindow->buffer_attached = 0;
-    pwindow->cursor_shape = 0; /* default arrow until shaped (W2) */
-    /* M-4: extension surfaces carry no toplevel (their role is the
-     * add-on's) — the icon pair stays NULL forever; set_icon's
-     * toplevel gate is the no-op path. */
-    pwindow->toplevel_icon = NULL;
-    pwindow->toplevel_icon_buffer = NULL;
-    pwindow->toplevel_icon_buffer_size.width = 0;
-    pwindow->toplevel_icon_buffer_size.height = 0;
-    pwindow->icon_absent_logged = 0;
-    for (int i = 0; i < FDK_WL_BG_SLOTS; i++) {
-        pwindow->bg_pending[i] = NULL;
-    }
-    pwindow->render_pending = NULL;
-    pwindow->rendered_ever = 0;
-    pwindow->last_refuse_warn_ms = 0;
-    pwindow->scale_x120 = 120;
-    pwindow->buffer_scale = 1;
-    pwindow->scale_applied = 0;
-    pwindow->viewport = NULL;
-    pwindow->fractional = NULL;
-    pwindow->entered_outputs = NULL;
-    pwindow->entered_count = 0;
-    pwindow->entered_capacity = 0;
-    pwindow->frame_ack = 1;
-    pwindow->frame_commit_ms = 0;
-    pwindow->frame_cb = NULL;
-    for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
-        pwindow->render_slots[i].buffer = NULL;
-        pwindow->render_slots[i].pixels = NULL;
-        pwindow->render_slots[i].length = 0;
-        pwindow->render_slots[i].size.width = 0;
-        pwindow->render_slots[i].size.height = 0;
-        pwindow->render_slots[i].released = 0;
-    }
 
     /* Output enter/leave tracking (HiDPI): the same listener the
      * create path attaches — the surface's scale follows the outputs

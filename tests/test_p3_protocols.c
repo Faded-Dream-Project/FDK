@@ -137,16 +137,6 @@ fdk_toplevel_list_close(tl);
             printf("[info] bound outputs: %zu\n", outs);
             fdk_ext_surface *screens[4] = {0};
             size_t n_screens = outs < 4 ? outs : 4;
-            /* KNOWN OPEN BUG (2026-11-11, the multi-output rig): the
-             * SECOND managed lock surface's adopted window dies with a
-             * corrupted pwindow->surface (0xe5 at destroy — a small
-             * integer overwriting the pointer; the adopt path mirrors
-             * window_create's field inits by hand and one is missing
-             * or overrun). One screen per run is the verified shape;
-             * the per-output API is in place for the fix. */
-            if (n_screens > 1) {
-                n_screens = 1;
-            }
             for (size_t oi = 0; oi < n_screens && lock != NULL; oi++) {
                 fdk_result sr =
                     fdk_session_lock_screen_create_on_output(
