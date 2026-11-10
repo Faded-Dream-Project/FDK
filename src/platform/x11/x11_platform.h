@@ -1238,3 +1238,7 @@ fdk_result fdk_x11_drag_begin(fdk_platform_window *origin, int formats,
                               void (*on_done)(int, void *), void *user);
 
 #endif /* FDK_X11_PLATFORM_H */
+
+fdk_result fdk_x11_set_event_filter_impl(fdk_platform_connection *conn,
+                                         int (*filter)(void *, void *),
+                                         void *user);

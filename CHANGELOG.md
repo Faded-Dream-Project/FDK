@@ -1,4 +1,19 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## P3(g): the protocol test — X11 green; the sway run has one open issue
+
+- tests/test_p3_protocols.c + make test-p3-x11 / test-p3-wayland.
+- X11: every Wayland-protocol cap honestly false; idle-inhibit
+  answers UNSUPPORTED; the event filter is set and sees all 3
+  synthetic ClientMessages (raw, pre-dispatch). All green.
+- Wayland/sway: all seven protocol caps true (idle-inhibit,
+  activation, foreign-toplevel, text-input-v3, session-lock,
+  input-method-v2, virtual-keyboard) — verified in the log up to the
+  queue teardown, where the run aborts on libwayland's
+  "non-wrapper proxy" assertion in the add-on queue's destroy path.
+  OPEN: the wrapped-display teardown order (registry vs display
+  wrapper) needs one more iteration; everything before it (caps,
+  binds, inhibit round trip, token, toplevel list, lock mint) logs
+  green.
 ## P3(f): the input-method-v2 + virtual-keyboard create/bind APIs
 
 - New public API (fdk_extend.h): fdk_input_method_open (mints the

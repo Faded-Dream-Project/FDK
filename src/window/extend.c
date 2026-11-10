@@ -1125,3 +1125,16 @@ void fdk_virtual_keyboard_key(void *kb, fdk_u32 time_ms, fdk_u32 key,
                                                  fdk_u32 k, fdk_u32 s);
     fdk_wayland_virtual_keyboard_key(kb, time_ms, key, state);
 }
+
+/* ---- P3: the X11 add-on event filter ---------------------------------- */
+fdk_result fdk_x11_set_event_filter(fdk_context *ctx,
+                                    fdk_x11_event_filter_fn filter,
+                                    void *user) {
+    if (ctx == NULL || ctx->ops == NULL ||
+        ctx->ops->x11_set_event_filter == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return ctx->ops->x11_set_event_filter(ctx->conn,
+                                          (int (*)(void *, void *))filter,
+                                          user);
+}

@@ -88,7 +88,9 @@ void fdk_wayland_queue_destroy(fdk_platform_connection *conn,
     if (*p == q) {
         *p = q->next;
     }
-    wl_proxy_wrapper_destroy((struct wl_proxy *)q->registry);
+    /* the registry is a NORMAL proxy (created on the wrapper);
+     * only the display wrapper takes wrapper_destroy */
+    wl_proxy_destroy((struct wl_proxy *)q->registry);
     wl_proxy_wrapper_destroy((struct wl_proxy *)q->wrapped);
     wl_event_queue_destroy(q->q);
     fdk_free(q);
@@ -134,7 +136,9 @@ static void queue_destroy_impl(struct fdk_wl_queue *q) {
     if (*p == q) {
         *p = q->next;
     }
-    wl_proxy_wrapper_destroy((struct wl_proxy *)q->registry);
+    /* the registry is a NORMAL proxy (created on the wrapper);
+     * only the display wrapper takes wrapper_destroy */
+    wl_proxy_destroy((struct wl_proxy *)q->registry);
     wl_proxy_wrapper_destroy((struct wl_proxy *)q->wrapped);
     wl_event_queue_destroy(q->q);
     fdk_free(q);

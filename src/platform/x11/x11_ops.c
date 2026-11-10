@@ -13,6 +13,7 @@ static int fdk_x11_next_wakeup_ms(fdk_platform_connection *conn,
 }
 
 static const fdk_platform_ops g_x11_ops = {
+    .x11_set_event_filter = fdk_x11_set_event_filter_impl,
     .name = "x11",
     .connect = fdk_x11_connect,
     .disconnect = fdk_x11_disconnect,
@@ -94,3 +95,4 @@ static const fdk_platform_ops g_x11_ops = {
 const fdk_platform_ops *fdk_platform_x11_ops(void) {
     return &g_x11_ops;
 }
+
