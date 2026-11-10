@@ -1,4 +1,17 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 3b: the per-surface present arbitration test
+
+- tests/test_arbitration.c + make test-arbitration: one context, three
+  windows — an add-on-driven GL surface (a GPU window whose frame
+  callback draws raw GL), a CPU window, a HYBRID window. Presents
+  interleave for four rounds; the GL surface shows the callback's
+  content, the CPU and HYBRID surfaces keep their own colors.
+- Library fix the test exposed: the GPU readback seam re-ran the
+  ENGINE flush even when an add-on's frame callback owned the window's
+  buffer, painting the engine's scene over the add-on's content.
+  fdk_x11_window_gpu_readback now routes to a callback readback
+  (run the callback, read, no engine flush) whenever the arbitration
+  contract is active.
 ## Item 3a: the X11 lane share-root (parity with Wayland)
 
 - x11_gl.c: every window context is now created sharing a lane-wide

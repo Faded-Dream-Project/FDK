@@ -917,6 +917,16 @@ fdk_result fdk_x11_window_gpu_readback(fdk_platform_window *pwindow,
                                        fdk_u32 *out, int width,
                                        int height) {
     struct fdk_surface *s = fdk__gpu_surface_for_window(pwindow);
+    /* Present arbitration: when an add-on's frame callback owns this
+     * window's buffer, the readback must reflect the CALLBACK's
+     * content — re-running the engine flush here would paint the
+     * engine's scene over the add-on's. */
+    if (pwindow != NULL && pwindow->gl_frame_fn != NULL &&
+        pwindow->gl_win != NULL) {
+        return fdk_x11_gl_window_cb_readback(
+            pwindow->gl_win, pwindow->gl_frame_fn, pwindow->gl_frame_user,
+            pwindow->gl_frame_surface, s, out, width, height);
+    }
     if (pwindow == NULL || pwindow->gl_win == NULL || s == NULL ||
         s->gpu == NULL) {
         fprintf(stderr,

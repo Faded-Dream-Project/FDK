@@ -125,6 +125,12 @@ fdk_result fdk_x11_gl_window_paint_flush(struct fdk_x11_gl_window *gwin,
                                          void *surface);
 
 /* Test seam: GPU-frame readback (see src/render/gpaint.h). */
+fdk_result fdk_x11_gl_window_cb_readback(struct fdk_x11_gl_window *gwin,
+                                         void (*fn)(void *, void *),
+                                         void *user, void *surface,
+                                         struct fdk_surface *resolved,
+                                         fdk_u32 *out, int width,
+                                         int height);
 fdk_result fdk_x11_gl_window_readback(struct fdk_x11_gl_window *gwin,
                                       void *surface, fdk_u32 *out,
                                       int width, int height);

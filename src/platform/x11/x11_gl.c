@@ -1282,6 +1282,31 @@ fdk_result fdk_x11_gl_window_cb_flush(struct fdk_x11_gl_window *gwin,
     return fdk_x11_gl_window_swap(gwin);
 }
 
+/* The readback twin for an add-on-owned buffer: run the callback
+ * (NOT the engine flush — the callback owns this window's buffer)
+ * and read the back buffer without swapping. */
+fdk_result fdk_x11_gl_window_cb_readback(struct fdk_x11_gl_window *gwin,
+                                         void (*fn)(void *, void *),
+                                         void *user, void *surface,
+                                         struct fdk_surface *resolved,
+                                         fdk_u32 *out, int width,
+                                         int height) {
+    fdk_result r = fdk_x11_gl_window_make_current(gwin);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    fn(user, surface);
+    /* the ENGINE state of this window (the registered surface may be
+     * NULL — the add-on decides what it passes its callback) */
+    struct fdk_surface *s = resolved;
+    if (s == NULL || s->gpu == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    return fdk__gpu_engine_readback(s, out, width, height) == 0
+               ? FDK_OK
+               : FDK_ERR_UNSUPPORTED;
+}
+
 /* ---- P2: real fences — glFenceSync (desktop GL 3.2+ / GL_ARB_sync;
  * resolved via the lane's proc table, UNSUPPORTED when absent) -------- */
 fdk_result fdk_x11_gl_window_fence_insert(struct fdk_x11_gl_window *gwin,
@@ -1333,4 +1358,17 @@ void *fdk_x11_gl_lib_for_test(fdk_platform_window *pw) {
         return NULL;
     }
     return ((struct fdk_x11_gl *)pw->conn->gl)->lib;
+}
+
+
+/* Test seam: a GL proc via the lane's loader (arbitration test). The
+ * lane stores the loader entry it resolved at load time. */
+void *fdk_x11_gl_proc_for_test(fdk_platform_window *pw, const char *name) {
+    if (pw == NULL || pw->conn == NULL || pw->conn->gl == NULL) {
+        return NULL;
+    }
+    struct fdk_x11_gl *gl = (struct fdk_x11_gl *)pw->conn->gl;
+    void *(*getproc)(const char *) =
+        (void *(*)(const char *))dlsym(gl->lib, "glXGetProcAddress");
+    return getproc != NULL ? getproc(name) : NULL;
 }
