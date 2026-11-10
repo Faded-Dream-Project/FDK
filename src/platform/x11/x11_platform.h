@@ -295,6 +295,9 @@ struct fdk_platform_connection {
      * FDK_GL_FORCE). gl_tried makes the attempt one-shot — NULL is
      * sticky, windows never re-attempt. */
     struct fdk_x11_gl *gl;
+    /* P3: the add-on raw-event filter (x11_dispatch.c). */
+    int (*event_filter)(void *user, void *event);
+    void *event_filter_user;
     int gl_tried;
 
     /* XI2 touch (1.0.0, M-3): dlopen'd libXi + the X Input

@@ -188,6 +188,11 @@ int fdk_ext_has_capability(fdk_context *ctx, fdk_ext_capability cap) {
         case FDK_EXT_CAP_VIRTUAL_KEYBOARD:
             return ops->virtual_keyboard_available != NULL &&
                    ops->virtual_keyboard_available(ctx->conn);
+        case FDK_EXT_CAP_X11_EVENT_FILTER:
+            /* The pre-dispatch hook: X11 only (the ops carry the
+             * setter; the wayland ops leave it NULL). */
+            return ops->x11_set_event_filter != NULL &&
+                   fdk_ext_active_backend(ctx) == FDK_EXT_BACKEND_X11;
         case FDK_EXT_CAP_WL_RAW_EVENTS:
             /* The raw-event surface: Wayland only. The create entry
              * point is defined in the wayland layer itself (the

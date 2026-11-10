@@ -185,6 +185,10 @@ typedef enum fdk_ext_capability {
     FDK_EXT_CAP_VIRTUAL_KEYBOARD = 16, /* zwp_virtual_keyboard_mgr_v1 */
     FDK_EXT_CAP_WL_RAW_EVENTS = 17,  /* the add-on raw-event surface
                                        * (own event queues + raw binds) */
+    FDK_EXT_CAP_X11_EVENT_FILTER = 18, /* the raw XEvent pre-dispatch
+                                        * hook (core + XI2 events; the
+                                        * OR-window path is the popup
+                                        * API)                     */
 } fdk_ext_capability;
 
 /* Returns nonzero when `ctx`'s connected backend has `cap`.
@@ -935,6 +939,22 @@ void *fdk_wl_raw_bind(fdk_wl_queue *queue, fdk_u32 name,
                       const void *wl_interface, fdk_u32 version);
 int fdk_wl_queue_dispatch(fdk_wl_queue *queue);
 void fdk_wl_queue_attach(fdk_wl_queue *queue, int on_pump);
+
+/* ---- P3: the X11 add-on event filter ----------------------------------
+ *
+ * A pre-dispatch hook: the filter sees every RAW XEvent (core or
+ * XInput2) before FDK translates it, and may consume it (nonzero
+ * return = FDK skips the event). Keycodes arrive untranslated, so an
+ * add-on wanting XKB-level detail runs xkbcommon itself on the raw
+ * event. One filter per context; setting a new one replaces the old
+ * (NULL removes). Override-redirect windows are the X11 popup path
+ * (fdk_ext_popup_create) and their events flow through the same
+ * filter. X11-only: FDK_ERR_UNSUPPORTED elsewhere. */
+typedef int (*fdk_x11_event_filter_fn)(void *user, void *xevent);
+
+fdk_result fdk_x11_set_event_filter(fdk_context *ctx,
+                                    fdk_x11_event_filter_fn filter,
+                                    void *user);
 
 #ifdef __cplusplus
 }

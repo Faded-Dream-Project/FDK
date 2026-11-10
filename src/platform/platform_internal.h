@@ -352,6 +352,10 @@ typedef struct fdk_platform_ops {
      * (it needs the conn); the rest goes through the queue's vtable. */
     void *(*wl_queue_create)(fdk_platform_connection *conn,
                              const char *name);
+    /* P3: the X11 add-on event filter (x11_dispatch.c). */
+    fdk_result (*x11_set_event_filter)(fdk_platform_connection *conn,
+                                       int (*filter)(void *, void *),
+                                       void *user);
     int (*window_activation_available)(fdk_platform_connection *conn);
     fdk_result (*window_set_idle_inhibit)(fdk_platform_window *pwindow,
                                           int inhibit);

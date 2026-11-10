@@ -1,4 +1,16 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## P3(d): the X11 add-on event filter — OR windows are the popup path
+
+- New public API (fdk_extend.h) with FDK_EXT_CAP_X11_EVENT_FILTER
+  (18): fdk_x11_set_event_filter(ctx, fn, user) — a pre-dispatch hook
+  in x11_dispatch.c that sees every RAW XEvent (core or XInput2;
+  keycodes untranslated, so an add-on wanting XKB detail runs
+  xkbcommon itself) before FDK translates it, and may consume it.
+  One filter per context; NULL removes.
+- Override-redirect windows: already first-class as the X11 popup
+  path (fdk_ext_popup_create creates OR windows on X11; the events
+  flow through the same filter) — documented here rather than
+  duplicated as a second mechanism.
 ## P3(c): the add-on raw-event surface (queues + raw binds)
 
 - New public API (fdk_extend.h) with FDK_EXT_CAP_WL_RAW_EVENTS (17):

@@ -157,6 +157,15 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
         XEvent xevent;
         XNextEvent(conn->display, &xevent);
 
+        /* P3: the add-on event filter — sees the RAW event (core or
+         * XI2; keycodes arrive untranslated, so an add-on wanting
+         * XKB-level detail runs xkbcommon itself) before FDK's own
+         * translation, and may consume it (nonzero return = skip). */
+        if (conn->event_filter != NULL &&
+            conn->event_filter(conn->event_filter_user, (void *)&xevent) != 0) {
+            continue;
+        }
+
         /* Motion coalescing (1.0.0-rc1, X2 — the lagging dropdown
          * highlight): X11 queues EVERY MotionNotify the pointer
          * hardware produced (hundreds per second in motion), and the
@@ -495,4 +504,17 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
 
     fdk__x11_io_armed = 0;
     return processed;
+}
+
+
+/* P3: the add-on event filter (the public entry routes here). */
+fdk_result fdk_x11_set_event_filter_impl(fdk_platform_connection *conn,
+                                         int (*filter)(void *, void *),
+                                         void *user) {
+    if (conn == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    conn->event_filter = filter;
+    conn->event_filter_user = user;
+    return FDK_OK;
 }
