@@ -1,4 +1,15 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 5: the pre-1.0 decision list (docs/PRE-1.0-DECISIONS.md)
+
+- The audit turned into eleven numbered decisions (D1-D11): the layout
+  exposures (the 1024-byte embed budget, the event union's size, the
+  struct_size pattern, the primitives), the frozen semantics (the
+  build-level X11 gate, the export-map removal policy, the dmabuf
+  fourcc table, the INVALID-modifier DRM soak), the multi-output
+  adoption bug (fix before 1.0 — the shared init helper removes the
+  bug class), and the VK delivery verification. Each carries the risk,
+  the cheapest reduction while no stability promise exists, and the
+  recommendation. NOTHING applied — they are the owner's calls.
 ## Item 3: the unexercised surface — lock screens per output, the VK
 ## keymap wall, and the honest map of what remains
 
