@@ -1,4 +1,30 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 4: the compositor reality table (EXTENDING.md §12)
+
+- A per-cap table over sway/Hyprland/labwc (wlroots), KDE KWin, GNOME
+  Mutter and weston — which protocols each implements, what each FDK
+  cap reports there, and the fallback an add-on should reach for when
+  the cap says no (the portal inhibitor, the DE's own taskbar
+  interfaces, the honest SKIP for the lock and the IM). Facts verified
+  against the compositors' protocol surface (the swaylock issue and
+  the 2026 threads for GNOME's internal locking, the KDE IBus thread
+  for the v2 input method, weston 9 for layer-shell); the sway column
+  is additionally exercised by FDK's own rig.
+
+## Item 5: the pre-1.0 audit (docs/PRE-1.0-AUDIT.md)
+
+- The freeze checklist: the per-header surface (~290 functions, ~85
+  typedefs, 34 event types, 19 caps, API version 3), the layout
+  exposures (the 1024-byte widget embed budget, the fdk_event_data
+  union's caller-visible size, the struct_size input contracts, the
+  primitive layouts), the semantics frozen at 1.0 (cap numbers, result
+  codes, event numbers, the export map, the dmabuf fourcc table's
+  meaning), the unstable/underdocumented flags (the dmabuf round-trip
+  needs one DRM-box soak; the lock screen's multi-output story has no
+  example; the X11 escape hatch needs its own declaration gate), the
+  untested/unexemplified gaps (virtual-keyboard key emission, the
+  count-only query shape, the X11 popup path at the ext level), and
+  the six-step sign-off checklist.
 ## Item 3 (cont.): the shutdown proxy discipline — five real leaks fixed
 
 - The 0f99f2d run: the sway step ran the tests GREEN but
