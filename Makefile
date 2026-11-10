@@ -1087,6 +1087,47 @@ test-exports: build/libfdk.so
 	if [ -s $(BUILD_DIR)/exports.leaked ]; then echo "EXPORT LEAKS:"; cat $(BUILD_DIR)/exports.leaked; exit 1; fi; \
 	echo "export map: no leaks"
 
+# D6 (PRE-1.0-DECISIONS): the export-map REMOVAL gate. test-exports
+# gates ADDITIONS (a leak = exported but unpromised); this target
+# gates REMOVALS — a symbol promised in the previous commit's public
+# headers and absent from the current exported set fails CI, unless
+# tests/data/export-removals.allowlist names it as an intended
+# removal. fdk_unstable_* are exempt (the tier's contract says it may
+# break any release). A shallow checkout (no HEAD~) skips LOUDLY, so
+# the CI checkout carries fetch-depth: 0.
+.PHONY: test-exports-removal
+# The declaration extractor BOTH sides share lives in
+# tools/strip_public_decls.sh (committed, runnable by hand): strip
+# block/line comments first (a raw grep caught fdk_theme_token inside
+# a prose comment as a phantom symbol), then take every fdk_* name
+# followed by '(' — function declarations; types never carry one.
+
+test-exports-removal: build/libfdk.so
+	@set -e; \
+	if ! git rev-parse --verify -q HEAD~ >/dev/null 2>&1; then \
+	    echo "export-removal gate: SKIPPED — no HEAD~ (shallow checkout; set fetch-depth: 0)"; \
+	    exit 0; \
+	fi; \
+	rm -rf $(BUILD_DIR)/prev-include; mkdir -p $(BUILD_DIR)/prev-include; \
+	git archive HEAD~ include | tar -x -C $(BUILD_DIR)/prev-include; \
+	tools/strip_public_decls.sh $(BUILD_DIR)/prev-include/include/fdk/*.h \
+	    $(BUILD_DIR)/prev-include/include/fdk/ext/*.h \
+	    | grep -v '^fdk_unstable_' > $(BUILD_DIR)/exports.prev || true; \
+	tools/strip_public_decls.sh include/fdk/*.h include/fdk/ext/*.h \
+	    | grep -v '^fdk_unstable_' > $(BUILD_DIR)/exports.now || true; \
+	comm -23 $(BUILD_DIR)/exports.prev $(BUILD_DIR)/exports.now \
+	    > $(BUILD_DIR)/exports.removed; \
+	if [ -s $(BUILD_DIR)/exports.removed ]; then \
+	    grep -vxF -f tests/data/export-removals.allowlist \
+	        $(BUILD_DIR)/exports.removed > $(BUILD_DIR)/exports.removed.unallowed || true; \
+	    if [ -s $(BUILD_DIR)/exports.removed.unallowed ]; then \
+	        echo "EXPORT REMOVALS (public-API break; allow-list them in tests/data/export-removals.allowlist if intended):"; \
+	        cat $(BUILD_DIR)/exports.removed.unallowed; \
+	        exit 1; \
+	    fi; \
+	fi; \
+	echo "export-removal gate: no unintended removals"
+
 # P4: the dma-buf import (validation runs everywhere; the round-trip
 # SKIPs without a DRM device and never fakes a PASS).
 DMABUF_BIN := $(BUILD_DIR)/tests/test_dmabuf

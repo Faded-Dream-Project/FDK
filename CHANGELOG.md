@@ -1,4 +1,22 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## D6 applied: the export-map's removal policy is enforceable
+
+- `make test-exports-removal` (run in CI right after the export-map
+  check) diffs the public declarations of HEAD~ against the current
+  tree — both sides through tools/strip_public_decls.sh, the same
+  comment-stripping extractor (a raw grep first caught
+  fdk_theme_token inside a prose comment as a phantom symbol; both
+  sides must be the same artifact). A symbol promised in HEAD~ and
+  gone from the current declarations FAILS CI unless
+  tests/data/export-removals.allowlist (committed, kept empty at
+  1.0) names it as an intended removal.
+- fdk_unstable_* are exempt — the tier's own contract says it may
+  break any release.
+- PROOF: a phantom declaration added to the HEAD~ side fires the
+  gate with exactly that symbol; the allow-list silences it; the
+  real tree passes ("export-removal gate: no unintended removals").
+- The CI checkout now carries fetch-depth: 0 so HEAD~ always exists;
+  a shallow checkout skips the gate LOUDLY (never silently).
 ## D5 applied: the banned-declaration gate is a BUILD gate
 
 - tools/header_gate.c is the gate: it scans the CORE public headers

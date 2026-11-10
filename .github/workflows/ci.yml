@@ -47,6 +47,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the D6 export-removal gate diffs against HEAD~
 
       - name: Install build dependencies
         run: |
@@ -227,6 +229,12 @@ jobs:
         # by plain `make examples` would silently flip the config stamp
         # back to debug (sanitizer builds). FDK_CONFIG pinned throughout.
         run: make FDK_CONFIG=release all examples verify-exports
+
+      # D6: a promised public symbol removed from the API fails CI
+      # unless tests/data/export-removals.allowlist names it. The
+      # fetch-depth above provides HEAD~.
+      - name: Export-removal gate
+        run: make test-exports-removal
 
       # The ext-level popup examples (the audit's two remaining
       # opens): 10 = the popup itself (X11 OR-window; the honest
