@@ -75,7 +75,10 @@ subclass struct") and forces every subclass through a second
 pointer. The chosen shape is a BOUNDED embed: `fdk_widget_embed` is
 a fixed 1024-byte opaque block (FDK_WIDGET_EMBED_U64 = 128 u64);
 the library static-asserts `sizeof(struct fdk_widget) <= 1024`, so
-internals grow without any add-on-visible change. Layout exposure
+internals grow without any add-on-visible change. MEASURED (decision
+D1, `make sizes`, 2026-11-12): the internal struct is 488 bytes —
+2.1x headroom; the D1 rule (keep 1024 iff the largest widget is
+under 640) keeps the budget at 1024. Layout exposure
 is thereby bounded, padded, and growth-safe; the allocation-callback
 pattern remains the documented fallback if the budget itself must
 ever be raised (that raise is a deliberate ABI event, not a silent

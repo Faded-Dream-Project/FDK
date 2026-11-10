@@ -425,7 +425,21 @@ SHIPPED_THEMES := .FDKThemes/faded-dream.fdk
 # library object did.
 DEPS := $(LIB_OBJS:.o=.d) $(LIB_OBJS_PIC:.o=.d)
 
-.PHONY: all release static shared test test-x11 test-dbus test-textdemo test-wayland bench examples tools test-apps test-apps-smoke install uninstall clean verify-exports
+.PHONY: all release static shared test test-x11 test-dbus test-textdemo test-wayland bench examples tools test-apps test-apps-smoke install uninstall clean verify-exports sizes
+
+# D1 (PRE-1.0-DECISIONS): the embed-budget MEASUREMENT. The decision's
+# rule — keep 1024 iff the largest widget is under 640 bytes — is
+# decided by DATA, so the data has a target. One shared struct serves
+# every family (klass->size == sizeof(fdk_widget) for all), so the
+# "per family" measurement collapses to the one number + the headroom.
+sizes: $(BUILD_DIR)/widget_sizes
+	@echo "== widget embed budget (D1) =="
+	@$(BUILD_DIR)/widget_sizes
+
+$(BUILD_DIR)/widget_sizes: tools/widget_sizes.c src/widget/widget_internal.h \
+    $(wildcard include/fdk/*.h)
+	@mkdir -p $(dir $@)
+	$(CC) -Iinclude -Isrc/widget -Isrc -O0 $< -o $@
 
 # The default goal is `all` BY NAME, not by file position: the
 # thread-test rule moved above `all:` once (G-2, 4d06933) and a

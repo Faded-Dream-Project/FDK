@@ -1,4 +1,17 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## D1 applied: the embed budget is data-ruled (stays 1024)
+
+- `make sizes` measures what decision D1 is ruled by: the shared
+  internal widget struct is 488 bytes, the public embed budget 1024
+  (FDK_WIDGET_EMBED_U64 = 128 u64), headroom 536 bytes = 2.1x.
+- The D1 rule (keep 1024 iff the largest widget is under 640) keeps
+  the budget AT 1024 — no padding bump; the static assert
+  (sizeof(fdk_widget) <= sizeof(fdk_widget_embed)) is intact and is
+  repeated in the probe so `make sizes` cannot print a green table
+  for a tree that does not compile.
+- The measured verdict is recorded in docs/EXTENDING.md,
+  docs/abi-policy.md, and the custom-widget example's embed comment.
+- Battery green.
 ## Valgrind's first catch: the CHECK macro's double evaluation
 
 - CI's valgrind lane failed on its first run — a REAL find: the

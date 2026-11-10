@@ -9,7 +9,10 @@
 #include <string.h>
 
 typedef struct {
-    fdk_widget_embed widget; /* MUST be first (see fdk_widget.h) */
+    fdk_widget_embed widget; /* MUST be first (see fdk_widget.h);
+                              * a fixed 1024-byte budget — the real
+                              * widget is 488 bytes (make sizes, D1),
+                              * so 2.1x headroom for library growth */
     int clicks;        /* per-instance field */
     float hue;         /* per-instance field */
 } counter_widget;

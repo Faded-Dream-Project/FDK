@@ -474,7 +474,11 @@ extension-API v3 folding is opt-in access + honest capability flags:
   `fdk_widget_embed` (a fixed, padded 1024-byte block,
   FDK_WIDGET_EMBED_U64) as its first member. The internal widget
   struct is static-asserted to fit the budget, so library growth
-  never changes the public embed.
+  never changes the public embed. The budget is DATA-ruled (decision
+  D1, applied 2026-11-12): `make sizes` prints the measured numbers —
+  the shared internal widget struct is 488 bytes, the budget 1024
+  (2.1x headroom), and the budget stays 1024 while the largest
+  widget stays under the decision's 640-byte threshold.
 - **Layer-shell panels** (fdk_extend.h):
   `fdk_ext_layer_surface_create` + setters — the
   zwlr_layer_shell_v1 role built BY FDK, configures bridged into the
