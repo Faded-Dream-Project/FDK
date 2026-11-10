@@ -880,3 +880,28 @@ $(XSEC_BIN): tests/crosssection.c $(STATIC_LIB)
 
 test-crosssection: $(XSEC_BIN)
 	"$(XSEC_BIN)"
+
+# DPI/scale evidence (P1 close-out): X11 (Xvfb at 96 and 192 dpi) and
+# Wayland (the sway headless rig with output scale 2).
+DPI_BIN := $(BUILD_DIR)/tests/test_dpi_scale
+
+$(DPI_BIN): tests/test_dpi_scale.c $(STATIC_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
+	       $(STATIC_LIB) -o $@ $(LDFLAGS)
+
+test-dpi-x11: $(DPI_BIN)
+	@pkill -x Xvfb 2>/dev/null; sleep 1; set -e; N=$$((90 + RANDOM % 400)); rm -f /tmp/.X11-unix/X$$N; \
+	Xvfb :$$N -screen 0 800x600x24 >/dev/null 2>&1 & XP=$$!; sleep 1; \
+	DISPLAY=:$$N FDK_GL_FORCE=1 LSAN_OPTIONS=suppressions=$(CURDIR)/tests/data/lsan-gl.supp "$(DPI_BIN)" x11 1; rc=$$?; kill $$XP 2>/dev/null; wait $$XP 2>/dev/null; \
+	if [ $$rc -eq 1 ]; then exit 1; fi; \
+	sleep 1; N=$$((90 + RANDOM % 400)); rm -f /tmp/.X11-unix/X$$N; \
+	Xvfb :$$N -screen 0 800x600x24 -dpi 192 >/dev/null 2>&1 & XP=$$!; sleep 1; \
+	DISPLAY=:$$N FDK_GL_FORCE=1 LSAN_OPTIONS=suppressions=$(CURDIR)/tests/data/lsan-gl.supp "$(DPI_BIN)" x11 2; rc=$$?; kill $$XP 2>/dev/null; \
+	if [ $$rc -eq 1 ]; then exit 1; fi
+
+test-dpi-wayland: $(DPI_BIN)
+	@if [ -z "$$WAYLAND_DISPLAY" ]; then echo "needs a compositor (the sway rig)"; exit 1; fi
+	WAYLAND_DISPLAY=$$WAYLAND_DISPLAY FDK_GL_FORCE=1 \
+	LSAN_OPTIONS=suppressions=$(CURDIR)/tests/data/lsan-gl.supp \
+	"$(DPI_BIN)" wayland 2
