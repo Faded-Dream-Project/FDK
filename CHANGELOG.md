@@ -1,4 +1,29 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Release-candidate dry run recorded (no tag, no version bump)
+
+The six-step sign-off checklist (docs/PRE-1.0-AUDIT.md §6) was run
+through at 63092ce without tagging:
+1. make test rc=0 (0 failures); test-exports rc=0 (no leaks);
+   test-exports-removal rc=0; the matrix BOTH lanes all green
+   (X11 under Xvfb, Wayland under headless sway) — PASS.
+2. The pinned sizes: sizeof(struct fdk_widget)=488 (embed 1024),
+   sizeof(fdk_event_data)=56 (ceiling 128), sizeof(fdk_dmabuf_params)=128,
+   sizeof(fdk_ext_layer_options)=48 — PASS (pinned here).
+3. The export map diff vs the v1.0.0 tag: 0 removals, 63 additions —
+   additions only — PASS.
+4. The dmabuf round-trip on a DRM box — BLOCKED-ON-OWNER (no /dev/dri
+   in the sandbox; CI records the honest SKIP; the hardware kit
+   (next commit) is the machine to close it on).
+5. EXTENDING.md §2's version contract re-read: append-only honored
+   (0 removals is the mechanical proof; the D6 gate now enforces it
+   forever) — PASS.
+6. §4's flags: the shaping-tier granularity accepted (documented);
+   the INVALID-modifier DRM soak folded into step 4 (blocked-on-
+   owner); the multi-output lock example accepted (post-1.0); the
+   idle-inhibit X11 answer accepted (documented UNSUPPORTED); the
+   ext/x11.h gate question partially answered by D5 (the core is
+   gated; ext/x11.h stays the sanctioned door, accepted for 1.0) —
+   4 accepted, 1 blocked-on-owner, none unresolved.
 ## The Vulkan recipe: a swapchain on an extension surface
 
 - examples/12_vulkan_surface.c drives the whole cycle through the
