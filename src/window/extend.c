@@ -1156,6 +1156,85 @@ fdk_result fdk_x11_set_event_filter(fdk_context *ctx,
 /* dmabuf_egl.c's bridge (the internal contract; the header's struct
  * definition rides with it). */
 #include "render/dmabuf_egl_internal.h"
+#include <stdio.h>
+
+fdk_result fdk_ext_surface_set_idle_inhibited(fdk_ext_surface *surface,
+                                              int inhibit) {
+    if (surface == NULL || surface->window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* the ext surface IS an internal window wearing a role: the
+     * window-level inhibitor rides the same wl_surface */
+    return fdk_window_set_idle_inhibited(surface->window, inhibit);
+}
+
+/* ---- Extension API v3: the FDK-MANAGED session-lock screen --------- */
+
+struct lock_screen_kind {
+    fdk_context *ctx;
+    void *lock_handle;
+};
+
+static fdk_result lock_screen_create(fdk_ext_surface *surface,
+                                     fdk_ext_native_handle *out_native,
+                                     void *user) {
+    struct lock_screen_kind *k = user;
+    if (k == NULL || k->ctx == NULL || k->ctx->ops == NULL ||
+        k->ctx->ops->session_lock_surface_managed == NULL) {
+        return (fdk_result)FDK_ERR_UNSUPPORTED;
+    }
+    void *native = NULL;
+    fdk_result r = k->ctx->ops->session_lock_surface_managed(
+        k->ctx->conn, k->lock_handle, (void *)surface, &native);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    out_native->pointer = native;
+    out_native->backend = FDK_EXT_BACKEND_WAYLAND;
+    return FDK_OK;
+}
+
+static void lock_screen_destroy(fdk_ext_surface *surface, void *user) {
+    (void)surface;
+    (void)user;
+    /* the role object dies with the WAYLAND surface (FDK destroys
+     * the surface next; the protocol surface proxy is a child of
+     * the lock object which unlock destroys) */
+}
+
+fdk_result fdk_session_lock_screen_create(fdk_context *ctx, void *lock,
+                                          fdk_ext_surface **out_surface) {
+    if (ctx == NULL || lock == NULL || out_surface == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (ctx->ops == NULL || ctx->conn == NULL ||
+        ctx->ops->session_lock_surface_managed == NULL) {
+        return FDK_ERR_UNSUPPORTED; /* not Wayland, or no lock role */
+    }
+    struct lock_screen_kind k = { ctx, lock };
+    fdk_ext_surface_ops ops;
+    memset(&ops, 0, sizeof ops);
+    ops.struct_size = sizeof ops;
+    ops.create = lock_screen_create;
+    ops.destroy = lock_screen_destroy;
+    /* the kind name is per-context unique; a second screen for the
+     * same lock re-registers under a fresh name (the compositor
+     * allows one lock surface per OUTPUT — multi-output lock screens
+     * mint one screen per output; the outputs accessor says which) */
+    static int screen_seq = 0;
+    char name[64];
+    snprintf(name, sizeof name, "fdk-session-lock-%d", ++screen_seq);
+    fdk_ext_surface_kind *kind = NULL;
+    fdk_result r = fdk_ext_register_kind(ctx, name, &ops, &k, &kind);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    r = fdk_ext_surface_create(kind, out_surface);
+    if (!fdk_ok(r)) {
+        (void)fdk_ext_kind_destroy(kind);
+    }
+    return r;
+}
 
 fdk_result fdk_texture_dmabuf_query(fdk_context *ctx, fdk_u32 fourcc,
                                     fdk_u64 *out_modifiers,

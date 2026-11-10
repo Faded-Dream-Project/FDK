@@ -356,6 +356,14 @@ typedef struct fdk_platform_ops {
      * keyboard surfaces (Wayland only; NULL elsewhere). */
     void *(*session_lock_open)(fdk_platform_connection *conn,
                                void (*on_event)(void *, int), void *user);
+    /* Extension API v3: the FDK-MANAGED lock surface (the
+     * first-class kind): FDK creates the role-less wl_surface,
+     * attaches the lock role on the first bound output, installs the
+     * configure listener (routed to the ext surface), and hands the
+     * raw surface to the ext adoption. Wayland-only; NULL elsewhere. */
+    fdk_result (*session_lock_surface_managed)(fdk_platform_connection *conn,
+                                               void *lock_handle, void *es,
+                                               void **out_native);
     void *(*session_lock_surface)(fdk_platform_connection *conn,
                                   void *lock, void *wl_surface,
                                   void *wl_output);

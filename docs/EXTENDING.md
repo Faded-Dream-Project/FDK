@@ -180,6 +180,18 @@ static void my_popup_attached(fdk_ext_surface *surface,
 X11 never calls this (the X tree parents popups to your window
 naturally). May be NULL — the popup then stands on its grab alone.
 
+### A note on first-class layer surfaces (the 0-px wall, 2026-11-10)
+
+An anchored-edge layer surface takes its SIZE from the client: a
+panel anchored TOP + LEFT + RIGHT is 0 px tall until the add-on calls
+`fdk_ext_layer_surface_set_size(surface, 0, height)` (0 = the
+compositor picks the width from the anchor edges). The blind-walk
+bar (examples/h-status-panel.c) configured at the output size and
+stayed invisible until it did. The idle-inhibit note, likewise: the
+inhibitor is settable per SURFACE since v3 —
+`fdk_ext_surface_set_idle_inhibited` — not only through the window
+API.
+
 ## 5. Events
 
 ```c

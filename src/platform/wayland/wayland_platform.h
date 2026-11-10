@@ -1272,6 +1272,9 @@ void fdk_wayland_addon_queues_dispatch(fdk_platform_connection *conn);
 void *fdk_wayland_session_lock(fdk_platform_connection *conn,
                                void (*on_event)(void *user, int locked),
                                void *user);
+fdk_result fdk_wayland_session_lock_surface_managed(
+    fdk_platform_connection *conn, void *handle, void *es,
+    void **out_native);
 void *fdk_wayland_session_lock_surface(fdk_platform_connection *conn,
                                        void *handle, void *wl_surface,
                                        void *wl_output);

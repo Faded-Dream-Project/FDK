@@ -574,6 +574,21 @@ struct wl_seat *fdk_ext_wl_seat(fdk_context *ctx, size_t index) {
     return c->seat;
 }
 
+size_t fdk_ext_wl_output_count(fdk_context *ctx) {
+    /* the connection's bound wl_outputs; the "gone" entries (scale 0)
+     * still count — an add-on rebinding by name sees the same truth */
+    fdk_platform_connection *c = (ctx != NULL) ? ctx->conn : NULL;
+    return (c != NULL) ? c->output_count : 0;
+}
+
+struct wl_output *fdk_ext_wl_output(fdk_context *ctx, size_t index) {
+    fdk_platform_connection *c = (ctx != NULL) ? ctx->conn : NULL;
+    if (c == NULL || index >= c->output_count) {
+        return NULL;
+    }
+    return c->outputs[index].output;
+}
+
 struct wl_data_device_manager *fdk_ext_wl_data_device_manager(
     fdk_context *ctx) {
     fdk_platform_connection *c = (ctx != NULL) ? ctx->conn : NULL;

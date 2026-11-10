@@ -43,6 +43,17 @@ struct wl_registry *fdk_ext_wl_registry(fdk_context *ctx);
 size_t fdk_ext_wl_seat_count(fdk_context *ctx);
 struct wl_seat *fdk_ext_wl_seat(fdk_context *ctx, size_t index);
 
+/* The connection's bound wl_outputs (the same objects FDK's output
+ * model drives — the scale/geometry listeners are FDK's, dispatching
+ * on FDK's queues; an add-on may pass them to role protocols like
+ * ext-session-lock's get_lock_surface). The count includes outputs
+ * that disappeared (their registry global was retired); such entries
+ * still return their (zombie) handle — a lock surface on a dead
+ * output is the compositor's refusal, not FDK's. Available since
+ * extension API v3 (append-only). */
+size_t fdk_ext_wl_output_count(fdk_context *ctx);
+struct wl_output *fdk_ext_wl_output(fdk_context *ctx, size_t index);
+
 /* The data-device manager FDK bound (NULL when absent). */
 struct wl_data_device_manager *fdk_ext_wl_data_device_manager(
     fdk_context *ctx);

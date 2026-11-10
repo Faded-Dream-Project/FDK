@@ -1,4 +1,41 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 2: example honesty — the FDK-native (d)/(f), the raw escape
+## hatches, and the blind EXTENDING.md walk
+
+- examples/d-input-method.c: the seat arrives from fdk_ext_wl_seat
+  (the documented accessor) — no raw-event surface. The protocol
+  listener stays vendor-carried (the documented add-on contract: the
+  add-on sets ITS OWN listeners on the raw proxy). Runs green under
+  sway: IM minted on FDK's seat, grab taken, clean teardown.
+- examples/f-session-lock.c: entirely first-class — open, the NEW
+  fdk_session_lock_screen_create, draw, unlock. Runs green under
+  sway: minted, adopted, LOCKED=1 (the real configure handshake
+  drives it), presented, clean unlock. The raw variants live on as
+  d-input-method-raw.c / f-session-lock-raw.c (the escape hatch).
+- The blind example (examples/h-status-panel.c, written ONLY from
+  EXTENDING.md + the public headers with src/ unread): a first-class
+  layer panel with an idle-inhibit toggle and a text-layout label.
+  Runs green under sway: configured, the 1280x32 bar, first frame,
+  clean exit. docs/DOC-GAPS.md records every wall; three became FDK
+  fixes:
+    1. fdk_ext_surface_set_idle_inhibited — the inhibitor was
+       window-only; a panel could not hold the screen awake (the new
+       public fn routes the same inhibitor through the ext surface).
+    2. fdk_session_lock_screen_create — the ext-surface native
+       accessor CANNOT serve the lock role (one role per wl_surface:
+       protocol error 2, the connection dies — caught live). The
+       first-class kind mints FDK's own role-less surface, attaches
+       the role on the first bound output, and listens for the
+       configure (acked, routed through the ext flow). The wrong
+       doc claim is corrected in fdk_extend.h.
+    3. fdk_ext_wl_output_count/fdk_ext_wl_output — the opt-in header
+       had a seat accessor but no output accessor; the lock role
+       needs an output and the raw-event surface was the only road.
+- The 0-px-layer-bar wall (an anchored-edge surface needs an explicit
+  set_size) is recorded in DOC-GAPS.md and handled in the example;
+  EXTENDING.md §4 got the note.
+- Export map carries the four new symbols (gate green); battery and
+  the P3 X11 lane green.
 ## Item 1: the dmabuf zero-copy path — EGLImage, modifiers, INVALID done right
 
 - src/render/dmabuf_egl.c (+ dmabuf_egl_internal.h): the self-contained

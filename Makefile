@@ -1004,7 +1004,11 @@ test-examples-protocols:
 	WL_LIBDIR=$$(pkg-config --variable=libdir wayland-client 2>/dev/null || echo /usr/lib); \
 	mkdir -p $(BUILD_DIR)/examples; \
 	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/d-input-method.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lm -ldl -lpthread -o $(BUILD_DIR)/examples/d-input-method; \
+	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/f-session-lock-raw.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lwayland-client -lm -ldl -lpthread -o $(BUILD_DIR)/examples/f-session-lock-raw; \
+	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/d-input-method-raw.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lwayland-client -lm -ldl -lpthread -o $(BUILD_DIR)/examples/d-input-method-raw; \
 	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/f-session-lock.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lm -ldl -lpthread -o $(BUILD_DIR)/examples/f-session-lock; \
+	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/d-input-method.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lwayland-client -lm -ldl -lpthread -o $(BUILD_DIR)/examples/d-input-method; \
+	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/h-status-panel.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lm -ldl -lpthread -o $(BUILD_DIR)/examples/h-status-panel; \
 	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/g-dmabuf-video.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lm -ldl -lpthread -o $(BUILD_DIR)/examples/g-dmabuf-video; \
 	echo "examples (d)/(f) built against the installed tree"
 

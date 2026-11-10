@@ -427,6 +427,18 @@ fdk_result fdk_ext_surface_get_surface(fdk_ext_surface *surface,
 void fdk_ext_surface_set_cursor(fdk_ext_surface *surface,
                                 int shape);
 
+/* Engages or releases the session's idle inhibitor FOR THIS SURFACE
+ * (extension API v3, append-only): the same
+ * zwp_idle_inhibit_manager_v1 object the window API drives, on the
+ * ext surface's native surface — a panel or lock screen can hold the
+ * screen awake exactly like a window. Answers FDK_ERR_UNSUPPORTED
+ * where the manager is missing (the D-Bus fallback is the caller's
+ * to arrange — the same contract as fdk_window_set_idle_inhibited;
+ * the capability to probe is FDK_EXT_CAP_IDLE_INHIBIT). Idempotent
+ * both ways. */
+fdk_result fdk_ext_surface_set_idle_inhibited(fdk_ext_surface *surface,
+                                              int inhibit);
+
 /* Sets the surface's INPUT region (1.0.0-rc2, S-4): `count`
  * window-local logical rectangles inside which the surface receives
  * pointer input; input outside them falls through to whatever is
@@ -1019,9 +1031,14 @@ fdk_result fdk_ext_gl_fence_wait(fdk_ext_surface *surface, fdk_u64 fence);
  * protocol, not an FDK window), and unlock
  * (fdk_session_lock_unlock — destroys the lock object). The raw
  * handles come from the add-on raw-event surface
- * (FDK_EXT_CAP_WL_RAW_EVENTS) or from an FDK ext surface's native
- * accessor. Wayland-only: NULL/UNSUPPORTED where
- * FDK_EXT_CAP_SESSION_LOCK is false. */
+ * (FDK_EXT_CAP_WL_RAW_EVENTS); the wl_surface MUST BE ROLE-LESS (a
+ * surface that already carries a role — a layer surface's native
+ * handle, an xdg window's — cannot take the lock role: the
+ * compositor answers protocol error 2 and kills the connection).
+ * The FIRST-CLASS path (fdk_session_lock_screen_create, v3) mints
+ * FDK's own role-less surface, listens for the configure, and
+ * renders — no raw handles at all. Wayland-only: NULL/UNSUPPORTED
+ * where FDK_EXT_CAP_SESSION_LOCK is false. */
 typedef void (*fdk_session_lock_event_fn)(void *user, int locked);
 
 void *fdk_session_lock_open(fdk_context *ctx,
@@ -1029,6 +1046,23 @@ void *fdk_session_lock_open(fdk_context *ctx,
 void *fdk_session_lock_surface(fdk_context *ctx, void *lock,
                                void *wl_surface, void *wl_output);
 void fdk_session_lock_unlock(void *lock);
+
+/* The FDK-MANAGED lock screen (extension API v3): a FIRST-CLASS lock
+ * surface — FDK creates a role-less wl_surface (a surface that
+ * already carries a role — e.g. an ext surface's native accessor —
+ * CANNOT take the lock role: the compositor answers protocol error
+ * 2 and kills the connection), attaches the role on the
+ * connection's first bound output, installs the configure listener
+ * (the compositor sizes the surface to the output; the configure
+ * flows through the ext-surface event stream), and adopts the
+ * surface: draw through fdk_ext_surface_get_surface + present, the
+ * same objects and lifetimes as every ext surface. The handle stays
+ * valid until fdk_ext_surface_destroy (destroy BEFORE
+ * fdk_session_lock_unlock — the role teardown wants its surface).
+ * Wayland-only: FDK_ERR_UNSUPPORTED where FDK_EXT_CAP_SESSION_LOCK
+ * is false. Available since extension API v3. */
+fdk_result fdk_session_lock_screen_create(fdk_context *ctx, void *lock,
+                                          fdk_ext_surface **out_surface);
 
 
 

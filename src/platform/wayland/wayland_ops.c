@@ -22,6 +22,7 @@ static const fdk_platform_ops g_wayland_ops = {
     .virtual_keyboard_available = fdk_wayland_virtual_keyboard_available,
     .wl_queue_create = fdk_wayland_queue_create,
     .session_lock_open = fdk_wayland_session_lock,
+    .session_lock_surface_managed = fdk_wayland_session_lock_surface_managed,
     .session_lock_surface = fdk_wayland_session_lock_surface,
     .session_lock_unlock = fdk_wayland_session_lock_unlock,
     .input_method_create = fdk_wayland_input_method_create,
