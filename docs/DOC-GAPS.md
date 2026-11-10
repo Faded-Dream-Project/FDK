@@ -98,11 +98,15 @@ authoring hit, and its fix:
    nothing appears. FIXED in EXTENDING.md (a warning in the
    create-callback section: plan the role object; own it in
    ops.destroy).
-3. **No public default-font accessor** — fdk_font_load(path, size)
-   refuses NULL, so a caption font means hardcoded candidate paths.
-   The example carries the pattern; the accessor (fdk_font_default())
-   is recorded as the v3 API candidate — NOT added now (the caption
-   story works with the documented loader, and 1.0 freezes after).
+3. **RESOLVED 2026-11-12 — it was a doc miss, not a missing API**:
+   fdk_font_load_system_default(pixel_size) has been public in
+   fdk_text.h all along (the blind authoring missed it because
+   fdk_font_load's contract block never cross-referenced it). FIXED
+   as a doc change: the cross-reference now sits in fdk_font_load's
+   contract ("no default-path handling here — use
+   fdk_font_load_system_default"), and the blind example uses the
+   accessor instead of a hardcoded candidate-path list. No v3 API
+   addition was needed; the append-only surface is unchanged.
 4. **fdk_init_options has no struct_size** — every add-on struct the
    docs show carries one; the init options is zero-init without it.
    FIXED in EXTENDING.md (one line in the example block: zero-init

@@ -94,6 +94,10 @@ typedef struct fdk_font fdk_font;
  *   FDK_ERR_OUT_OF_MEMORY   — allocation failed
  *   FDK_ERR_FONT_LOAD       — file is not a usable font (stbtt InitFont
  *                             rejected it: bad magic/tables)
+ *
+ * There is deliberately NO default-path handling here: a caller with
+ * no font of its own uses fdk_font_load_system_default() (below) for
+ * the system UI face, or points FDK_FONT_FILE at a file.
  */
 fdk_font *fdk_font_load(const char *path, fdk_i32 pixel_size);
 

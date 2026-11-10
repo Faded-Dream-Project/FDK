@@ -1,4 +1,26 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The audit's gap list is EMPTY: the two popup examples landed
+
+- examples/10_ext_popup.c — the ext-level popup: a kind surface
+  hosts fdk_ext_popup_create; on Xvfb the popup is real (draws, the
+  close-request callback wired, clean ASan teardown), on Wayland the
+  run documents the honest deferral (the kind defers to 11).
+- examples/11_ext_popup_attached.c — the popup_attached hook: under
+  sway the hook FIRES and adopts the xdg_popup proxy (asserted — the
+  proxy pointer is recorded at the one place wayland-client types
+  may appear); on X11 the documented negative is asserted too (the
+  hook never fires; the popup rides the window tree). The role-less
+  Wayland refusal stays a documented outcome.
+- Both built against the installed tree; a CI step runs 10+11 under
+  Xvfb and 11 under headless sway.
+- The default-font "gap" RESOLVED as a doc miss: the accessor
+  (fdk_font_load_system_default, fdk_text.h) has been public all
+  along — the blind example's grep missed it because fdk_font_load's
+  contract block never cross-referenced it. The cross-reference is
+  in, the blind example uses the accessor (the hardcoded candidate
+  list is gone), DOC-GAPS entry updated. No v3 surface change was
+  needed; verified on both backends.
+- docs/PRE-1.0-AUDIT.md §5 is now empty. Battery + exports green.
 ## Valgrind as the third detector in CI
 
 - A new ubuntu job step installs valgrind, builds the two targets in

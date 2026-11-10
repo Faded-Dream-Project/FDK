@@ -103,10 +103,16 @@ Updated 2026-11-11 (this session closed four of five):
   and asserts the honest UNSUPPORTED without a lane (and the impl's
   guard order was verified against the docs' "out_n is always the
   true count" contract).
-- The popup_attached hook's Wayland popup-parenting path — widget
-  tests cover it; STILL no ext-kind example (the one open gap).
-- `fdk_ext_popup_create`'s X11 OR-window path — widget-tested; STILL
-  no ext-level popup example (open, same family).
+- The popup_attached hook's Wayland popup-parenting path — CLOSED
+  2026-11-12: examples/11_ext_popup_attached.c registers a kind with
+  the hook, pops a popup under sway, and asserts the hook fired and
+  adopted the xdg_popup proxy (and asserts the documented X11
+  negative: the hook never fires there).
+- `fdk_ext_popup_create`'s X11 OR-window path — CLOSED 2026-11-12:
+  examples/10_ext_popup.c pops a menu off a kind surface on Xvfb
+  (draw + the close-request wiring + clean teardown under ASan) and
+  documents the honest Wayland deferral. Both run in CI (Xvfb +
+  sway). The audit's §5 list is now EMPTY.
 
 ## 6. The sign-off checklist (do at 1.0, in order)
 

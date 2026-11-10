@@ -320,25 +320,15 @@ int main(void) {
         return 2;
     }
 
-    /* The caption font. DOC GAP (recorded in docs/DOC-GAPS.md): there
-     * is no public default-font accessor — fdk_font_load takes a real
-     * path and refuses NULL — so an add-on hardcodes candidates. */
-    static const char *font_candidates[] = {
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    };
-    for (size_t i = 0; i < sizeof font_candidates / sizeof *font_candidates;
-         i++) {
-        g_font = fdk_font_load(font_candidates[i], 14);
-        if (g_font != NULL) {
-            break;
-        }
-    }
+    /* The caption font: the toolkit's system-default accessor (the
+     * DOC-GAPS entry was a doc miss — the accessor always existed;
+     * what was missing was the cross-reference from fdk_font_load). */
+    g_font = fdk_font_load_system_default(14);
     if (g_font == NULL) {
-        printf("[panel] no candidate font found - the caption is "
+        printf("[panel] no system default font — the caption is "
                "skipped\n");
     }
+
 
     /* The worker: the gradient renders off-thread; notes ride fdk_post;
      * the finished pixels come back through done() on the UI thread. */

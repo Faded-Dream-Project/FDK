@@ -228,6 +228,37 @@ jobs:
         # back to debug (sanitizer builds). FDK_CONFIG pinned throughout.
         run: make FDK_CONFIG=release all examples verify-exports
 
+      # The ext-level popup examples (the audit's two remaining
+      # opens): 10 = the popup itself (X11 OR-window; the honest
+      # Wayland skip), 11 = the popup_attached hook (X11: never
+      # fires; sway: fires and adopts the xdg_popup proxy). Built
+      # against the installed tree; the sway leg runs 11 under a
+      # real compositor.
+      - name: The ext popup examples (Xvfb + sway)
+        run: |
+          P=$PWD/build/fdk-install
+          for ex in 10_ext_popup 11_ext_popup_attached; do
+            cc -Iinclude examples/$ex.c $P/lib/libfdk.a \
+              -fsanitize=address,undefined -lX11 -lXext -lXrandr \
+              -lXrender -ldl -lwayland-client -lxkbcommon -lm -lz \
+              -pthread -o build/$ex || exit 1
+          done
+          xvfb-run -a -s "-screen 0 800x600x24" ./build/10_ext_popup || exit 1
+          xvfb-run -a -s "-screen 0 800x600x24" ./build/11_ext_popup_attached || exit 1
+          export XDG_RUNTIME_DIR=$(mktemp -d)
+          export WLR_BACKENDS=headless
+          export WLR_LIBINPUT_NO_DEVICES=1
+          export WLR_RENDERER=pixman
+          sway -c /dev/null & SWAY_PID=$!
+          for i in $(seq 1 20); do
+            ls "$XDG_RUNTIME_DIR" | grep -q '^wayland-' && break
+            sleep 0.5
+          done
+          WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR" | grep -o 'wayland-[0-9]*' | head -1) \
+            ASAN_OPTIONS=detect_leaks=1 ./build/11_ext_popup_attached \
+            || { kill $SWAY_PID 2>/dev/null; exit 1; }
+          kill $SWAY_PID 2>/dev/null || true
+
       # Valgrind (Item: the third detector). ASan and valgrind cannot
       # share a binary, so this runs the RELEASE config (the -O2 step
       # above already built those objects). Leak detection fully ON;
