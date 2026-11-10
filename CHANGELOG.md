@@ -1,4 +1,11 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Fix-forward: the matrix self-builds the header-gate tool
+
+- CI's sway lane failed on the D5 proof test: the step builds only
+  named targets, never `make all`, so the gate tool was absent and
+  the test demanded it. The test now self-builds the tool
+  (cc tools/header_gate.c) when missing — narrow-target invocations
+  stay green everywhere. The X11 lane re-run: all green.
 ## The hardware test kit: docs/HARDWARE-TESTING.md + tests/run-hardware.sh
 
 - One POSIX-sh script, no arguments, no network, no token: builds the
