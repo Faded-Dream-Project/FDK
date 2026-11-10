@@ -1,4 +1,22 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## CI-first: the b28b442 run's verdict, two real fixes, the timeouts
+
+- The b28b442 run: 6 jobs hung ~24h on dead runners (cancelled);
+  the two that finished BOTH found real bugs:
+    1. ubuntu's sway lane: a 96-byte leak naming
+       zwp_virtual_keyboard_manager_v1_create_virtual_keyboard — the
+       public API had NO destroy. fdk_virtual_keyboard_destroy added
+       (v3, append-only; zwp_virtual_keyboard_v1_destroy; NULL
+       no-op); the P3 test destroys its keyboard.
+    2. alpine's test-x11: the accelerator GUI test aborted — the
+       XTEST key delivery raced the fixed 200ms pump under the musl
+       runner (the text check asserted against a sleep). The content
+       check now polls up to 2s (arrival timing, not behavior, was
+       the variable).
+- timeout-minutes: 25 on every job (the caller and the distro callee
+  workflow) — a dead runner fails fast instead of hanging a run.
+- The alpine/rpm/arch/debian/void distro jobs inherit it via the
+  callee.
 ## Item 5: the pre-1.0 decision list (docs/PRE-1.0-DECISIONS.md)
 
 - The audit turned into eleven numbered decisions (D1-D11): the layout

@@ -1298,3 +1298,4 @@ void fdk_wayland_virtual_keyboard_key(void *kb, fdk_u32 time_ms,
                                       fdk_u32 key, fdk_u32 state);
 
 #endif /* FDK_WAYLAND_PLATFORM_H */
+void fdk_wayland_virtual_keyboard_destroy(void *kb);

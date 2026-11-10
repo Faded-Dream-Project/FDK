@@ -16130,10 +16130,19 @@ static void test_window_shortcuts_and_accelerators_gui(void) {
     /* 5. The tree still gets keys nobody claims: type "ab" into the
      * focused Entry through real key events, then undo/redo with the
      * real Ctrl+Z / Ctrl+Y. */
+    /* The XTEST delivery races under loaded runners (the alpine
+     * flake, 2026-11-11: the 200ms pump returned before the keys
+     * landed and the text check aborted the job). The CONTENT is not
+     * in question — the arrival timing is: poll up to 2s instead of
+     * asserting against a fixed sleep. */
+    int typed_ok = 0;
     x11_send_key_state(send_dpy, xid, 38, 0); /* a */
     x11_send_key_state(send_dpy, xid, 56, 0); /* b */
-    (void)fdk_pump_events(ctx, 200);
-    assert(strcmp(fdk_entry_get_text(entry), "ab") == 0);
+    for (int i = 0; i < 20 && !typed_ok; i++) {
+        (void)fdk_pump_events(ctx, 100);
+        typed_ok = strcmp(fdk_entry_get_text(entry), "ab") == 0;
+    }
+    assert(typed_ok);
     assert(fdk_entry_can_undo(entry));
     x11_send_key_state(send_dpy, xid, 52, ControlMask); /* Ctrl+Z */
     (void)fdk_pump_events(ctx, 200);

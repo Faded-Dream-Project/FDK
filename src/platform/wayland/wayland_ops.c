@@ -33,6 +33,7 @@ static const fdk_platform_ops g_wayland_ops = {
     .input_method_commit = fdk_wayland_input_method_commit,
     .virtual_keyboard_create = fdk_wayland_virtual_keyboard_create,
     .virtual_keyboard_key = fdk_wayland_virtual_keyboard_key,
+    .virtual_keyboard_destroy = fdk_wayland_virtual_keyboard_destroy,
     .dmabuf_import_available = fdk_wayland_egl_dmabuf_available,
     .lane_egl_display = fdk_wayland_egl_lane_display,
     .window_activation_available = fdk_wayland_activation_available,

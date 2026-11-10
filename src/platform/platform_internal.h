@@ -384,6 +384,7 @@ typedef struct fdk_platform_ops {
                                      fdk_u32 size);
     void (*virtual_keyboard_key)(void *kb, fdk_u32 time_ms, fdk_u32 key,
                                  fdk_u32 state);
+    void (*virtual_keyboard_destroy)(void *kb);
     /* P3: the X11 add-on event filter (x11_dispatch.c). */
     fdk_result (*x11_set_event_filter)(fdk_platform_connection *conn,
                                        int (*filter)(void *, void *),

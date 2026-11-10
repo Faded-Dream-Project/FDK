@@ -199,6 +199,7 @@ fdk_toplevel_list_close(tl);
                     fdk_virtual_keyboard_key(vk, 10, 16, 0);
                     fdk_pump_events(ctx, 16);
                     CHECK(1, "virtual keyboard keys emitted cleanly");
+                    fdk_virtual_keyboard_destroy(vk);
                 }
             } else {
                 printf("[info] SKIP: no virtual-keyboard capability\n");

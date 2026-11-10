@@ -1108,4 +1108,10 @@ void *fdk_virtual_keyboard_create(fdk_context *ctx, void *seat_raw,
 void fdk_virtual_keyboard_key(void *kb, fdk_u32 time_ms, fdk_u32 key,
                               fdk_u32 state);
 
+/* Destroys the keyboard (zwp_virtual_keyboard_v1). The CI leak
+ * catch, 2026-11-11: without it the proxy survives the connection
+ * teardown and LeakSanitizer names it on every Wayland run. NULL is
+ * a no-op. Available since extension API v3 (append-only). */
+void fdk_virtual_keyboard_destroy(void *kb);
+
 #endif /* FDK_EXTEND_H */

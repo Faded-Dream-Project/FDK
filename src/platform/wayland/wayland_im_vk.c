@@ -100,3 +100,10 @@ void fdk_wayland_virtual_keyboard_key(void *kb, fdk_u32 time_ms,
                                     time_ms, key, state);
     }
 }
+
+void fdk_wayland_virtual_keyboard_destroy(void *kb) {
+    if (kb != NULL) {
+        zwp_virtual_keyboard_v1_destroy(
+            (struct zwp_virtual_keyboard_v1 *)kb);
+    }
+}

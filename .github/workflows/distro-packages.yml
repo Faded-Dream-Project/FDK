@@ -43,6 +43,7 @@ jobs:
   package:
     name: ${{ matrix.id }}
     runs-on: ubuntu-latest
+    timeout-minutes: 25 # a dead runner fails fast (the arch hang, 2026-11-10)
     permissions:
       contents: read
     strategy:

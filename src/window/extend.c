@@ -1146,6 +1146,11 @@ void fdk_virtual_keyboard_key(void *kb, fdk_u32 time_ms, fdk_u32 key,
     fdk_wayland_virtual_keyboard_key(kb, time_ms, key, state);
 }
 
+void fdk_virtual_keyboard_destroy(void *kb) {
+    extern void fdk_wayland_virtual_keyboard_destroy(void *kb);
+    fdk_wayland_virtual_keyboard_destroy(kb);
+}
+
 /* ---- P3: the X11 add-on event filter ---------------------------------- */
 fdk_result fdk_x11_set_event_filter(fdk_context *ctx,
                                     fdk_x11_event_filter_fn filter,
