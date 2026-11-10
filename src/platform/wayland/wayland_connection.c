@@ -565,6 +565,15 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
         xdg_toplevel_icon_manager_v1_destroy(conn->toplevel_icon_manager);
         conn->toplevel_icon_manager = NULL;
     }
+    if (conn->cursor_shape_manager != NULL) {
+        wp_cursor_shape_manager_v1_destroy(conn->cursor_shape_manager);
+        conn->cursor_shape_manager = NULL;
+    }
+    if (conn->primary_manager != NULL) {
+        zwp_primary_selection_device_manager_v1_destroy(
+            conn->primary_manager);
+        conn->primary_manager = NULL;
+    }
     fdk_wayland_ime_teardown(conn);
     if (conn->idle_inhibit_manager != NULL) {
         zwp_idle_inhibit_manager_v1_destroy(conn->idle_inhibit_manager);
@@ -573,6 +582,23 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
     if (conn->activation != NULL) {
         xdg_activation_v1_destroy(conn->activation);
         conn->activation = NULL;
+    }
+    /* The P3 managers (the session-lock / IM / virtual-keyboard
+     * additions) died only with the display disconnect — LeakSanitizer
+     * on the sway lane counted their two proxy allocations (the CI
+     * catch, 2026-11-10). Idempotent destroys, same shape as above. */
+    if (conn->session_lock_manager != NULL) {
+        ext_session_lock_manager_v1_destroy(conn->session_lock_manager);
+        conn->session_lock_manager = NULL;
+    }
+    if (conn->input_method_manager != NULL) {
+        zwp_input_method_manager_v2_destroy(conn->input_method_manager);
+        conn->input_method_manager = NULL;
+    }
+    if (conn->virtual_keyboard_manager != NULL) {
+        zwp_virtual_keyboard_manager_v1_destroy(
+            conn->virtual_keyboard_manager);
+        conn->virtual_keyboard_manager = NULL;
     }
     /* Tablets (1.0.0, D-3): the tool records + the tablet seat die
      * with the connection; the manager proxy below. Idempotent. */

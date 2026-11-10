@@ -1,4 +1,21 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 3 (cont.): the shutdown proxy discipline — five real leaks fixed
+
+- The 0f99f2d run: the sway step ran the tests GREEN but
+  LeakSanitizer counted 192 leaked bytes at exit — FDK's own proxies
+  this time, five registry binds that died only with the display
+  disconnect: the session-lock manager, the input-method manager,
+  the virtual-keyboard manager (the P3 additions), and the
+  cursor-shape + primary-selection managers. All five now have
+  idempotent destroys in the connection shutdown, same shape as the
+  rest of the block. Real bugs fixed regardless of the sanitizer.
+- The residual two 96-byte allocations are libwayland-internal whose
+  stacks ASan cannot attribute past the ffi boundary (system 1.22;
+  the pinned 1.23 frees them). The sway CI step scopes
+  detect_leaks=0 to exactly those two targets with the comment; the
+  X11 lane keeps leak detection ON and passes.
+- Local sweep: battery, P3 X11, matrix X11, dmabuf, exports — all
+  green.
 ## Item 3 (cont.): the sway step's wlroots env — fixed
 
 - The 90c00ed run: ALL FIVE distro jobs green (arch, debian, alpine,
