@@ -99,9 +99,9 @@ cc -O1 -I"$X11DEV/usr/include" scripts/xdnd_sink.c \
    || echo "   xdnd_sink BUILD FAILED"
 
 echo "== 4/4: the git identity hooks =="
-git config user.name "Faded Dream Project"
+git config user.name "FemBoyGamerTechGuy"
 git config user.email "242450780+FemBoyGamerTechGuy@users.noreply.github.com"
-git config --global user.name "Faded Dream Project" 2>/dev/null || true
+git config --global user.name "FemBoyGamerTechGuy" 2>/dev/null || true
 git config --global user.email \
     "242450780+FemBoyGamerTechGuy@users.noreply.github.com" 2>/dev/null || true
 mkdir -p .git/hooks
@@ -109,10 +109,10 @@ cat > .git/hooks/pre-commit <<'HOOK'
 #!/bin/sh
 name=$(git config user.name)
 email=$(git config user.email)
-if [ "$name" != "Faded Dream Project" ] || \
+if [ "$name" != "FemBoyGamerTechGuy" ] || \
    [ "$email" != "242450780+FemBoyGamerTechGuy@users.noreply.github.com" ]; then
     echo "PRE-COMMIT ABORT: identity must be exactly"
-    echo "  Faded Dream Project <242450780+FemBoyGamerTechGuy@users.noreply.github.com>"
+    echo "  FemBoyGamerTechGuy <242450780+FemBoyGamerTechGuy@users.noreply.github.com>"
     echo "  (got: $name <$email>)"
     exit 1
 fi

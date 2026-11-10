@@ -1,4 +1,14 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Identity fix (sandbox infra)
+
+- scripts/setup-sandbox.sh installed the git identity as
+  "Faded Dream Project" and a pre-commit hook enforcing exactly that
+  name; per the owner the commit author is FemBoyGamerTechGuy
+  <242450780+FemBoyGamerTechGuy@users.noreply.github.com>. The setup
+  script, both git configs and the hook now agree on the correct
+  identity. The five earlier session commits keep their old author
+  (fixing them would need a force-push, which the rollback rules
+  forbid); all commits from this session on carry the correct author.
 
 ### Added — the GPU paint engine (P1, the main goal)
 
