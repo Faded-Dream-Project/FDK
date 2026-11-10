@@ -1,4 +1,19 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Valgrind as the third detector in CI
+
+- A new ubuntu job step installs valgrind, builds the two targets in
+  the RELEASE config (ASan and valgrind cannot share a binary; the
+  -O2 step's release objects are already there), and runs:
+    1. the dmabuf robustness matrix (no compositor needed),
+    2. the two-output session-lock flow under headless sway,
+  with --leak-check=full, definite/indirect leak errors and
+  --error-exitcode=42 — invalid reads/writes AND leaks fail the job.
+- The config-stamp machinery already guards the debug/release flip
+  (a full rebuild on config change), so the step cannot mix objects.
+- Verified locally to the extent the sandbox allows: both release
+  test binaries build and the dmabuf matrix passes in release
+  (valgrind itself is not installable here — no package repo — the
+  CI step is the first real execution).
 ## Header dependency tracking: every test binary tracks every header
 
 - The library objects already carried -MMD -MP (included at the file

@@ -228,6 +228,55 @@ jobs:
         # back to debug (sanitizer builds). FDK_CONFIG pinned throughout.
         run: make FDK_CONFIG=release all examples verify-exports
 
+      # Valgrind (Item: the third detector). ASan and valgrind cannot
+      # share a binary, so this runs the RELEASE config (the -O2 step
+      # above already built those objects). Leak detection fully ON;
+      # definite/indirect leaks and any invalid read/write fail the
+      # job (error-exitcode 42). The two targets: the two-output
+      # session-lock flow under a real sway, and the dmabuf
+      # robustness matrix (no compositor needed).
+      - name: Valgrind — the session-lock flow + the dmabuf matrix
+        run: |
+          sudo apt-get install -y --no-install-recommends valgrind sway
+          make FDK_CONFIG=release build/tests/test_p3_protocols \
+            build/tests/test_dmabuf
+          # the dmabuf matrix: no display needed
+          valgrind \
+            --leak-check=full --show-leak-kinds=definite,indirect \
+            --errors-for-leak-kinds=definite,indirect \
+            --track-origins=yes --error-exitcode=42 \
+            ./build/tests/test_dmabuf > valgrind-dmabuf.log 2>&1 \
+            || { tail -40 valgrind-dmabuf.log; exit 1; }
+          grep -E 'ERROR SUMMARY: 0 errors|all green' valgrind-dmabuf.log \
+            || { tail -40 valgrind-dmabuf.log; exit 1; }
+          # the two-output session-lock flow under sway (the same
+          # env shape as the sway step above)
+          export XDG_RUNTIME_DIR=$(mktemp -d)
+          export WLR_BACKENDS=headless
+          export WLR_LIBINPUT_NO_DEVICES=1
+          export WLR_RENDERER=pixman
+          sway -c /dev/null & SWAY_PID=$!
+          for i in $(seq 1 40); do
+            ls "$XDG_RUNTIME_DIR" | grep -q '^wayland-' && break
+            sleep 0.5
+          done
+          SWAYSOCK=$(ls "$XDG_RUNTIME_DIR"/sway-ipc* | head -1) \
+            swaymsg create_output > /dev/null 2>&1 || true
+          WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR" | grep -o 'wayland-[0-9]*' | head -1) \
+            valgrind \
+              --leak-check=full --show-leak-kinds=definite,indirect \
+              --errors-for-leak-kinds=definite,indirect \
+              --track-origins=yes --error-exitcode=42 \
+              ./build/tests/test_p3_protocols wayland \
+              > valgrind-lock.log 2>&1 \
+            || { tail -60 valgrind-lock.log; kill $SWAY_PID 2>/dev/null; exit 1; }
+          grep -E 'ERROR SUMMARY: 0 errors' valgrind-lock.log \
+            || { tail -60 valgrind-lock.log; kill $SWAY_PID 2>/dev/null; exit 1; }
+          grep 'P3 PROTOCOLS: all green' valgrind-lock.log \
+            || { tail -20 valgrind-lock.log; kill $SWAY_PID 2>/dev/null; exit 1; }
+          kill $SWAY_PID 2>/dev/null || true
+          echo "valgrind: both targets clean (0 errors, no leaks)"
+
   distro-packages:
     name: distro packages
     uses: ./.github/workflows/distro-packages.yml
