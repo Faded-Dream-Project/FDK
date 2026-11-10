@@ -1,4 +1,28 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 2: multi-angle circle cross-sections — the ring band fix
+
+- tests/crosssection.c now dumps radial cross-sections (samples ON the
+  radial at d=-3..+3 px) for the fill at r=24 and r=6 and the ring at
+  r=24, at 0/22.5/45/67.5/90 degrees, with the edge-band mean |cpu-gpu|
+  and the radial 50%-coverage crossing per angle.
+- Fill evidence: edge-band mean 0.00-0.33 (= 0-1 LSB) at every
+  angle/radius; the 50%-crossings agree to +0.00 px. The AA model
+  agrees; no geometry offset anywhere.
+- Ring evidence found a real residual: the GPU's circle stroke peaked
+  half a pixel INSIDE the radius (band [R-1.5, R+0.5]) vs the CPU's
+  straddling 2px triangle 1-|dist-R| (cpu 103/101 vs gpu 203/0), and
+  the stroke quad (exactly 2R wide) did not even cover fragments out
+  to R+1. Fixed: the circle-stroke shader branch uses the CPU's exact
+  triangle and the emitter pads the quad 1px, carrying the true radius
+  in aux0.y. After: ring rows match within 1 LSB at every angle.
+- The smoke's circles region dropped from edge mean 25.7 (max 115) to
+  0.334 (max 1.0).
+- Goldens: none existed to update (tests/data holds theme files, not
+  reference images). The circle tests in test_render.c are PROPERTY
+  assertions (monotone coverage, half-ish blends, presence/absence);
+  they stay valid under the pixel-center convention and the battery
+  has been green since the fix (5b60dfc). The smoke's circle
+  tolerances are now re-measured and far tighter than the gates.
 ## Item 1: the widget embed is a fixed padded budget
 
 - fdk_widget_embed / FDK_WIDGET_EMBED_U64 goes 61 u64 (488 bytes,

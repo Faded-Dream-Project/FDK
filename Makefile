@@ -876,7 +876,7 @@ XSEC_BIN := $(BUILD_DIR)/tests/crosssection
 $(XSEC_BIN): tests/crosssection.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
-	       $(STATIC_LIB) -o $@ $(LDFLAGS)
+	       $(STATIC_LIB) -o $@ $(LDFLAGS) -lm
 
 test-crosssection: $(XSEC_BIN)
 	"$(XSEC_BIN)"

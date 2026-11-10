@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #define XW 640
 #define XH 480
@@ -221,7 +222,122 @@ int main(int argc, char **argv) {
             break;
         }
     }
-        /* the 45-degree arc: edge at center + r/sqrt(2) up-right */
+        /* Item 2 close-out: per-angle radial cross-sections for r=24 and
+     * r=6. Samples sit ON the radial at d in [-3, +3] px from the
+     * ideal edge (pixel-snapped). For each angle: both profiles, the
+     * edge-band mean |cpu-gpu| (d=-1..+1), and the radial offset —
+     * where each side crosses 50% coverage (114 = half of the 229
+     * contrast), interpolated linearly. A geometry offset shows as a
+     * consistent nonzero delta; an AA-model difference leaves the
+     * crossings aligned with different slopes. */
+    {
+        /* a real r=24 fill for the radial walk (the scene's big
+         * circle is r=120; its r=24 radial would sample its core) */
+        fdk_color red2 = { 0.8f, 0.1f, 0.1f, 1.0f };
+        fdk_surface_fill_circle_aa(s, 200, 400, 24, red2);
+        fdk_surface_fill_circle_aa(off, 200, 400, 24, red2);
+        fdk_color green = { 0.1f, 0.8f, 0.3f, 1.0f };
+        fdk_surface_fill_circle_aa(s, 520, 120, 6, green);
+        fdk_surface_fill_circle_aa(off, 520, 120, 6, green);
+        /* the ring (draw_circle_aa) — the other half of the smoke's
+         * circles region; its radial profile decides whether the
+         * remaining smoke residual is the fill (no) or the ring. */
+        fdk_color purple = { 0.6f, 0.2f, 0.8f, 1.0f };
+        fdk_surface_draw_circle_aa(s, 100, 380, 24, purple);
+        fdk_surface_draw_circle_aa(off, 100, 380, 24, purple);
+        fdk_surface_present(s);
+        for (int i = 0; i < 2; i++) {
+            fdk_pump_events(ctx, 16);
+        }
+        gpu = grab_gpu(w);
+        if (gpu != NULL) {
+            for (int y = 0; y < 480; y++) {
+                const fdk_u32 *row =
+                    off->own_pixels + (size_t)y * off->fb.stride;
+                for (int x = 0; x < 640; x++) {
+                    fdk_u32 p = row[x];
+                    cref[y * 640 + x] =
+                        0xff000000u | ((p & 0xffu) << 16) |
+                        (p & 0xff00u) | ((p >> 16) & 0xffu);
+                }
+            }
+            const fdk_u32 *cpu = cref;
+            static const double angs[5] = { 0.0, 22.5, 45.0, 67.5, 90.0 };
+            static const struct { int r, cx, cy; } rc[3] = {
+                { 24, 200, 400 }, { 6, 520, 120 }, { 24, 100, 380 }
+            };
+            for (int ri = 0; ri < 3; ri++) {
+                const int R = rc[ri].r, ccx = rc[ri].cx, ccy = rc[ri].cy;
+                /* per-circle flat (the r=6 disk is green, the ring's
+                 * flat = its center = background) */
+                const fdk_u32 myflat =
+                    ri == 0 ? flat
+                            : cref[ccy * 640 + ccx];
+                const double thr =
+                    cov(cpu[(ccy - R - 3) * 640 + ccx], myflat) / 2.0;
+                for (int ai = 0; ai < 5; ai++) {
+                    double th = angs[ai] * 3.14159265358979323 / 180.0;
+                    double cth = cos(th), sth = sin(th);
+                    printf("== CIRCLE r=%d angle=%.1f (%s) ==\n", R,
+                       angs[ai], ri == 2 ? "ring" : "fill");
+                    double band = 0.0, cp50 = -1, gp50 = -1;
+                    double cvals[7] = { 0 }, gvals[7] = { 0 };
+                    printf("cpu:");
+                    for (int k = -3; k <= 3; k++) {
+                        double dd = (double)R + (double)k;
+                        int px = (int)(ccx + dd * cth + 0.5);
+                        int py = (int)(ccy - dd * sth + 0.5);
+                        double v = cov(cpu[py * 640 + px], myflat);
+                        cvals[k + 3] = v;
+                        printf(" %5.0f", v);
+                        if (k >= -1 && k <= 1) {
+                            }
+                        /* outward = increasing cov (white side); the
+                         * 50% crossing sits between two samples */
+                        if (k > -3 && cp50 < 0) {
+                            double dd0 = (double)R + (double)(k - 1);
+                            int px0 = (int)(ccx + dd0 * cth + 0.5);
+                            int py0 = (int)(ccy - dd0 * sth + 0.5);
+                            double v0 = cov(cpu[py0 * 640 + px0], myflat);
+                            if (v0 < thr && v >= thr) {
+                                cp50 = dd0 + (thr - v0) / (v - v0) - R;
+                            }
+                        }
+                    }
+                    printf("\ngpu:");
+                    for (int k = -3; k <= 3; k++) {
+                        double dd = (double)R + (double)k;
+                        int px = (int)(ccx + dd * cth + 0.5);
+                        int py = (int)(ccy - dd * sth + 0.5);
+                        double v = cov(gpu[py * 640 + px], myflat);
+                        gvals[k + 3] = v;
+                        printf(" %5.0f", v);
+                        if (k > -3 && gp50 < 0) {
+                            double dd0 = (double)R + (double)(k - 1);
+                            int px0 = (int)(ccx + dd0 * cth + 0.5);
+                            int py0 = (int)(ccy - dd0 * sth + 0.5);
+                            double v0 = cov(gpu[py0 * 640 + px0], myflat);
+                            if (v0 < thr && v >= thr) {
+                                gp50 = dd0 + (thr - v0) / (v - v0) - R;
+                            }
+                        }
+                    }
+                    printf("\n");
+                    for (int k = -1; k <= 1; k++) {
+                        double dd = cvals[k + 3] - gvals[k + 3];
+                        band += dd > 0 ? dd : -dd;
+                    }
+                    printf("  edge-band mean |cpu-gpu| = %.2f; radial "
+                           "50%%-crossing: cpu=%s%.2f gpu=%s%.2f "
+                           "(gpu-cpu %+.2f px)\n",
+                           band / 3.0, cp50 < 0 ? "?" : "", cp50,
+                           gp50 < 0 ? "?" : "", gp50,
+                           (cp50 >= 0 && gp50 >= 0) ? gp50 - cp50 : 0.0);
+                }
+            }
+        }
+    }
+    /* the 45-degree arc: edge at center + r/sqrt(2) up-right */
     {
         int ay = 240 - 85;
         int ax = 320 + 85;

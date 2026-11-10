@@ -304,13 +304,25 @@ static const char *GP_FS_BODY =
     "            d = sd_rect(p - half_sz, half_sz - vec2(v_aux0.y)) -\n"
     "                v_aux0.y;\n"
     "        } else {\n"
-    "            d = length(p - half_sz) - min(half_sz.x, half_sz.y);\n"
+    /*  circle stroke: the quad is padded 1px (the emitter), the true
+        radius rides aux0.y — undo the pad before the SDF */
+    "            d = length(p - half_sz) -\n"
+    "                (min(half_sz.x, half_sz.y) - v_aux0.y);\n"
     "        }\n"
-    /*  the CPU's 1px stroke paints the boundary PIXEL ring: its
-        center sits half a pixel inside the shape edge. Center the
-        GPU ring there too (stroke_half is in pixels). */
-    "        float ring = abs(d + v_aux0.z) - v_aux0.z;\n"
-    "        float a = clamp(0.5 - ring, 0.0, 1.0);\n"
+    /*  Rect strokes: the CPU paints the boundary PIXEL ring, whose
+        center sits half a pixel INSIDE the shape edge — the ring
+        band below is inside-only and matches. Circle strokes: the
+        CPU's coverage is the 2px triangle 1-|dist-R|, straddling the
+        mathematical radius (the radial cross-section evidence:
+        two half-coverage pixels, cpu 103/101 vs the old gpu 203/0) —
+        the circle branch uses that triangle directly. */
+    "        float a;\n"
+    "        if (v_aux0.w < 0.5) {\n"
+    "            float ring = abs(d + v_aux0.z) - v_aux0.z;\n"
+    "            a = clamp(0.5 - ring, 0.0, 1.0);\n"
+    "        } else {\n"
+    "            a = clamp(1.0 - abs(d), 0.0, 1.0);\n"
+    "        }\n"
     "        c = vec4(v_color.rgb, v_color.a * a);\n"
     "    } else if (mode < 2.5) {\n" /* vertical gradient */
     "        float t = clamp(p.y / max(v_aux2.w, 1.0), 0.0, 1.0);\n"
@@ -783,10 +795,12 @@ void fdk__gpu_draw_circle(struct fdk_surface *s, fdk_f32 cx, fdk_f32 cy,
                           int aa) {
     (void)aa;
     /* The CPU's AA circle stroke straddles the mathematical radius R
-     * (coverage of the curve itself); the ring band is inside-only in
-     * d-space, so inflate the shape by t/2 to re-center it on R. */
-    gp_quad(s, cx - radius, cy - radius, radius * 2.0f, radius * 2.0f, 1, 1,
-            -thickness * 0.5f, thickness * 0.5f, c, c, 0, 0, 0, 0, 1.0f);
+     * (the 2px triangle 1-|dist-R|, out to R+1). The quad is padded
+     * by 1px on every side so fragments out to R+1 exist, and the
+     * true radius rides aux0.y (the shader undoes the pad). */
+    gp_quad(s, cx - radius - 1.0f, cy - radius - 1.0f, radius * 2.0f + 2.0f,
+            radius * 2.0f + 2.0f, 1, 1, 1.0f, thickness * 0.5f, c, c, 0, 0,
+            0, 0, 1.0f);
 }
 
 void fdk__gpu_draw_line(struct fdk_surface *s, fdk_f32 x0, fdk_f32 y0,
