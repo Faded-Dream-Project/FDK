@@ -32,6 +32,14 @@ static void *queue_raw_bind_impl(struct fdk_wl_queue *q, fdk_u32 name,
 static int queue_dispatch_impl(struct fdk_wl_queue *q);
 static void queue_attach_impl(struct fdk_wl_queue *q, int on_pump);
 
+/* wl_display_create_queue_with_name arrived in libwayland 1.23;
+ * runners and distros on 1.22 (ubuntu-24.04, debian stable) lack it.
+ * The weak ref is NULL there — the unnamed queue is the honest
+ * fallback (the name is a debugging aid, not a protocol fact). */
+__attribute__((weak)) struct wl_event_queue *
+wl_display_create_queue_with_name(struct wl_display *display,
+                                  const char *name);
+
 void *fdk_wayland_queue_create(fdk_platform_connection *conn,
                                const char *name) {
     if (conn == NULL || conn->display == NULL) {
@@ -42,9 +50,11 @@ void *fdk_wayland_queue_create(fdk_platform_connection *conn,
         return NULL;
     }
     memset(q, 0, sizeof *q);
-    q->q = name != NULL
-               ? wl_display_create_queue_with_name(conn->display, name)
-               : wl_display_create_queue(conn->display);
+    if (name != NULL && wl_display_create_queue_with_name != NULL) {
+        q->q = wl_display_create_queue_with_name(conn->display, name);
+    } else {
+        q->q = wl_display_create_queue(conn->display);
+    }
     if (q->q == NULL) {
         fdk_free(q);
         return NULL;

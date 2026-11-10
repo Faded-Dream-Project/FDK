@@ -1,4 +1,15 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 3: CI verification — the libwayland 1.22 wall, fixed
+
+- The Actions run for 178530e: build + test (ubuntu) FAILED at the
+  link (undefined wl_display_create_queue_with_name — libwayland 1.23
+  on the pinned prefix, 1.22 on ubuntu-24.04 and debian stable); the
+  distro matrix was green on arch/rpm/alpine/void and failed the same
+  way on debian.
+- The fix: a weak reference to wl_display_create_queue_with_name —
+  NULL on pre-1.23 libwayland falls back to the unnamed queue (the
+  name is a debugging aid, not a protocol fact). Both lanes green
+  locally (battery, P3 X11, P3 sway).
 ## Item 2: example honesty — the FDK-native (d)/(f), the raw escape
 ## hatches, and the blind EXTENDING.md walk
 
