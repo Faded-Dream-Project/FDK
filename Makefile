@@ -848,3 +848,22 @@ clean:
 # .d's object the default goal (make pitfall; hit during the Phase 8
 # session). After every target is defined, including them is inert.
 -include $(DEPS)
+
+# Wayland GLES GPU paint smoke — the GLES-only lane under a headless
+# compositor (WLR_BACKENDS=headless sway, or any weston). Self-skips
+# without WAYLAND_DISPLAY.
+WL_GPU_TEST_BIN := $(BUILD_DIR)/tests/test_gpu_paint_wl
+
+$(WL_GPU_TEST_BIN): tests/test_gpu_paint_wl.c $(STATIC_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
+	       $(STATIC_LIB) -o $@ $(LDFLAGS)
+
+test-gpu-paint-wl: $(WL_GPU_TEST_BIN)
+	@if [ -n "$$WAYLAND_DISPLAY" ]; then \
+	    echo "== GLES-only GPU paint smoke (wayland lane) =="; \
+	    "$(WL_GPU_TEST_BIN)" || exit 1; \
+	else \
+	    echo "== no WAYLAND_DISPLAY; self-skip =="; \
+	    "$(WL_GPU_TEST_BIN)"; \
+	fi
