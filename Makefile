@@ -311,6 +311,18 @@ EXPORT_MAP := $(BUILD_DIR)/libfdk.exports.map
 TEST_SRCS := $(filter-out tests/crosssection.c tests/test_dpi_scale.c tests/test_gpu_paint_wl.c tests/test_x11_share.c tests/test_arbitration.c tests/test_p3_protocols.c tests/test_matrix.c tests/test_dmabuf.c tests/test_x11_integration.c tests/test_gpu_paint.c tests/probe_cpu.c tests/test_wayland_integration.c tests/test_dbus_live.c tests/test_notify_client.c tests/test_tray_item.c tests/test_clip_uris.c tests/bench.c,$(wildcard tests/*.c))
 TEST_BINS := $(patsubst tests/%.c,$(BUILD_DIR)/tests/%,$(TEST_SRCS))
 
+# Every test binary ALSO depends on every FDK header (public AND
+# private). The one-step test compiles inline whatever headers the
+# test includes — window_internal.h, the platform headers — so a
+# private-struct change with no surviving library includer would
+# otherwise leave a stale test object linked against a fresh lib
+# (the 0xe5 mixed-layout class, 2026-11-11). Broad by design: a
+# header touch is rare and correctness beats minimality here.
+ALL_FDK_HEADERS := $(wildcard include/fdk/*.h include/fdk/ext/*.h \
+    src/*.h src/window/*.h src/render/*.h src/text/*.h src/widget/*.h \
+    src/platform/*.h src/platform/x11/*.h src/platform/wayland/*.h \
+    src/platform/wayland/generated/*.h)
+
 X11_TEST_SRC := tests/test_x11_integration.c
 X11_TEST_BIN := $(BUILD_DIR)/tests/test_x11_integration
 
@@ -325,7 +337,7 @@ X11_URI_TEST_BIN := $(BUILD_DIR)/tests/test_clip_uris
 THREAD_TEST_SRC := tests/test_threads.c
 THREAD_TEST_BIN := $(BUILD_DIR)/tests/test_threads
 
-$(THREAD_TEST_BIN): $(THREAD_TEST_SRC) $(STATIC_LIB)
+$(THREAD_TEST_BIN): $(THREAD_TEST_SRC) $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -pthread $(THREAD_TEST_SRC) $(STATIC_LIB) -o $@ $(LDFLAGS)
 
@@ -566,7 +578,7 @@ test: $(TEST_BINS)
 	done
 	@echo "== all tests passed =="
 
-$(BUILD_DIR)/tests/%: tests/%.c $(STATIC_LIB)
+$(BUILD_DIR)/tests/%: tests/%.c $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) $(shell pkg-config --cflags xkbcommon 2>/dev/null) -o $@ $(LDFLAGS) $(shell pkg-config --libs xkbcommon 2>/dev/null)
 
@@ -582,7 +594,7 @@ $(BUILD_DIR)/tests/%: tests/%.c $(STATIC_LIB)
 # not faked — the test says so when it runs).
 GPU_PAINT_TEST_BIN := $(BUILD_DIR)/tests/test_gpu_paint
 
-$(GPU_PAINT_TEST_BIN): tests/test_gpu_paint.c $(STATIC_LIB)
+$(GPU_PAINT_TEST_BIN): tests/test_gpu_paint.c $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual tests/test_gpu_paint.c $(STATIC_LIB) -o $@ $(LDFLAGS) -lX11
 
@@ -675,7 +687,7 @@ test-dbus: $(DBUS_LIVE_BIN) $(DBUS_NOTIFY_BIN) $(DBUS_TRAY_BIN)
 		dbus-run-session -- sh -c $(DBUS_LIVE_ALL); \
 	fi
 
-$(DBUS_LIVE_BIN): $(DBUS_LIVE_SRC) $(STATIC_LIB)
+$(DBUS_LIVE_BIN): $(DBUS_LIVE_SRC) $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual $< $(STATIC_LIB) -o $@ $(LDFLAGS)
 
@@ -720,7 +732,7 @@ $(WL_TEST_BIN): $(WL_TEST_SRC) \
 	       src/platform/wayland/generated/input-method-unstable-v2-protocol.c \
 	       $(STATIC_LIB) -o $@ $(LDFLAGS)
 
-$(X11_TEST_BIN): $(X11_TEST_SRC) $(STATIC_LIB)
+$(X11_TEST_BIN): $(X11_TEST_SRC) $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	# -lXtst: the input-region click-through legs drive REAL XTEST pointer
 	# events (S-4, rc2) — XSendEvent bypasses shapes and proves nothing.
@@ -857,7 +869,7 @@ clean:
 # without WAYLAND_DISPLAY.
 WL_GPU_TEST_BIN := $(BUILD_DIR)/tests/test_gpu_paint_wl
 
-$(WL_GPU_TEST_BIN): tests/test_gpu_paint_wl.c $(STATIC_LIB)
+$(WL_GPU_TEST_BIN): tests/test_gpu_paint_wl.c $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
 	       $(STATIC_LIB) -o $@ $(LDFLAGS)
@@ -876,7 +888,7 @@ test-gpu-paint-wl: $(WL_GPU_TEST_BIN)
 # shift analysis that separates a geometry offset from the AA model.
 XSEC_BIN := $(BUILD_DIR)/tests/crosssection
 
-$(XSEC_BIN): tests/crosssection.c $(STATIC_LIB)
+$(XSEC_BIN): tests/crosssection.c $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
 	       $(STATIC_LIB) -o $@ $(LDFLAGS) -lm
@@ -888,7 +900,7 @@ test-crosssection: $(XSEC_BIN)
 # Wayland (the sway headless rig with output scale 2).
 DPI_BIN := $(BUILD_DIR)/tests/test_dpi_scale
 
-$(DPI_BIN): tests/test_dpi_scale.c $(STATIC_LIB)
+$(DPI_BIN): tests/test_dpi_scale.c $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
 	       $(STATIC_LIB) -o $@ $(LDFLAGS)
@@ -944,7 +956,7 @@ test-examples-wayland: $(BUILD_DIR)/examples/panel-layer-shell
 # through the lane's share group (the fdk_ext_gl contract).
 XSHARE_BIN := $(BUILD_DIR)/tests/test_x11_share
 
-$(XSHARE_BIN): tests/test_x11_share.c $(STATIC_LIB)
+$(XSHARE_BIN): tests/test_x11_share.c $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
 	       $(STATIC_LIB) -o $@ $(LDFLAGS)
@@ -960,7 +972,7 @@ test-x11-share: $(XSHARE_BIN)
 # CPU and HYBRID windows in one context.
 ARB_BIN := $(BUILD_DIR)/tests/test_arbitration
 
-$(ARB_BIN): tests/test_arbitration.c $(STATIC_LIB)
+$(ARB_BIN): tests/test_arbitration.c $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
 	       $(STATIC_LIB) -o $@ $(LDFLAGS)
@@ -975,7 +987,7 @@ test-arbitration: $(ARB_BIN)
 # P3 protocol surface (the sway rig + the honest X11 negatives).
 P3_BIN := $(BUILD_DIR)/tests/test_p3_protocols
 
-$(P3_BIN): tests/test_p3_protocols.c $(STATIC_LIB)
+$(P3_BIN): tests/test_p3_protocols.c $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
 	       $(STATIC_LIB) -o $@ $(LDFLAGS)
@@ -1015,7 +1027,7 @@ test-examples-protocols:
 # P4: the capability x backend x API matrix (both lanes) + the export-map gate.
 MATRIX_BIN := $(BUILD_DIR)/tests/test_matrix
 
-$(MATRIX_BIN): tests/test_matrix.c $(STATIC_LIB)
+$(MATRIX_BIN): tests/test_matrix.c $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
 	       $(STATIC_LIB) -o $@ $(LDFLAGS)
@@ -1041,7 +1053,7 @@ test-exports: build/libfdk.so
 # SKIPs without a DRM device and never fakes a PASS).
 DMABUF_BIN := $(BUILD_DIR)/tests/test_dmabuf
 
-$(DMABUF_BIN): tests/test_dmabuf.c $(STATIC_LIB)
+$(DMABUF_BIN): tests/test_dmabuf.c $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
 	       $(STATIC_LIB) -o $@ $(LDFLAGS)

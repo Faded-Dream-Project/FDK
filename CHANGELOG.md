@@ -1,4 +1,22 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Header dependency tracking: every test binary tracks every header
+
+- The library objects already carried -MMD -MP (included at the file
+  end); the 0xe5 hole was the one-step TEST binaries: they compile
+  whatever private headers they include (window_internal.h, the
+  platform headers) and a private-struct change with no surviving
+  library includer could leave a stale test linked against a fresh
+  lib. Every test rule (the pattern rule + 12 explicit ones) now
+  also depends on ALL_FDK_HEADERS — the full public AND private
+  header set. Broad by design: header touches are rare, correctness
+  beats minimality.
+- PROOF (this session): a real field was added to fdk_platform_ops
+  and removed again — 182 library objects rebuilt, the test binary
+  relinked (the compile line printed), and `make -n` afterwards
+  shows nothing stale can be linked. The battery is green after the
+  revert.
+- CI: a new step touches include/fdk/fdk_core.h, rebuilds
+  test_prefs, and FAILS unless the binary is newer than the header.
 ## CI: the DRM soak can never pend a run again
 
 - The dmabuf-soak job is gated on vars.HAS_DRM_RUNNER == 'true': on

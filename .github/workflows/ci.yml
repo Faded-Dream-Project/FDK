@@ -151,6 +151,18 @@ jobs:
       - name: make install + the protocol examples against the installed tree
         run: make test-examples-protocols
 
+      # Header dependency tracking: a header touch must rebuild the
+      # dependents (the 0xe5 mixed-layout class). Touch a core header,
+      # rebuild a test binary, assert it is NEWER than the header.
+      - name: Header dependency tracking assertion
+        run: |
+          touch include/fdk/fdk_core.h
+          sleep 1
+          make build/tests/test_prefs > /dev/null
+          test build/tests/test_prefs -nt include/fdk/fdk_core.h \
+            || { echo "STALE: the test binary did not rebuild after a header touch"; exit 1; }
+          echo "dep tracking verified: test_prefs newer than the touched header"
+
       # The second blind example (09_gl_dmabuf_panel.c): worker ->
       # fdk_post -> the dma-buf import attempt -> the caption draw, on
       # the installed tree under Xvfb. Zero-copy needs a DRM box (the
