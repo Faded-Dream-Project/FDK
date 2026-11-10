@@ -309,7 +309,7 @@ static const char *GP_FS_BODY =
     /*  the CPU's 1px stroke paints the boundary PIXEL ring: its
         center sits half a pixel inside the shape edge. Center the
         GPU ring there too (stroke_half is in pixels). */
-    "        float ring = abs(abs(d) - (v_aux0.z - 0.5)) - 0.5;\n"
+    "        float ring = abs(d + v_aux0.z) - v_aux0.z;\n"
     "        float a = clamp(0.5 - ring, 0.0, 1.0);\n"
     "        c = vec4(v_color.rgb, v_color.a * a);\n"
     "    } else if (mode < 2.5) {\n" /* vertical gradient */
@@ -780,8 +780,11 @@ void fdk__gpu_draw_circle(struct fdk_surface *s, fdk_f32 cx, fdk_f32 cy,
                           fdk_f32 radius, fdk_color c, fdk_f32 thickness,
                           int aa) {
     (void)aa;
+    /* The CPU's AA circle stroke straddles the mathematical radius R
+     * (coverage of the curve itself); the ring band is inside-only in
+     * d-space, so inflate the shape by t/2 to re-center it on R. */
     gp_quad(s, cx - radius, cy - radius, radius * 2.0f, radius * 2.0f, 1, 1,
-            0, thickness * 0.5f, c, c, 0, 0, 0, 0, 1.0f);
+            -thickness * 0.5f, thickness * 0.5f, c, c, 0, 0, 0, 0, 1.0f);
 }
 
 void fdk__gpu_draw_line(struct fdk_surface *s, fdk_f32 x0, fdk_f32 y0,

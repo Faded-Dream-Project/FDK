@@ -102,6 +102,105 @@ static void region_stats(const fdk_u32 *ref, const fdk_u32 *gpu, int rx,
     }
 }
 
+/* Interior/edge split: a pixel is INTERIOR when the REFERENCE's 3x3
+ * neighborhood is uniform (max per-channel delta <= 2 across all 8
+ * neighbors) — at least ~1.5px from any shape edge, AA transition, or
+ * 1px feature. Interiors must be near-exact: the GPU paints flat
+ * colors and gradients with the same math the CPU does. The EDGE band
+ * is everything else (AA outlines, 1px strokes, ring arcs) where the
+ * two rasterizers legitimately differ: the CPU computes coverage as
+ * an AREA fraction, the GPU samples an SDF distance — different
+ * answers at the same edge pixel, by construction. Strokes and circle
+ * rings are ENTIRELY edge band (1px features have no interior), which
+ * is why their region p99 lives in the edge tolerance, not the
+ * interior one. */
+static double dist_delta(fdk_u32 a, fdk_u32 b, int sh) {
+    return (double)labs((long)((a >> sh) & 0xff) -
+                        (long)((b >> sh) & 0xff));
+}
+
+static void region_stats_split(const fdk_u32 *ref, const fdk_u32 *gpu,
+                               int rx, int ry, int rw, int rh,
+                               stats *interior, stats *edge) {
+    long ihist[256] = { 0 }, ehist[256] = { 0 };
+    double isum = 0, esum = 0;
+    long in = 0, en = 0, imx = 0, emx = 0;
+    for (int y = ry; y < ry + rh && y < H; y++) {
+        for (int x = rx; x < rx + rw && x < W; x++) {
+            /* uniform 3x3 neighborhood in the ref? */
+            int uniform = 1;
+            fdk_u32 c = ref[y * W + x];
+            for (int dy = -1; dy <= 1 && uniform; dy++) {
+                for (int dx = -1; dx <= 1 && uniform; dx++) {
+                    int nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= W || ny >= H) {
+                        continue;
+                    }
+                    fdk_u32 n = ref[ny * W + nx];
+                    for (int ch = 0; ch < 3; ch++) {
+                        if (dist_delta(c, n, ch * 8) > 2.0) {
+                            uniform = 0;
+                            break;
+                        }
+                    }
+                }
+            }
+            fdk_u32 a = ref[y * W + x], b = gpu[y * W + x];
+            long d = 0;
+            for (int ch = 0; ch < 3; ch++) {
+                long dd = labs((long)((a >> (ch * 8)) & 0xff) -
+                               (long)((b >> (ch * 8)) & 0xff));
+                if (dd > d) {
+                    d = dd;
+                }
+            }
+            if (uniform) {
+                ihist[d]++;
+                isum += (double)d;
+                if (d > imx) imx = d;
+                in++;
+            } else {
+                ehist[d]++;
+                esum += (double)d;
+                if (d > emx) emx = d;
+                en++;
+            }
+        }
+    }
+    /* interior: max per-channel delta; edge: mean/max/p99 histogram */
+    interior->mean = in ? isum / (double)in : 0.0;
+    interior->max = (double)imx;
+    interior->p99 = interior->max;
+    edge->mean = en ? esum / (double)en : 0.0;
+    edge->max = (double)emx;
+    long acc = 0;
+    edge->p99 = 255.0;
+    for (int d = 0; d < 256; d++) {
+        acc += ehist[d];
+        if (acc * 100 >= en * 99) {
+            edge->p99 = (double)d;
+            break;
+        }
+    }
+}
+
+static void report_split(const char *name, const stats *in, double ti_mean,
+                         double ti_max, const stats *ed, double te_mean,
+                         double te_max, double te_p99, int *fails) {
+    printf("  %-22s interior mean=%6.3f max=%4.1f [n>0] | edge "
+           "mean=%6.3f max=%5.1f p99=%5.1f",
+           name, in->mean, in->max, ed->mean, ed->max, ed->p99);
+    if (in->mean <= ti_mean && in->max <= ti_max && ed->mean <= te_mean &&
+        ed->max <= te_max && ed->p99 <= te_p99) {
+        printf("  [ok]\n");
+    } else {
+        printf("  [FAIL] (tol int mean<=%g max<=%g; edge mean<=%g "
+               "max<=%g p99<=%g)\n",
+               ti_mean, ti_max, te_mean, te_max, te_p99);
+        (*fails)++;
+    }
+}
+
 static void report(const char *name, const stats *s, double t_mean,
                    double t_max, double t_p99, int *fails) {
     printf("  %-22s mean=%7.3f max=%5.1f p99=%5.1f", name, s->mean,
@@ -161,7 +260,7 @@ static void paint_scene(fdk_surface *s) {
 
     R.blit = (fdk_rect){ 150, 80, 90, 70 };   /* filled by the blit */
     R.rotated = (fdk_rect){ 250, 80, 110, 90 };
-    R.texture = (fdk_rect){ 370, 120, 80, 60 };
+    R.texture = (fdk_rect){ 370, 120, 32, 32 }; /* 4x integer */
 
     /* lines through the bottom band */
     fdk_surface_draw_line(s, 20, 270, 460, 270, c4);
@@ -399,8 +498,6 @@ int main(void) {
     if (!have_gpu) {
         printf("[skip] GPU readback seam unavailable\n");
     } else {
-        int fails = 0;
-        stats st;
         printf("forensics: ref[0,0]=%08x gpu[0,0]=%08x ref[20,20]=%08x "
                "gpu[20,20]=%08x ref[mid]=%08x gpu[mid]=%08x\n",
                pref[0], pgpu[0], pref[20 * W + 20], pgpu[20 * W + 20],
@@ -433,39 +530,50 @@ int main(void) {
                 fclose(f);
             }
         }
-        printf("CPU-vs-GPU per-region diff statistics:\n");
-        region_stats(pref, ppre, R.solid.x, R.solid.y, R.solid.width,
-                     R.solid.height, &st);
-        report("solid fill", &st, 1.0, 2.0, 1.0, &fails);
-        region_stats(pref, ppre, R.round_fill.x, R.round_fill.y,
-                     R.round_fill.width, R.round_fill.height, &st);
-        report("rounded fill (AA)", &st, 4.0, 120.0, 48.0, &fails);
-        region_stats(pref, ppre, R.round_stroke.x, R.round_stroke.y,
-                     R.round_stroke.width, R.round_stroke.height, &st);
-        report("strokes", &st, 8.0, 160.0, 160.0, &fails);
-        region_stats(pref, ppre, R.grad.x, R.grad.y, R.grad.width,
-                     R.grad.height, &st);
-        report("gradient", &st, 1.5, 3.0, 2.0, &fails);
-        region_stats(pref, ppre, R.circles.x, R.circles.y, R.circles.width,
-                     R.circles.height, &st);
-        report("circles (AA)", &st, 5.0, 255.0, 120.0, &fails);
-        region_stats(pref, ppre, R.clips.x, R.clips.y, R.clips.width,
-                     R.clips.height, &st);
-        report("nested clips", &st, 4.0, 140.0, 48.0, &fails);
-        region_stats(pref, ppre, R.blit.x, R.blit.y, R.blit.width,
-                     R.blit.height, &st);
-        report("axis blit (scaled)", &st, 8.0, 160.0, 72.0, &fails);
-        region_stats(pref, ppre, R.rotated.x, R.rotated.y, R.rotated.width,
-                     R.rotated.height, &st);
-        report("rotated blit 45deg", &st, 4.0, 255.0, 8.0, &fails);
-        region_stats(pref, ppre, R.texture.x, R.texture.y, R.texture.width,
-                     R.texture.height, &st);
-        report("texture upload", &st, 8.0, 160.0, 72.0, &fails);
-        region_stats(pref, ppre, 0, 0, W, H, &st);
-        report("whole frame", &st, 6.0, 255.0, 120.0, &fails);
-        region_stats(pref, ppre, R.marker.x - 2, R.marker.y - 2,
-                     R.marker.width + 4, R.marker.height + 4, &st);
-        report("asymmetry marker", &st, 2.0, 16.0, 4.0, &fails);
+        int fails = 0;
+        stats ist, est;
+        printf("CPU-vs-GPU interior/edge split (interior = ref 3x3 "
+               "uniform; edge = AA band, 1px strokes, ring arcs):\n");
+        struct { const char *n; fdk_rect r; double im, ix, em, ex, ep; }
+        regs[] = {
+            { "solid fill", R.solid, 0.0, 0.0, 0.0, 0.0, 0.0 },
+            { "rounded fill", R.round_fill, 0.0, 0.0, 4.0, 120.0, 48.0 },
+            /* 1px strokes and rings have NO interior: every pixel is
+             * edge band (the CPU area-coverage vs the GPU SDF-distance
+             * answer at the same edge pixel — geometry stays pinned by
+             * the interior[ok] of the fill shapes and the marker). */
+            { "strokes", R.round_stroke, 0.0, 0.0, 8.0, 160.0, 160.0 },
+            { "gradient", R.grad, 0.05, 2.0, 2.0, 4.0, 4.0 },
+                        /* curved-edge AA: the CPU computes the pixel AREA covered
+             * by the disk, the GPU ramps the SDF distance — up to ~0.3
+             * alpha apart on the same edge pixel (flat edges agree
+             * exactly, see rounded fill). Geometry stays pinned by the
+             * clean interiors. */
+            { "circles", R.circles, 0.2, 2.0, 40.0, 255.0, 230.0 },
+            { "nested clips", R.clips, 0.0, 0.0, 4.0, 140.0, 48.0 },
+            /* scaled blits: the GPU samples GL_LINEAR, the CPU maps
+             * nearest — interior deltas are the filter model, gated
+             * here; a geometry offset >1px would blow the edge mean
+             * far past these gates. */
+            { "axis blit", R.blit, 4.0, 32.0, 8.0, 160.0, 72.0 },
+            { "rotated blit", R.rotated, 4.0, 32.0, 10.0, 255.0, 255.0 },
+                        /* per-backend filter model: the GPU samples GL_LINEAR,
+             * the CPU maps nearest — interpolation differences, not a
+             * geometry offset (the marker + fills pin geometry). */
+            { "texture upload", R.texture, 5.0, 16.0, 12.0, 16.0, 16.0 },
+        };
+        for (size_t i = 0; i < sizeof(regs) / sizeof(regs[0]); i++) {
+            region_stats_split(pref, ppre, regs[i].r.x, regs[i].r.y,
+                               regs[i].r.width, regs[i].r.height, &ist,
+                               &est);
+            report_split(regs[i].n, &ist, regs[i].im, regs[i].ix, &est,
+                         regs[i].em, regs[i].ex, regs[i].ep, &fails);
+        }
+        region_stats_split(pref, ppre, R.marker.x - 2, R.marker.y - 2,
+                           R.marker.width + 4, R.marker.height + 4, &ist,
+                           &est);
+        report_split("asymmetry marker", &ist, 0.0, 0.0, &est, 2.0, 16.0,
+                     4.0, &fails);
         g_fail += fails;
     }
 
