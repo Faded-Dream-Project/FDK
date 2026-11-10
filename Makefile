@@ -308,7 +308,7 @@ SHARED_LIB := $(BUILD_DIR)/libfdk.so
 # lists may wrap freely). Every header already follows this.
 EXPORT_MAP := $(BUILD_DIR)/libfdk.exports.map
 
-TEST_SRCS := $(filter-out tests/crosssection.c tests/test_dpi_scale.c tests/test_gpu_paint_wl.c tests/test_x11_share.c tests/test_arbitration.c tests/test_p3_protocols.c tests/test_matrix.c tests/test_x11_integration.c tests/test_gpu_paint.c tests/probe_cpu.c tests/test_wayland_integration.c tests/test_dbus_live.c tests/test_notify_client.c tests/test_tray_item.c tests/test_clip_uris.c tests/bench.c,$(wildcard tests/*.c))
+TEST_SRCS := $(filter-out tests/crosssection.c tests/test_dpi_scale.c tests/test_gpu_paint_wl.c tests/test_x11_share.c tests/test_arbitration.c tests/test_p3_protocols.c tests/test_matrix.c tests/test_dmabuf.c tests/test_x11_integration.c tests/test_gpu_paint.c tests/probe_cpu.c tests/test_wayland_integration.c tests/test_dbus_live.c tests/test_notify_client.c tests/test_tray_item.c tests/test_clip_uris.c tests/bench.c,$(wildcard tests/*.c))
 TEST_BINS := $(patsubst tests/%.c,$(BUILD_DIR)/tests/%,$(TEST_SRCS))
 
 X11_TEST_SRC := tests/test_x11_integration.c
@@ -1005,6 +1005,7 @@ test-examples-protocols:
 	mkdir -p $(BUILD_DIR)/examples; \
 	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/d-input-method.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lm -ldl -lpthread -o $(BUILD_DIR)/examples/d-input-method; \
 	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/f-session-lock.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lm -ldl -lpthread -o $(BUILD_DIR)/examples/f-session-lock; \
+	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/g-dmabuf-video.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lm -ldl -lpthread -o $(BUILD_DIR)/examples/g-dmabuf-video; \
 	echo "examples (d)/(f) built against the installed tree"
 
 # P4: the capability x backend x API matrix (both lanes) + the export-map gate.
@@ -1031,3 +1032,15 @@ test-exports: build/libfdk.so
 	comm -23 $(BUILD_DIR)/exports.actual $(BUILD_DIR)/exports.mapped > $(BUILD_DIR)/exports.leaked; \
 	if [ -s $(BUILD_DIR)/exports.leaked ]; then echo "EXPORT LEAKS:"; cat $(BUILD_DIR)/exports.leaked; exit 1; fi; \
 	echo "export map: no leaks"
+
+# P4: the dma-buf import (validation runs everywhere; the round-trip
+# SKIPs without a DRM device and never fakes a PASS).
+DMABUF_BIN := $(BUILD_DIR)/tests/test_dmabuf
+
+$(DMABUF_BIN): tests/test_dmabuf.c $(STATIC_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
+	       $(STATIC_LIB) -o $@ $(LDFLAGS)
+
+test-dmabuf: $(DMABUF_BIN)
+	@ASAN_OPTIONS=detect_leaks=0 "$(DMABUF_BIN)"

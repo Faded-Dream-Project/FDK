@@ -1,4 +1,33 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 4: dma-buf import — full implementation, SKIP-ruled round-trip
+
+- fdk_surface.h: fdk_texture_import_dmabuf with the fdk_dmabuf_params
+  input struct (struct_size contract) and per-plane fd/offset/stride/
+  modifier. The fourcc table covers the 8-bit RGB/RGBA family FDK can
+  convert exactly (AR24/AB24/XR24/BX24/RA24/BA24); everything else
+  answers FDK_ERR_UNSUPPORTED — no lossy guesses. Linear and
+  INVALID-modifier buffers map through CPU mmap and convert into the
+  texture's RGBA8888 storage (filled through the PUBLIC texture API —
+  no internals); tiled modifiers answer UNSUPPORTED with the GPU-side
+  EGLImage path as the documented follow-up. The fds are borrowed;
+  import closes nothing.
+- src/render/dmabuf.c: validation runs before any mapping, in the
+  honest order (a tiled modifier is unsupported regardless of the
+  descriptor quality — the test pins that order). The mmap refusal
+  (an anonymous fd, a device that will not map) is UNSUPPORTED, not a
+  guess.
+- tests/test_dmabuf.c + make test-dmabuf: the 14-case validation
+  matrix runs everywhere (all green); the REAL round-trip (a
+  GBM-generated linear ARGB8888 buffer through the texture path,
+  pixels verified via draw + readback) reports SKIP — never PASS —
+  without a DRM device. This sandbox has no /dev/dri, no udmabuf, no
+  dma-heaps: the round-trip needs a DRM-equipped runner.
+- examples/g-dmabuf-video.c (built by make test-examples-protocols
+  against the installed tree): the video-style per-frame import —
+  SKIP without a DRM device, 20 synthesized GBM "frames" played
+  through the import on a DRM box.
+- The export map carries fdk_texture_import_dmabuf (make test-exports
+  green).
 ## Item 3: P4 — the public layout/shaping API + the full test matrix
 
 - fdk_text.h: the layout/shaping surface. fdk_text_shaping_tier_get

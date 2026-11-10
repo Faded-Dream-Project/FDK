@@ -680,6 +680,50 @@ fdk_u32 fdk_gif_player_frame(const fdk_gif_player *player);
  */
 typedef struct fdk_texture fdk_texture;
 
+/* ---- dmabuf import (P4, append-only) ------------------------------------
+ *
+ * Imports a Linux dma-buf as a texture. The planes arrive by FD (the
+ * acquisition is the caller's business: linux-dmabuf on Wayland, the
+ * DRI3 buffers on X11, GBM anywhere); FDK maps the planes and copies
+ * into the texture's RGBA8888 storage, after which the texture is an
+ * ordinary fdk_texture (fdk_texture_draw on every render mode — the
+ * lane's upload path takes over). The FDs are BORROWED: import does
+ * not close them and never uses them after returning.
+ *
+ * Modifiers: DRM_FORMAT_MOD_LINEAR (0) and DRM_FORMAT_MOD_INVALID
+ * (the implicit-modifier sentinel) map through CPU mmap; any tiled
+ * modifier answers FDK_ERR_UNSUPPORTED — reading tiled memory needs
+ * the GPU-side EGLImage path, which is the documented GPU-lane
+ * follow-up (the validation here is complete either way: the format
+ * and modifier checks run before any mapping).
+ *
+ * Fourccs are DRM fourccs (the linux-dmabuf table); FDK supports the
+ * 8-bit RGB/RGBA family it can convert exactly:
+ *   AR24 (ABGR8888), AB24 (ARGB8888), XR24 (BGRX8888),
+ *   BX24 (RGBX8888), RA24 (RGBA8888), BA24 (BGRA8888).
+ * Everything else: FDK_ERR_UNSUPPORTED (honest — no lossy guesses). */
+#define FDK_DMABUF_MAX_PLANES 4
+
+typedef struct fdk_dmabuf_plane {
+    int fd;           /* the plane's buffer object; borrowed       */
+    fdk_u32 offset;   /* bytes into the fd where this plane starts */
+    fdk_u32 stride;   /* bytes per row                             */
+    fdk_u64 modifier; /* DRM_FORMAT_MOD_LINEAR / _INVALID / tiled  */
+} fdk_dmabuf_plane;
+
+typedef struct fdk_dmabuf_params {
+    fdk_u32 struct_size; /* sizeof(fdk_dmabuf_params) — input struct */
+    fdk_i32 width;
+    fdk_i32 height;
+    fdk_u32 fourcc;      /* DRM fourcc, e.g. 'A' | 'R'<<8 | '2'<<16 | '4'<<24 */
+    fdk_u64 flags;       /* reserved; must be 0                      */
+    fdk_dmabuf_plane planes[FDK_DMABUF_MAX_PLANES];
+    fdk_i32 n_planes;
+} fdk_dmabuf_params;
+
+fdk_result fdk_texture_import_dmabuf(const fdk_dmabuf_params *params,
+                                     fdk_texture **out_texture);
+
 /* Allocates a zeroed RGBA8888 texture (transparent black). */
 fdk_result fdk_texture_create(fdk_i32 width, fdk_i32 height,
                               fdk_texture **out_texture);
