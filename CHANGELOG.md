@@ -1,4 +1,22 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## P1 close-out: the circle half-pixel bug, the cross-section tool
+
+- tests/crosssection.c + make test-crosssection: dumps 1px-wide
+  CPU-vs-GPU coverage cross-sections (circle center-row edge, circle
+  45-degree arc, rotated-blit edge) with a shift analysis in [-2,2]
+  that separates a geometry offset from an AA-model difference.
+- EVIDENCE: before the fix the circle's center-row boundary pixel was
+  cpu=114 gpu=0 (the GPU painted it full): the CPU's fill_circle_aa
+  sampled the SDF at INTEGER pixel coords while the rect/rounded AA
+  paths, the ring path and GL fragments all sample at pixel CENTERS
+  (x+0.5) — the CPU disk was half a pixel small. Fixed: every CPU AA
+  rasterizer now samples at pixel centers. After: center row EXACT
+  (114 vs 114), 45-degree arc within 1 LSB (162 vs 163), rotated-blit
+  edge exact (residual 0.00 at shift 0). The remaining smoke-region
+  circle residual (edge mean 25.7, max 115) is the documented
+  area/ramp model difference at r=24 curvature — no offset (best
+  shift 0 everywhere), tolerances stay evidence-based.
+- The GPU shader was NOT shifted; the CPU was aligned to the GL grid.
 ## Identity fix (sandbox infra)
 
 - scripts/setup-sandbox.sh installed the git identity as

@@ -867,3 +867,16 @@ test-gpu-paint-wl: $(WL_GPU_TEST_BIN)
 	    echo "== no WAYLAND_DISPLAY; self-skip =="; \
 	    "$(WL_GPU_TEST_BIN)"; \
 	fi
+
+# Cross-section evidence tool (P1 close-out): CPU-vs-GPU coverage
+# profiles for one circle edge and one rotated edge, with the
+# shift analysis that separates a geometry offset from the AA model.
+XSEC_BIN := $(BUILD_DIR)/tests/crosssection
+
+$(XSEC_BIN): tests/crosssection.c $(STATIC_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
+	       $(STATIC_LIB) -o $@ $(LDFLAGS)
+
+test-crosssection: $(XSEC_BIN)
+	"$(XSEC_BIN)"

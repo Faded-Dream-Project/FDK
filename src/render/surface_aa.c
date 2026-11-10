@@ -173,8 +173,8 @@ void fdk_surface_draw_circle_aa(fdk_surface *surface,
     int r = radius;
     for (int y = cy - r - 2; y <= cy + r + 2; y++) {
         for (int x = cx - r - 2; x <= cx + r + 2; x++) {
-            float dx = (float)(x - cx);
-            float dy = (float)(y - cy);
+            float dx = (float)x + 0.5f - (float)cx;
+            float dy = (float)y + 0.5f - (float)cy;
             float dist = sqrtf(dx * dx + dy * dy);
             float cov = 1.0f - fabsf(dist - (float)r);
             if (cov <= 0.0f) {
@@ -209,13 +209,16 @@ void fdk_surface_fill_circle_aa(fdk_surface *surface,
         return;
     }
 
-    /* Coverage = how far inside the radius the pixel center is:
-     * full at r - 0.5, gone at r + 0.5. */
+    /* Coverage = how far inside the radius the pixel CENTER is:
+     * full at r - 0.5, gone at r + 0.5. Samples sit at pixel centers
+     * (x + 0.5) — the same grid as the rect/rounded AA paths and GL's
+     * fragments; the old integer-coord grid drew the disk half a pixel
+     * small (the circle cross-section evidence). */
     int r = radius;
     for (int y = cy - r - 1; y <= cy + r + 1; y++) {
         for (int x = cx - r - 1; x <= cx + r + 1; x++) {
-            float dx = (float)(x - cx);
-            float dy = (float)(y - cy);
+            float dx = (float)x + 0.5f - (float)cx;
+            float dy = (float)y + 0.5f - (float)cy;
             float dist = sqrtf(dx * dx + dy * dy);
             float cov = (float)r + 0.5f - dist;
             if (cov <= 0.0f) {
