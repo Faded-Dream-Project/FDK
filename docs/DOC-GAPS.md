@@ -79,3 +79,36 @@ outputs FDK's own output model drives.
 - `examples/f-session-lock.c` is entirely first-class (three public
   calls + the draw loop). The raw path lives in
   `f-session-lock-raw.c`.
+
+## The second blind example's walls (2026-11-11, 09_gl_dmabuf_panel.c)
+
+Written from EXTENDING.md + the public headers only. Every wall the
+authoring hit, and its fix:
+
+1. **The ext surface's present contract in GPU mode** — EXTENDING.md's
+   GL section says a frame callback "replaces the paint engine" but
+   never says whether plain fdk_surface_present() on the ext surface
+   is legal in GPU mode, or which of the two an add-on should pick.
+   FIXED in EXTENDING.md (a "Presenting an extension surface"
+   subsection): both are legal; present() drives the engine (the
+   usual choice), the frame callback replaces the pacing.
+2. **A Wayland ext surface needs a ROLE to be visible** — the docs'
+   create-callback example returns a bare wl_surface, which maps to
+   nothing without a role object; an add-on discovers this only when
+   nothing appears. FIXED in EXTENDING.md (a warning in the
+   create-callback section: plan the role object; own it in
+   ops.destroy).
+3. **No public default-font accessor** — fdk_font_load(path, size)
+   refuses NULL, so a caption font means hardcoded candidate paths.
+   The example carries the pattern; the accessor (fdk_font_default())
+   is recorded as the v3 API candidate — NOT added now (the caption
+   story works with the documented loader, and 1.0 freezes after).
+4. **fdk_init_options has no struct_size** — every add-on struct the
+   docs show carries one; the init options is zero-init without it.
+   FIXED in EXTENDING.md (one line in the example block: zero-init
+   the whole struct, no struct_size exists).
+5. **The worker signatures' shape** — fdk_thread.h documents them,
+   but EXTENDING.md's worker story is a bare pointer to the header:
+   the job fn returns the result that done() receives, and
+   pool_create is (ctx, threads, out). FIXED in EXTENDING.md (a
+   6-line example block).

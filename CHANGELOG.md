@@ -1,4 +1,31 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The second blind example: 09_gl_dmabuf_panel.c — written, run, and
+## its five walls fixed
+
+- examples/09_gl_dmabuf_panel.c: a GL-canvas panel in GPU mode —
+  an extension surface of a custom kind, a WORKER rendering the
+  gradient off-thread, fdk_post carrying a note to the UI thread on
+  the way, the finished buffer imported through
+  fdk_texture_import_dmabuf (the memfd/linear path), the texture
+  drawn with fdk_texture_draw and a caption via the text API. Built
+  against the installed tree; runs under Xvfb in CI (a new step). On
+  a box without the GL/dmabuf lane the import refuses with the
+  documented FDK_ERR_UNSUPPORTED and the example exits 0 saying so —
+  the pipeline is the point; zero-copy needs the DRM box.
+- The five doc walls (docs/DOC-GAPS.md, all fixed):
+  1. the ext surface's present contract in GPU mode (which of
+     present() vs the GL frame callback) — a "Presenting an
+     extension surface" subsection in EXTENDING.md,
+  2. a Wayland ext surface needs a ROLE object to be visible —
+     a warning in the create-callback section,
+  3. no public default-font accessor (fdk_font_load refuses NULL) —
+     recorded as the v3 candidate; the candidate-path pattern is in
+     the example,
+  4. fdk_init_options has no struct_size (zero-init, unlike the
+     append-only tables) — stated in EXTENDING.md,
+  5. the worker signatures' shape (the job fn's return flows to
+     done(); pool_create is (ctx, threads, out)) — a one-glance
+     block in EXTENDING.md.
 ## The LSan suppression: the sway lane's second, clang-based leg
 
 - The gcc-14 libasan parser verdict, with evidence: the same valid

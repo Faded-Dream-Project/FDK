@@ -151,6 +151,21 @@ jobs:
       - name: make install + the protocol examples against the installed tree
         run: make test-examples-protocols
 
+      # The second blind example (09_gl_dmabuf_panel.c): worker ->
+      # fdk_post -> the dma-buf import attempt -> the caption draw, on
+      # the installed tree under Xvfb. Zero-copy needs a DRM box (the
+      # drm-soak job); on Xvfb the documented UNSUPPORTED refusal IS
+      # the pass, and the example exits 0 saying so.
+      - name: The GL dmabuf panel example (Xvfb)
+        run: |
+          P=$PWD/build/fdk-install
+          cc -Iinclude examples/09_gl_dmabuf_panel.c $P/lib/libfdk.a \
+            -fsanitize=address,undefined \
+            -lX11 -lXext -lXrandr -lXrender -ldl -lwayland-client \
+            -lxkbcommon -lm -lz -pthread -o build/panel_example
+          xvfb-run -a -s "-screen 0 800x600x24" \
+            ./build/panel_example
+
       # The headless sway rig: the real compositor for the Wayland
       # protocol legs (wlroots headless backend, pixman renderer).
       - name: Install sway

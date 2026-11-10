@@ -80,7 +80,7 @@ core feature that predates the extension API's bump cadence — use
 
 ```c
 fdk_ext_surface_ops ops = {0};
-ops.struct_size      = sizeof(ops);
+ops.struct_size      = sizeof(ops);   /* append-only tables carry one */
 ops.create           = my_create;      /* required */
 ops.destroy          = my_destroy;     /* optional */
 ops.popup_attached   = my_popup_hook;  /* Wayland roles that parent popups */
@@ -96,7 +96,29 @@ working when fields are added later. Kind names are unique per
 context (a duplicate fails with `FDK_ERR_INVALID_ARGUMENT` — the
 double-init detector).
 
+### Presenting an extension surface (GPU mode included)
+
+Two legal ways; pick by pacing, not by mode:
+
+- **Drive it yourself**: get the surface (`fdk_ext_surface_get_surface`),
+  draw with the ordinary fdk_surface calls (fill, texture draw, text —
+  the same calls on every render mode; on a GPU-mode window the engine
+  routes them through the lane), then `fdk_surface_present()`. This is
+  the usual choice and what `examples/09_gl_dmabuf_panel.c` does.
+- **The GL frame callback** (`fdk_ext_gl_set_frame_callback`): the
+  callback runs on the UI thread with the lane context ALREADY current,
+  right before present — draw, return, FDK swaps. It REPLACES the paint
+  engine for that surface; the compositor's frame pacing drives you.
+  Plain `fdk_surface_present()` inside a frame-callback surface is not
+  needed (the swap is the present); mixing both on one surface is an
+  error shape, not a documented one.
+
 ### The create callback — building the native surface
+
+(On a related zero-init note: `fdk_init_options` — the struct you pass
+`fdk_init` — deliberately has NO `struct_size`; zero-initialize the
+whole struct and set the fields you care about. Only the append-only
+callback tables carry a size.)
 
 ```c
 static fdk_result my_create(fdk_ext_surface *surface,
@@ -132,6 +154,13 @@ static fdk_result my_create(fdk_ext_surface *surface,
 
 Rules that matter:
 
+- **Wayland visibility needs a ROLE**: a bare `wl_surface` maps to
+  nothing — without a role object (xdg_surface, layer shell, a lock
+  surface, ...) your surface simply never appears, with no error
+  anywhere. Plan the role object when you design the kind, create it
+  in `create`, and destroy it in `destroy` (the role objects are the
+  add-on's; see §3). The sandbox examples run the X11 lane, where a
+  plain window is already visible.
 - **X11**: build the window UNMAPPED with your properties already
   set. FDK maps it at `fdk_ext_surface_show()` and installs its own
   event mask at adopt (the standard FDK input set — your
@@ -425,6 +454,11 @@ truth — synthetic input goes through FDK's public APIs.
 The old "workarounds banned" list is gone; the model since the
 extension-API v3 folding is opt-in access + honest capability flags:
 
+- **Workers** (fdk_thread.h): the shape in one glance —
+  `fdk_worker_pool_create(ctx, threads, &pool)`; the job fn is
+  `void *(*job)(void *user_data, void (*report)(double, void *), void *report_user)`
+  and its RETURN VALUE is what `done(void *result, void *user)`
+  receives on the UI thread; `user_data`/`done_user` flow separately.
 - **Render modes** (fdk_core.h): AUTO / CPU / HYBRID / GPU, selected
   by init option > `FDK_RENDER` env > AUTO, overridable per window
   (`fdk_window_options.render_mode`), queried via
@@ -449,6 +483,7 @@ extension-API v3 folding is opt-in access + honest capability flags:
   `fdk_ext_modal_run/quit/depth` (supported nested/modal loops —
   menus, dropdowns, custom dialogs), fd sources for your own queues.
 - **GL**: `FDK_EXT_CAP_GL` when the lane loaded; EGL/GLX contexts on
+  the native accessors — see "Presenting an extension surface" below.
   the native-display accessor, surfaces on
   `fdk_ext_surface_native()`. Per-surface present arbitration and
   dmabuf/EGLImage import are the recorded next increments — the
