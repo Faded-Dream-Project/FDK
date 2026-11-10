@@ -1,4 +1,18 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 5: CI — the P3/P4 legs, the installed-tree examples, the sway rig
+
+- .github/workflows/ci.yml's build-test job gains: the P3 protocol
+  tests on Xvfb (test-x11-share, test-arbitration, test-p3-x11,
+  test-matrix-x11), the P4 dma-buf leg (test-dmabuf — the validation
+  matrix runs; the round-trip self-reports SKIP because the runners
+  expose no /dev/dri; a self-hosted runner with a DRM render node +
+  libgbm1 is the one that runs it for real), make install +
+  test-examples-protocols (the protocol examples built against the
+  installed tree with public headers only), and the headless sway rig
+  (apt sway, wlroots headless) running test-p3-wayland and
+  test-matrix-wayland — the real compositor legs the battery cannot
+  cover headless. The existing O2 + verify-exports and
+  distro-packages jobs are untouched.
 ## Item 4: dma-buf import — full implementation, SKIP-ruled round-trip
 
 - fdk_surface.h: fdk_texture_import_dmabuf with the fdk_dmabuf_params

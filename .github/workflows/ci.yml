@@ -124,6 +124,45 @@ jobs:
       - name: Wayland integration suite (self-skips without a compositor)
         run: make test-wayland
 
+      # P3: the protocol surface (X11 lane: the honest negatives; the
+      # add-on texture exchange; present arbitration) — each target
+      # owns its Xvfb.
+      - name: P3 protocol tests (Xvfb)
+        run: |
+          make test-x11-share
+          make test-arbitration
+          make test-p3-x11
+          make test-matrix-x11
+
+      # P4: the dma-buf import. The validation matrix runs everywhere;
+      # the REAL round-trip (a GBM buffer through the texture path)
+      # self-reports SKIP on these runners: they expose no
+      # /dev/dri (no GPU passthrough, no udmabuf, no dma-heaps).
+      # A runner that would run it for real: a SELF-HOSTED runner on
+      # a machine with a DRM render node (/dev/dri/renderD*) and
+      # libgbm1 — then the round-trip allocates a real linear buffer
+      # and verifies the imported pixels.
+      - name: P4 dma-buf import (round-trip SKIPs without /dev/dri)
+        run: make test-dmabuf
+
+      # The installed tree: public headers only, no internal include
+      # paths (the examples compile against PREFIX alone).
+      - name: make install + the protocol examples against the installed tree
+        run: make test-examples-protocols
+
+      # The headless sway rig: the real compositor for the Wayland
+      # protocol legs (wlroots headless backend, pixman renderer).
+      - name: Install sway
+        run: sudo apt-get install -y --no-install-recommends sway
+      - name: P3 protocol tests (headless sway)
+        run: |
+          export XDG_RUNTIME_DIR=$(mktemp -d)
+          sway -c /dev/null & SWAY_PID=$!
+          sleep 3
+          WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR" | grep -o 'wayland-[0-9]*' | head -1) \
+            make test-p3-wayland test-matrix-wayland
+          kill $SWAY_PID 2>/dev/null || true
+
       - name: Optimized build (-O2) + examples + export surface
         # One invocation, one config: an optimized-config build followed
         # by plain `make examples` would silently flip the config stamp
