@@ -301,6 +301,25 @@ int main(void) {
             printf("SKIP: no EGL lane for the modifier query (%d)\n",
                    (int)qr);
         }
+    /* ---- the count-only query shape (the audit's §5 edge) -------- */
+    {
+        fdk_i32 n_only = -1;
+        fdk_i32 impl_only = -1;
+        /* max_modifiers=0 with a NULL out array: the documented
+         * "tell me the count" call — *out_n is ALWAYS the true count */
+        fdk_result qr = fdk_texture_dmabuf_query(g_ctx_dbg,
+                                                 FOURCC('R', 'A', '2', '4'),
+                                                 NULL, 0, &n_only,
+                                                 &impl_only);
+        printf("[info] count-only query: result=%d n=%d implicit=%d\n",
+               (int)qr, (int)n_only, (int)impl_only);
+        /* No lane here: the honest UNSUPPORTED (out_n untouched — the
+         * contract promises the true count only on success). On a DRM
+         * box this returns OK with the real count. */
+        CHECK(qr == FDK_ERR_UNSUPPORTED,
+              "count-only query without the lane: honest UNSUPPORTED");
+    }
+
         fdk_shutdown(g_ctx_dbg);
         g_ctx_dbg = NULL;
     }

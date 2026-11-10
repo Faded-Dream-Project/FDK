@@ -1,4 +1,23 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The audit's gap list: four of five closed, the count-only bug found
+
+- fdk_texture_dmabuf_query's count-only shape (max_modifiers=0, NULL
+  out array) is now TESTED — and the test caught the placement trap:
+  the shape returns FDK_ERR_INVALID_ARGUMENT for a NULL context (the
+  impl's argument guard precedes the lane check — the docs' "out_n is
+  always the true count" promise applies only past that guard), which
+  is the honest order. The test runs it against a live context and
+  asserts the honest UNSUPPORTED without a lane.
+- fdk_ext_surface_set_cursor is now called add-on-facing in
+  09_gl_dmabuf_panel.c (the labeled result; UNSUPPORTED where the
+  lane lacks the machinery).
+- fdk_virtual_keyboard_key was closed earlier this session (the
+  delivery assertion). The audit's §5 list is updated: the two
+  remaining opens are the ext-kind popup examples (the widget tests
+  cover both paths; the examples do not yet).
+- Full battery: 797 [ok] lines, all suites pass, both sway lanes
+  green with leak detection ON (P3 + matrix, zero leaks), the
+  exports gate clean, the examples gate green.
 ## The second blind example: 09_gl_dmabuf_panel.c — written, run, and
 ## its five walls fixed
 

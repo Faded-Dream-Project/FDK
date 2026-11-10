@@ -89,18 +89,24 @@ capability flags, FDK_EXT_API_VERSION 3.
 
 ## 5. Not covered by a test or example (the gap list)
 
-- `fdk_virtual_keyboard_key` — declared, exercised only by the cap
-  check; no example sends a key through it (the IM example commits
-  text instead). Needs a virtual-keyboard example or a protocol-test
-  leg.
-- `fdk_ext_surface_set_cursor` — tested via the widget paths; no
-  add-on-facing example.
-- `fdk_texture_dmabuf_query`'s max_modifiers=0 call shape (count-only)
-  — untested edge.
-- The popup_attached hook's Wayland popup-parenting path — covered by
-  the widget popup tests, not by an ext-kind example.
-- `fdk_ext_popup_create`'s X11 OR-window path — widget-tested; the
-  ext-level example set has no popup.
+Updated 2026-11-11 (this session closed four of five):
+
+- `fdk_virtual_keyboard_key` — CLOSED: the P3 protocol test injects Q
+  through the VK and asserts REAL delivery (a KEY_DOWN with scancode
+  16 on the focused window) on the two-output sway rig, under
+  ASan/LSan.
+- `fdk_ext_surface_set_cursor` — CLOSED: 09_gl_dmabuf_panel.c calls
+  it add-on-facing (the labeled result printed; the documented
+  UNSUPPORTED contract on a lane without the cursor machinery).
+- `fdk_texture_dmabuf_query`'s max_modifiers=0 call shape — CLOSED:
+  test_dmabuf.c exercises the count-only call against a live context
+  and asserts the honest UNSUPPORTED without a lane (and the impl's
+  guard order was verified against the docs' "out_n is always the
+  true count" contract).
+- The popup_attached hook's Wayland popup-parenting path — widget
+  tests cover it; STILL no ext-kind example (the one open gap).
+- `fdk_ext_popup_create`'s X11 OR-window path — widget-tested; STILL
+  no ext-level popup example (open, same family).
 
 ## 6. The sign-off checklist (do at 1.0, in order)
 
