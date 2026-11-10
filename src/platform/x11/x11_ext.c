@@ -433,3 +433,63 @@ fdk_result fdk_x11_subsurface_place(fdk_platform_window *pwindow,
                      CWSibling | CWStackMode, &changes);
     return FDK_OK;
 }
+
+
+/* ---- fdk/ext/x11.h — the opt-in escape hatch (1.0.0) ---------------------- */
+#include "window/window_internal.h"  /* the opaque types open inside the library */
+#include "core/context_internal.h"
+
+Display *fdk_ext_x11_display(fdk_context *ctx) {
+    fdk_platform_connection *c = (ctx != NULL) ? ctx->conn : NULL;
+    return (c != NULL) ? c->display : NULL;
+}
+
+unsigned long fdk_ext_x11_window_handle(fdk_window *window) {
+    if (window == NULL || window->pwindow == NULL) {
+        return 0;
+    }
+    /* The X11 pwindow's first member IS the Window (x11_platform.h);
+     * the tagged-native contract makes the XID the documented read. */
+    return (unsigned long)*(const unsigned long *)window->pwindow;
+}
+
+static Atom ext_x11_atom(Display *dpy, const char *name) {
+    return XInternAtom(dpy, name, False);
+}
+
+fdk_result fdk_ext_x11_set_window_type(fdk_window *window,
+                                       const char *type_atom) {
+    fdk_platform_connection *c =
+        (window != NULL && window->ctx != NULL) ? window->ctx->conn : NULL;
+    if (c == NULL || window->pwindow == NULL || type_atom == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    Display *dpy = c->display;
+    Window w = (Window) * (const unsigned long *)window->pwindow;
+    Atom prop = ext_x11_atom(dpy, "_NET_WM_WINDOW_TYPE");
+    Atom data = ext_x11_atom(dpy, type_atom);
+    XChangeProperty(dpy, w, prop, XA_ATOM, 32, PropModeReplace,
+                    (unsigned char *)&data, 1);
+    return FDK_OK;
+}
+
+fdk_result fdk_ext_x11_set_struts(fdk_window *window,
+                                  unsigned long struts[12]) {
+    fdk_platform_connection *c =
+        (window != NULL && window->ctx != NULL) ? window->ctx->conn : NULL;
+    if (c == NULL || window->pwindow == NULL || struts == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    Display *dpy = c->display;
+    Window w = (Window) * (const unsigned long *)window->pwindow;
+    Atom prop = ext_x11_atom(dpy, "_NET_WM_STRUT_PARTIAL");
+    XChangeProperty(dpy, w, prop, XA_CARDINAL, 32, PropModeReplace,
+                    (unsigned char *)struts, 12);
+    /* The legacy _NET_WM_STRUT (4 longs) alongside: simple WMs read
+     * only the old one. */
+    prop = ext_x11_atom(dpy, "_NET_WM_STRUT");
+    XChangeProperty(dpy, w, prop, XA_CARDINAL, 32, PropModeReplace,
+                    (unsigned char *)struts, 4);
+    XFlush(dpy);
+    return FDK_OK;
+}

@@ -12,6 +12,7 @@
 #include "generated/xdg-activation-v1-client-protocol.h"
 #include "generated/tablet-unstable-v2-client-protocol.h"
 #include "generated/wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
+#include "generated/wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "generated/xdg-session-management-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
@@ -160,6 +161,22 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->idle_inhibit_manager =
             wl_registry_bind(registry, name,
                              &zwp_idle_inhibit_manager_v1_interface, 1);
+    } else if (strcmp(interface,
+                      zwlr_layer_shell_v1_interface.name) == 0) {
+        /* OPTIONAL (1.0.0, WI4): the first-class layer-shell role's
+         * factory. Bound eagerly — get_layer_surface is
+         * client-initiated, so nothing hits the wire until an add-on
+         * creates a layer surface (fdk_ext_layer_surface_create).
+         * Absent (GNOME, KDE Plasma pre-6) = the capability reports
+         * false and creation answers UNSUPPORTED; an add-on can still
+         * bind its own through fdk/ext/wayland.h. Version 4 is what
+         * the protocol offers on current compositors; older servers
+         * get their own version (the role surface uses only v1
+         * requests). */
+        conn->layer_shell =
+            wl_registry_bind(registry, name,
+                             &zwlr_layer_shell_v1_interface,
+                             version < 4 ? version : 4);
     } else if (strcmp(interface,
                       zwlr_foreign_toplevel_manager_v1_interface.name) == 0) {
         /* OPTIONAL (1.0.0, D-4): wlr-foreign-toplevel-management —
@@ -552,6 +569,10 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
     if (conn->shm) wl_shm_destroy(conn->shm);
     if (conn->subcompositor) {
         wl_subcompositor_destroy(conn->subcompositor);
+    }
+    if (conn->layer_shell) {
+        zwlr_layer_shell_v1_destroy(conn->layer_shell);
+        conn->layer_shell = NULL;
     }
     if (conn->foreign_toplevel_manager) {
         zwlr_foreign_toplevel_manager_v1_destroy(

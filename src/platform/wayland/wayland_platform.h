@@ -174,6 +174,16 @@ struct fdk_platform_connection {
      * KDE pre-5.x) = open answers NULL, the honest degradation.
      * foreign_toplevels_live enforces the one-list rule (libwayland's
      * one-listener-per-proxy). */
+    /* OPTIONAL (1.0.0, WI4): zwlr_layer_shell_v1 — the first-class
+     * layer-surface role's factory (wayland_layer.c). Bound eagerly
+     * (get_layer_surface is client-initiated: nothing rides the wire
+     * until an add-on asks). */
+    struct zwlr_layer_shell_v1 *layer_shell;
+    /* The first-class layer role's internal kind (registered lazily,
+     * once) and the pending options for the NEXT create (the kind's
+     * create callback reads and clears them). */
+    struct fdk_ext_surface_kind *layer_kind;
+    const struct fdk_ext_layer_options *pending_layer_opts;
     uint32_t foreign_toplevel_name;
     struct zwlr_foreign_toplevel_manager_v1 *foreign_toplevel_manager;
     int foreign_toplevels_live;
@@ -915,6 +925,16 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
  * add-on's role handshake owns the first commit) in a registered
  * pwindow with the render-slot machinery. See
  * platform_internal.h's ext_surface_adopt contract. */
+/* ---- the first-class layer-shell role (wayland_layer.c, WI4) ---- */
+int fdk_wayland_layer_shell_available(fdk_platform_connection *conn);
+fdk_result fdk_wayland_layer_surface_create(
+    fdk_context *ctx, fdk_platform_connection *conn,
+    const struct fdk_ext_layer_options *options,
+    fdk_ext_surface **out_surface);
+fdk_result fdk_wayland_layer_surface_set(fdk_platform_window *pwindow,
+                                         int what, fdk_i32 a, fdk_i32 b,
+                                         fdk_i32 c, fdk_i32 d);
+
 fdk_result fdk_wayland_ext_surface_adopt(fdk_platform_connection *conn,
                                          const fdk_ext_native_handle *native,
                                          fdk_platform_window **out_pwindow);

@@ -33,6 +33,7 @@
 #define FDK_LOG_TAG "wayland"
 
 #include "platform/wayland/wayland_platform.h"
+#include "core/context_internal.h"  /* ctx->conn opens inside the library */
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -542,4 +543,44 @@ fdk_result fdk_wayland_subsurface_place(fdk_platform_window *pwindow,
     /* Stacking is parent-managed state too: apply it NOW. */
     subsurface_apply_tree_state(pwindow);
     return FDK_OK;
+}
+
+
+/* ---- fdk/ext/wayland.h — the opt-in escape hatch (1.0.0) ------------------ */
+
+struct wl_display *fdk_ext_wl_display(fdk_context *ctx) {
+    fdk_platform_connection *c = (ctx != NULL) ? ctx->conn : NULL;
+    return (c != NULL) ? c->display : NULL;
+}
+
+struct wl_registry *fdk_ext_wl_registry(fdk_context *ctx) {
+    fdk_platform_connection *c = (ctx != NULL) ? ctx->conn : NULL;
+    return (c != NULL) ? c->registry : NULL;
+}
+
+size_t fdk_ext_wl_seat_count(fdk_context *ctx) {
+    /* FDK models the single-seat connection today (the conn's one
+     * wl_seat, wayland_platform.h); the count/index shape keeps an
+     * add-on source-compatible with a multi-seat future. */
+    fdk_platform_connection *c = (ctx != NULL) ? ctx->conn : NULL;
+    return (c != NULL && c->seat != NULL) ? 1 : 0;
+}
+
+struct wl_seat *fdk_ext_wl_seat(fdk_context *ctx, size_t index) {
+    fdk_platform_connection *c = (ctx != NULL) ? ctx->conn : NULL;
+    if (c == NULL || index != 0) {
+        return NULL;
+    }
+    return c->seat;
+}
+
+struct wl_data_device_manager *fdk_ext_wl_data_device_manager(
+    fdk_context *ctx) {
+    fdk_platform_connection *c = (ctx != NULL) ? ctx->conn : NULL;
+    return (c != NULL) ? c->data_device_manager : NULL;
+}
+
+struct xkb_context *fdk_ext_wl_xkb_context(fdk_context *ctx) {
+    fdk_platform_connection *c = (ctx != NULL) ? ctx->conn : NULL;
+    return (c != NULL) ? c->xkb_context : NULL;
 }

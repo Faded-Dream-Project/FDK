@@ -143,6 +143,13 @@ int fdk_ext_has_capability(fdk_context *ctx, fdk_ext_capability cap) {
              * the add-on's own protocol negotiation, which FDK cannot
              * vouch for. */
             return fdk_ext_active_backend(ctx) == FDK_EXT_BACKEND_X11;
+        case FDK_EXT_CAP_LAYER_SHELL:
+            /* The first-class layer role: Wayland + the compositor's
+             * zwlr_layer_shell_v1 (the optional ops carry the truth;
+             * X11 and wayland-less builds leave them NULL). */
+            return ops->ext_layer_shell_available != NULL &&
+                   ops->ext_layer_surface_create != NULL &&
+                   ops->ext_layer_shell_available(ctx->conn);
         case FDK_EXT_CAP_RENDER_CPU:
             /* The software rasterizer exists in every mode; in GPU mode
              * its pixels ride the lane's texture upload. */
@@ -901,4 +908,70 @@ void fdk__ext_kinds_detach(fdk_context *ctx) {
         kind = next;
     }
     ctx->ext_kinds_head = NULL;
+}
+
+
+/* ---- Layer-shell surfaces (1.0.0, fdk_extend.h) --------------------------- */
+static fdk_result fdk__ext_layer_set(fdk_ext_surface *surface, int what,
+                                     fdk_i32 a, fdk_i32 b, fdk_i32 c,
+                                     fdk_i32 d);
+
+fdk_result fdk_ext_layer_surface_create(fdk_context *ctx,
+                                        const fdk_ext_layer_options *options,
+                                        fdk_ext_surface **out_surface) {
+    if (ctx == NULL || options == NULL || out_surface == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (ctx->ops == NULL || ctx->conn == NULL) {
+        return FDK_ERR_NOT_INITIALIZED;
+    }
+    if (options->struct_size < sizeof(fdk_ext_layer_options)) {
+        return FDK_ERR_INVALID_ARGUMENT; /* older options, newer lib */
+    }
+    if (ctx->ops->ext_layer_surface_create == NULL) {
+        return FDK_ERR_UNSUPPORTED; /* X11, or a wayland-less build */
+    }
+    return ctx->ops->ext_layer_surface_create(ctx, ctx->conn, options,
+                                              out_surface);
+}
+
+fdk_result fdk_ext_layer_surface_set_layer(fdk_ext_surface *surface,
+                                           int layer) {
+    return fdk__ext_layer_set(surface, 1, layer, 0, 0, 0);
+}
+
+fdk_result fdk_ext_layer_surface_set_anchor(fdk_ext_surface *surface,
+                                            fdk_u32 anchor) {
+    return fdk__ext_layer_set(surface, 2, (fdk_i32)anchor, 0, 0, 0);
+}
+
+fdk_result fdk_ext_layer_surface_set_exclusive_zone(fdk_ext_surface *surface,
+                                                    fdk_i32 zone) {
+    return fdk__ext_layer_set(surface, 3, zone, 0, 0, 0);
+}
+
+fdk_result fdk_ext_layer_surface_set_margins(fdk_ext_surface *surface,
+                                             fdk_i32 top, fdk_i32 bottom,
+                                             fdk_i32 left, fdk_i32 right) {
+    return fdk__ext_layer_set(surface, 4, top, bottom, left, right);
+}
+
+fdk_result fdk_ext_layer_surface_set_keyboard(fdk_ext_surface *surface,
+                                              int mode) {
+    return fdk__ext_layer_set(surface, 5, mode, 0, 0, 0);
+}
+
+/* The shared setter body: validate the surface is live, then ride the
+ * platform op (NULL on X11 / wayland-less builds = UNSUPPORTED). */
+fdk_result fdk__ext_layer_set(fdk_ext_surface *surface, int what, fdk_i32 a,
+                              fdk_i32 b, fdk_i32 c, fdk_i32 d) {
+    fdk_window *w = (surface != NULL) ? surface->window : NULL;
+    if (w == NULL || w->pwindow == NULL || w->ctx == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (w->ctx->ops == NULL ||
+        w->ctx->ops->ext_layer_surface_set == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return w->ctx->ops->ext_layer_surface_set(w->pwindow, what, a, b, c, d);
 }

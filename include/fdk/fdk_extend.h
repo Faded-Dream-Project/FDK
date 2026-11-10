@@ -152,6 +152,13 @@ typedef enum fdk_ext_capability {
     FDK_EXT_CAP_RENDER_CPU    = 5,
     FDK_EXT_CAP_RENDER_HYBRID = 6,
     FDK_EXT_CAP_RENDER_GPU    = 7,
+    /* 1.0.0: a FIRST-CLASS layer-shell role (fdk_ext_layer_surface_*,
+     * below) — the compositor offers zwlr_layer_shell_v1 (or an
+     * equivalent FDK binds) and FDK built the role for the add-on.
+     * False on X11 and on Wayland compositors without the protocol
+     * (the add-on may still bind its own layer shell through the
+     * documented native accessors in fdk/ext/wayland.h). */
+    FDK_EXT_CAP_LAYER_SHELL   = 8,
 } fdk_ext_capability;
 
 /* Returns nonzero when `ctx`'s connected backend has `cap`.
@@ -666,6 +673,100 @@ fdk_result fdk_ext_subsurface_place_above(fdk_ext_surface *surface,
 /* The mirror: BELOW the sibling. Same validation, same failures. */
 fdk_result fdk_ext_subsurface_place_below(fdk_ext_surface *surface,
                                           fdk_ext_surface *sibling);
+
+/* ---- Layer-shell surfaces (extension API v3, 1.0.0) -----------------------
+ *
+ * The panel/dock/notification-layer role as a FIRST-CLASS FDK
+ * surface: FDK binds zwlr_layer_shell_v1 when the compositor offers
+ * it, builds the zwlr_layer_surface_v1 role for the add-on, bridges
+ * the role's configure handshake into the standard extension-surface
+ * flow (the present gate applies — notify_configure drives it), and
+ * the add-on renders/events exactly like any other extension surface
+ * (get_surface + set_event_callback + popups + widget hosting all
+ * work). The add-on NEVER touches the protocol objects; FDK owns the
+ * role's lifetime (destroyed with the surface, before the wl_surface).
+ *
+ * Compositors without the protocol: the capability reports false and
+ * creation answers FDK_ERR_UNSUPPORTED — the honest refusal, never a
+ * faked xdg_toplevel with dock hints. An add-on that wants to speak
+ * the protocol ITSELF (its own bind, its own listeners) uses the
+ * native accessors in fdk/ext/wayland.h instead.
+ */
+
+/* zwlr_layer_shell_v1's layer values (numeric identity matches the
+ * protocol; append-only). */
+enum {
+    FDK_LAYER_BACKGROUND = 0,
+    FDK_LAYER_BOTTOM     = 1,
+    FDK_LAYER_TOP        = 2,
+    FDK_LAYER_OVERLAY    = 3,
+};
+
+/* Anchor bits (zwlr_layer_surface_v1.set_anchor's enum). */
+enum {
+    FDK_LAYER_ANCHOR_TOP    = 1,
+    FDK_LAYER_ANCHOR_BOTTOM = 2,
+    FDK_LAYER_ANCHOR_LEFT   = 4,
+    FDK_LAYER_ANCHOR_RIGHT  = 8,
+};
+
+/* Keyboard interactivity (zwlr_layer_surface_v1.set_keyboard_
+ * interactivity's enum). */
+enum {
+    FDK_LAYER_KB_NONE       = 0,
+    FDK_LAYER_KB_EXCLUSIVE  = 1,
+    FDK_LAYER_KB_ON_DEMAND  = 2,
+};
+
+typedef struct fdk_ext_layer_options {
+    size_t struct_size;      /* sizeof(fdk_ext_layer_options); FDK reads
+                              * exactly this many bytes (append-only) */
+
+    int layer;               /* FDK_LAYER_*; default TOP            */
+    fdk_u32 anchor;          /* FDK_LAYER_ANCHOR_* bits; default 0
+                              * (compositor centers)               */
+    fdk_i32 exclusive_zone;  /* -1 = exclusive to the anchored edge's
+                              * full size; >=0 the reserve; default 0 */
+    fdk_i32 margin_top, margin_bottom, margin_left, margin_right;
+    int keyboard;            /* FDK_LAYER_KB_*; default NONE        */
+    const char *namespace_;  /* role namespace (compositor logs);
+                              * NULL = "fdk"                        */
+} fdk_ext_layer_options;
+
+/* Creates a layer surface. The role's configure events arrive as
+ * FDK_EVENT_WINDOW_CONFIGURE on the surface's event callback (the
+ * add-on acks implicitly by rendering — the present gate owns the
+ * protocol discipline, exactly like add-on-driven roles).
+ *
+ * Can fail with:
+ *   FDK_ERR_INVALID_ARGUMENT - ctx/out NULL, or options->struct_size
+ *                              smaller than this header's struct
+ *   FDK_ERR_NOT_INITIALIZED  - no live connection
+ *   FDK_ERR_UNSUPPORTED      - the compositor offers no layer shell
+ *                              (check FDK_EXT_CAP_LAYER_SHELL first)
+ *   FDK_ERR_OUT_OF_MEMORY
+ */
+fdk_result fdk_ext_layer_surface_create(fdk_context *ctx,
+                                        const fdk_ext_layer_options *options,
+                                        fdk_ext_surface **out_surface);
+
+/* Post-create adjustments — legal any time before the FIRST configure
+ * is reported (the role state applies with the initial handshake);
+ * after that they answer FDK_ERR_INVALID_STATE (a re-map of layer
+ * state is the compositor's move, not the client's — destroy and
+ * recreate). All take the surface; wrong-kind surfaces answer
+ * FDK_ERR_INVALID_ARGUMENT. */
+fdk_result fdk_ext_layer_surface_set_layer(fdk_ext_surface *surface,
+                                           int layer);
+fdk_result fdk_ext_layer_surface_set_anchor(fdk_ext_surface *surface,
+                                            fdk_u32 anchor);
+fdk_result fdk_ext_layer_surface_set_exclusive_zone(fdk_ext_surface *surface,
+                                                    fdk_i32 zone);
+fdk_result fdk_ext_layer_surface_set_margins(fdk_ext_surface *surface,
+                                             fdk_i32 top, fdk_i32 bottom,
+                                             fdk_i32 left, fdk_i32 right);
+fdk_result fdk_ext_layer_surface_set_keyboard(fdk_ext_surface *surface,
+                                              int mode);
 
 /* ---- Nested / modal loops (extension API v3, 1.0.0) -----------------------
  *

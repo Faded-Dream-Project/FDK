@@ -15,6 +15,7 @@
 #define FDK_PLATFORM_INTERNAL_H
 
 #include "fdk/fdk_core.h"
+#include "fdk/fdk_extend.h" /* layer-surface options + ext surfaces (WI4) */
 #include "fdk/fdk_dnd.h"
 #include "fdk/fdk_error.h"
 #include "fdk/fdk_event.h"
@@ -850,6 +851,22 @@ typedef struct fdk_platform_ops {
      * backend has no buffer bookkeeping to update. */
     void (*ext_surface_resized)(fdk_platform_window *pwindow,
                                 fdk_i32 width, fdk_i32 height);
+
+    /* OPTIONAL (1.0.0, WI4): the FIRST-CLASS layer-shell role
+     * (fdk_extend.h's layer section). available(): nonzero when the
+     * compositor offered zwlr_layer_shell_v1. create(): builds the
+     * wl_surface + role through the internal kind machinery and
+     * returns the public ext surface. set(): one selector op for the
+     * post-create role adjustments. All NULL on X11 — the capability
+     * reports false and the public API answers UNSUPPORTED. */
+    int (*ext_layer_shell_available)(fdk_platform_connection *conn);
+    fdk_result (*ext_layer_surface_create)(
+        fdk_context *ctx, fdk_platform_connection *conn,
+        const struct fdk_ext_layer_options *options,
+        fdk_ext_surface **out_surface);
+    fdk_result (*ext_layer_surface_set)(fdk_platform_window *pwindow,
+                                        int what, fdk_i32 a, fdk_i32 b,
+                                        fdk_i32 c, fdk_i32 d);
 
     /* ---- OPTIONAL foreign-toplevel management (1.0.0, D-4) ------
      * (the types live just above this struct) */
