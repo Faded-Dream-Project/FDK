@@ -375,6 +375,14 @@ typedef struct fdk_platform_ops {
                                        int (*filter)(void *, void *),
                                        void *user);
     int (*window_activation_available)(fdk_platform_connection *conn);
+    /* Extension-API v3, cap 19: the zero-copy dma-buf import truth
+     * (Wayland only; the X11 GLX lane has no EGL to import through).
+     * NULL = the lane cannot serve zero-copy (the CPU-mode fallback
+     * rules decide per draw). */
+    int (*dmabuf_import_available)(fdk_platform_connection *conn);
+    /* The lane's EGL display for the cap-19 query (Wayland: the
+     * display once the lane loaded; X11/CPU: NULL). */
+    void *(*lane_egl_display)(fdk_platform_connection *conn);
     fdk_result (*window_set_idle_inhibit)(fdk_platform_window *pwindow,
                                           int inhibit);
 

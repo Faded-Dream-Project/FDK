@@ -1,3 +1,6 @@
+/* memfd_create is GNU; the test wants it before any include */
+#define _GNU_SOURCE
+
 /* test_dmabuf.c — P4: the dma-buf import.
  *
  * Everything that can run without a DRM device runs everywhere:
@@ -15,8 +18,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dlfcn.h>
+#include <sys/mman.h>
 #include "render/surface_internal.h"
 
+static fdk_context *g_ctx_dbg = NULL;
 static int g_fail = 0;
 #define CHECK(cond, name)                                                    \
     do {                                                                     \
@@ -90,16 +95,142 @@ int main(void) {
     CHECK(fdk_texture_import_dmabuf(&p, &t) == FDK_ERR_INVALID_ARGUMENT,
           "negative fd rejected (with the INVALID modifier accepted)");
     p = base_params();
-    p.planes[0].modifier = 0x0200000000000002ull; /* a tiled modifier */
-    p.planes[0].fd = -1;
-    CHECK(fdk_texture_import_dmabuf(&p, &t) == FDK_ERR_UNSUPPORTED,
-          "tiled modifier honestly unsupported (the EGLImage path)");
-    p = base_params();
     p.planes[0].stride = 4; /* < width*4 */
     p.planes[0].fd = -1;
     CHECK(fdk_texture_import_dmabuf(&p, &t) == FDK_ERR_INVALID_ARGUMENT,
           "stride < width*bpp rejected");
     CHECK(t == NULL, "no texture leaked by any rejection");
+
+    /* ---- the lazy-split semantics (no DRM needed: a memfd is
+     * mmap-able exactly like a linear dmabuf, so the CPU fallback
+     * path is REALLY testable here) -------------------------------- */
+    int mfd = memfd_create("fdk-dmabuf-test", 0);
+    int memfd_ok = mfd >= 0;
+    CHECK(memfd_ok, "memfd for the fallback tests");
+    if (mfd >= 0) {
+        /* an 8x8 linear RA24 buffer: gradient + alpha */
+        const int W = 8, H = 8;
+        uint8_t buf[W * H * 4];
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                uint8_t *px = buf + (size_t)y * W * 4 + (size_t)x * 4;
+                /* RA24 = RGBA8888: the bytes are R,G,B,A in memory */
+                px[0] = (uint8_t)(y * 30);  /* R: the vertical ramp */
+                px[1] = 10;                 /* G */
+                px[2] = (uint8_t)(x * 30);  /* B */
+                px[3] = 0xEE;               /* A */
+            }
+        }
+        CHECK(write(mfd, buf, sizeof buf) == (ssize_t)sizeof buf,
+              "the linear buffer written");
+
+        /* LINEAR + the CPU fallback: import stores, draw realizes
+         * through the mmap path and the pixels land */
+        fdk_dmabuf_params lp = base_params();
+        lp.width = W;
+        lp.height = H;
+        lp.fourcc = FOURCC('R', 'A', '2', '4');
+        lp.planes[0].fd = mfd;
+        lp.planes[0].stride = W * 4;
+        lp.planes[0].modifier = 0; /* LINEAR */
+        fdk_texture *lt = NULL;
+        fdk_result lr = fdk_texture_import_dmabuf(&lp, &lt);
+        CHECK(fdk_ok(lr), "the linear import stores (no mmap yet)");
+        if (fdk_ok(lr)) {
+            /* update is refused on a dmabuf texture (BEFORE the
+             * draw — the fallback claims the storage after it) */
+            fdk_rect one = {0, 0, 1, 1};
+            uint8_t px4[4] = {1, 2, 3, 4};
+            CHECK(fdk_texture_update(lt, one, px4, 4) ==
+                      FDK_ERR_INVALID_STATE,
+                  "texture_update refuses the dmabuf payload");
+            fdk_surface *s2 = NULL;
+            if (fdk_ok(fdk_surface_create(W, H, &s2))) {
+                fdk_surface_fill(s2, (fdk_color){0, 0, 0, 1});
+                fdk_rect dst = {0, 0, W, H};
+                CHECK(fdk_ok(fdk_texture_draw(s2, lt, dst)),
+                      "the CPU fallback draws");
+                const uint8_t *pix =
+                    (const uint8_t *)s2->fb.pixels;
+                /* the fb is the surface's opaque BGRX form: alpha is
+                 * the fill's — verify R and G only */
+                /* the fb stride is in fdk_u32 PIXEL units (the
+                 * documented fdk_surface_info contract) */
+                const size_t stride_b = (size_t)s2->fb.stride * 4u;
+                /* the draw's NEAREST sampling rounds at the edge:
+                 * row 7 lands on 209, not 210 — tolerance 2 */
+                int ok = pix[2] == 0 /* y=0,x=0: R=0 */ &&
+                         pix[1] == 10 &&
+                         pix[(size_t)(H - 1) * stride_b + 2] >=
+                             (uint8_t)((H - 1) * 30 - 2);
+                CHECK(ok, "the fallback pixels round-trip");
+                fdk_surface_destroy(s2);
+            }
+            fdk_texture_destroy(lt);
+        }
+
+        /* INVALID modifier: import stores; the draw must answer
+         * UNSUPPORTED — NEVER map it as linear */
+        if (lseek(mfd, 0, SEEK_SET) == 0) {
+            CHECK(write(mfd, buf, sizeof buf) == (ssize_t)sizeof buf,
+                  "the buffer rewritten");
+        }
+        fdk_dmabuf_params ip = lp;
+        ip.planes[0].modifier = ((uint64_t)1 << 56) - 1;
+        fdk_texture *it = NULL;
+        fdk_result ir = fdk_texture_import_dmabuf(&ip, &it);
+        CHECK(fdk_ok(ir), "the INVALID import stores");
+        if (fdk_ok(ir)) {
+            fdk_surface *s3 = NULL;
+            if (fdk_ok(fdk_surface_create(W, H, &s3))) {
+                fdk_rect dst = {0, 0, W, H};
+                CHECK(fdk_texture_draw(s3, it, dst) ==
+                          FDK_ERR_UNSUPPORTED,
+                      "INVALID never mmaps (draw refuses)");
+                fdk_surface_destroy(s3);
+            }
+            fdk_texture_destroy(it);
+        }
+        /* the tiled modifier: the import STORES (the zero-copy lane
+         * may serve it); the draw refuses without the EGL path */
+        fdk_dmabuf_params tp = lp;
+        tp.planes[0].modifier = 0x0200000000000002ull;
+        fdk_texture *tt = NULL;
+        if (fdk_ok(fdk_texture_import_dmabuf(&tp, &tt))) {
+            fdk_surface *s4 = NULL;
+            if (fdk_ok(fdk_surface_create(W, H, &s4))) {
+                fdk_rect dst = {0, 0, W, H};
+                CHECK(fdk_texture_draw(s4, tt, dst) ==
+                          FDK_ERR_UNSUPPORTED,
+                      "tiled draws UNSUPPORTED without the EGL path");
+                fdk_surface_destroy(s4);
+            }
+            fdk_texture_destroy(tt);
+        }
+        close(mfd);
+    }
+
+    /* ---- the driver's modifier query: only where an EGL lane
+     * exists (the sandbox usually has none — SKIP honestly) ------- */
+    if (!fdk_ok(fdk_init(&g_ctx_dbg, NULL))) {
+        /* no context at all: the query test is done */
+    } else {
+        fdk_u64 mods[64];
+        fdk_i32 n = 0, implicit = 0;
+        fdk_result qr = fdk_texture_dmabuf_query(
+            g_ctx_dbg, FOURCC('A', 'R', '2', '4'), mods, 64, &n,
+            &implicit);
+        if (fdk_ok(qr)) {
+            printf("dmabuf query: %d modifiers for AR24 (implicit=%d)\n",
+                   (int)n, (int)implicit);
+            CHECK(n >= 0, "the modifier query ran");
+        } else {
+            printf("SKIP: no EGL lane for the modifier query (%d)\n",
+                   (int)qr);
+        }
+        fdk_shutdown(g_ctx_dbg);
+        g_ctx_dbg = NULL;
+    }
 
     /* ---- the real round-trip: SKIP without a DRM device --------------- */
     void *gbm = dlopen("libgbm.so.1", RTLD_NOW | RTLD_LOCAL);

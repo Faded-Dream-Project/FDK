@@ -4,6 +4,7 @@
 
 #include "platform/wayland/wayland_egl.h"
 #include "render/gpaint.h"
+#include "render/dmabuf_egl_internal.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -597,6 +598,44 @@ static int wlgl_policy_selfcheck_failed = 0;
  * down, and how many of them reached the eglReleaseThread tail. */
 static int wlgl_teardown_count = 0;
 static int wlgl_release_thread_count = 0;
+
+/* Extension-API v3, cap 19: the connection's zero-copy import truth.
+ * Triggers the lane's lazy EGL load (the one-shot bring-up) and asks
+ * the DISPLAY for the import extensions. 0 when no lane, no display,
+ * or the extension is missing — exactly when the CPU-mode linear
+ * fallback is the only import path. */
+int fdk_wayland_egl_dmabuf_available(fdk_platform_connection *conn) {
+    if (conn == NULL) {
+        return 0;
+    }
+    struct fdk_wayland_egl *e = conn->egl;
+    if (e == NULL) {
+        if (conn->egl_tried) {
+            return 0;
+        }
+        conn->egl = fdk_wayland_egl_try_load(conn);
+        conn->egl_tried = 1;
+        e = conn->egl;
+        if (e == NULL) {
+            return 0;
+        }
+    }
+    if (e->egl_display == NULL || e->lib_egl == NULL) {
+        return 0;
+    }
+    struct fdk__dmabuf_egl_api *api = NULL;
+    if (!fdk__dmabuf_egl_load(&api)) {
+        return 0;
+    }
+    return fdk__dmabuf_egl_dpy_supports(api, e->egl_display, NULL);
+}
+
+void *fdk_wayland_egl_lane_display(fdk_platform_connection *conn) {
+    if (conn == NULL || conn->egl == NULL) {
+        return NULL;
+    }
+    return conn->egl->egl_display;
+}
 
 void fdk__wayland_egl_test_reset(void) {
     /* TEST SEAM (mirrors fdk__x11_gl_test_reset): clear the

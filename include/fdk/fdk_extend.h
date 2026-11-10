@@ -189,6 +189,15 @@ typedef enum fdk_ext_capability {
                                         * hook (core + XI2 events; the
                                         * OR-window path is the popup
                                         * API)                     */
+    FDK_EXT_CAP_DMABUF_IMPORT = 19, /* zero-copy dma-buf texture import
+                                     * (EGL_EXT_image_dma_buf_import +
+                                     * _import_modifiers on the lane's
+                                     * EGL display; the zero-copy draw
+                                     * path). FALSE means only the
+                                     * explicit CPU-mode linear-mmap
+                                     * fallback serves imports — and
+                                     * tiled/INVALID modifiers then
+                                     * answer UNSUPPORTED at draw. */
 } fdk_ext_capability;
 
 /* Returns nonzero when `ctx`'s connected backend has `cap`.

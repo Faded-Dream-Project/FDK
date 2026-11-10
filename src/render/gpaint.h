@@ -97,6 +97,14 @@ void fdk__gpu_flush(struct fdk_surface *s);
 /* Texture registry shared with the public fdk_texture API: creates or
  * returns the GL texture name for `t` in THIS engine (per-context
  * namespace; the lane's shared-context chain makes names cross). */
+/* The zero-copy dma-buf texture: realizes the EGLImage-backed GL
+ * texture in the LANE'S current context (the engine's flush contract)
+ * and registers it under the texture's key. Returns the GL name, or
+ * 0 when this lane cannot serve zero-copy (no current EGL display,
+ * the import extensions absent, or the driver refused) — the caller
+ * applies the CPU-mode fallback rules. */
+unsigned fdk__gpu_dmabuf_name(struct fdk_surface *s, void *key);
+
 unsigned fdk__gpu_texture_name(struct fdk_surface *s, void *key,
                                int width, int height, int format_rgba,
                                const unsigned char *pixels, fdk_i32 stride,

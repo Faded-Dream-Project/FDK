@@ -7,6 +7,7 @@
 #include "core/log_internal.h"
 #include "render/surface_internal.h"
 #include "gpaint.h"
+#include "surface_internal.h"
 #include "window/window_internal.h"
 
 #include <math.h>
@@ -2320,12 +2321,8 @@ fdk_result fdk_surface_blit_blend(fdk_surface *dst, fdk_i32 dst_x,
  * (blend_rgba), so widget paint code stays mode-agnostic. See the
  * declarations in include/fdk/fdk_surface.h. */
 
-struct fdk_texture {
-    fdk_i32 width;
-    fdk_i32 height;
-    fdk_u8 *pixels; /* RGBA8888, tightly packed (stride = width*4) */
-    size_t length;
-};
+/* struct fdk_texture lives in surface_internal.h (the dmabuf
+ * module's fallback path touches the payload directly). */
 
 fdk_result fdk_texture_create(fdk_i32 width, fdk_i32 height,
                               fdk_texture **out_texture) {
@@ -2355,6 +2352,11 @@ fdk_result fdk_texture_update(fdk_texture *texture, fdk_rect rect,
     if (texture == NULL || pixels == NULL || rect.width <= 0 ||
         rect.height <= 0) {
         return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (texture->is_dmabuf) {
+        /* the buffer is the dmabuf's, not ours: update would race
+         * the zero-copy lane's image and corrupt the fallback */
+        return FDK_ERR_INVALID_STATE;
     }
     if (rect.x < 0 || rect.y < 0 ||
         rect.x + rect.width > texture->width ||
@@ -2420,6 +2422,27 @@ fdk_result fdk_texture_draw_ex(fdk_surface *surface, fdk_texture *texture,
     }
     if (filter != FDK_FILTER_NEAREST && filter != FDK_FILTER_LINEAR) {
         return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (texture->is_dmabuf) {
+        /* the dmabuf import: zero-copy when the lane's EGL bridge
+         * can serve it; otherwise the EXPLICIT CPU fallback (linear
+         * only — INVALID/tiled answer UNSUPPORTED here, never a
+         * linear mmap guess) */
+        if (surface->gpu != NULL && !surface->gpu_failed) {
+            if (fdk__gpu_dmabuf_name(surface, texture) != 0) {
+                fdk__gpu_draw_texture(surface, texture, dst, 0.0f, 0.0f,
+                                      1.0f, 1.0f, 1.0f, (int)filter);
+                return FDK_OK;
+            }
+        }
+        fdk_result fr = fdk__dmabuf_fallback_realize(texture,
+                                                    &texture->dmabuf);
+        if (!fdk_ok(fr)) {
+            /* the payload flag STAYS: the texture keeps refusing
+             * (INVALID/tiled never degrade to empty-pixel draws) */
+            return FDK_ERR_UNSUPPORTED;
+        }
+        texture->is_dmabuf = 0; /* the pixels own it now */
     }
     if (surface->gpu != NULL || surface->gpu_failed) {
         if (surface->gpu_failed) {
@@ -2532,7 +2555,11 @@ void fdk_texture_destroy(fdk_texture *texture) {
         return;
     }
     /* GL-side registry entries die with their window engine (bounded
-     * table); the pixel memory is app-owned and freed here. */
+     * table); the pixel memory is app-owned and freed here. A dmabuf
+     * texture closes its own dup'd fds. */
+    if (texture->is_dmabuf) {
+        fdk__dmabuf_texture_close_fds(&texture->dmabuf);
+    }
     fdk_free(texture->pixels);
     fdk_free(texture);
 }

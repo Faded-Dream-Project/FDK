@@ -690,12 +690,27 @@ typedef struct fdk_texture fdk_texture;
  * lane's upload path takes over). The FDs are BORROWED: import does
  * not close them and never uses them after returning.
  *
- * Modifiers: DRM_FORMAT_MOD_LINEAR (0) and DRM_FORMAT_MOD_INVALID
- * (the implicit-modifier sentinel) map through CPU mmap; any tiled
- * modifier answers FDK_ERR_UNSUPPORTED — reading tiled memory needs
- * the GPU-side EGLImage path, which is the documented GPU-lane
- * follow-up (the validation here is complete either way: the format
- * and modifier checks run before any mapping).
+ * Modifiers and lanes (the honest map of what happens per draw):
+ *
+ *   - GPU lane with EGL_EXT_image_dma_buf_import: the import is
+ *     ZERO-COPY — the texture is realized as an EGLImage
+ *     (eglCreateImageKHR + glEGLImageTargetTexture2DOES) in the
+ *     lane's context and every draw samples it directly. Tiled and
+ *     vendor modifiers import when the DRIVER lists them for the
+ *     fourcc (fdk_texture_dmabuf_query reports that truth);
+ *     UNSUPPORTED only when the driver lacks the extension or the
+ *     specific modifier.
+ *   - INVALID modifier: the implicit-modifier sentinel. NEVER read
+ *     as linear — it imports through EGLImage with implicit-modifier
+ *     semantics (no modifier attributes passed), and a lane without
+ *     the EGL path answers FDK_ERR_UNSUPPORTED at draw.
+ *   - CPU mode (and GPU lanes without the EGL path) are the EXPLICIT
+ *     FALLBACK: DRM_FORMAT_MOD_LINEAR maps through CPU mmap and
+ *     converts into the texture's RGBA8888 storage (lazily, at the
+ *     first draw); tiled/INVALID answer FDK_ERR_UNSUPPORTED there.
+ *
+ * The FDs are BORROWED: import does not close them and never uses
+ * them after returning (the texture keeps dup'd copies).
  *
  * Fourccs are DRM fourccs (the linux-dmabuf table); FDK supports the
  * 8-bit RGB/RGBA family it can convert exactly:
@@ -723,6 +738,23 @@ typedef struct fdk_dmabuf_params {
 
 fdk_result fdk_texture_import_dmabuf(const fdk_dmabuf_params *params,
                                      fdk_texture **out_texture);
+
+/* The driver's modifier truth for `fourcc` on the zero-copy lane
+ * (eglQueryDmaBufFormatsEXT/eglQueryDmaBufModifiersEXT against the
+ * context's EGL display). out receives at most `max` modifiers;
+ * *out_n always the true count; *out_implicit (may be NULL) is 1
+ * when the driver advertises the implicit (DRM_FORMAT_MOD_INVALID)
+ * pseudo-modifier for the format. FDK_ERR_UNSUPPORTED when the
+ * context has no EGL lane or the driver lacks the query extension —
+ * which is exactly when the zero-copy path cannot serve imports
+ * (the CPU-mode fallback still applies per draw).
+ *
+ * Can fail with FDK_ERR_INVALID_ARGUMENT (NULL ctx/out_n) or
+ * FDK_ERR_UNSUPPORTED. Available since extension API v3. */
+fdk_result fdk_texture_dmabuf_query(fdk_context *ctx, fdk_u32 fourcc,
+                                    fdk_u64 *out_modifiers,
+                                    fdk_i32 max_modifiers,
+                                    fdk_i32 *out_n, fdk_i32 *out_implicit);
 
 /* Allocates a zeroed RGBA8888 texture (transparent black). */
 fdk_result fdk_texture_create(fdk_i32 width, fdk_i32 height,

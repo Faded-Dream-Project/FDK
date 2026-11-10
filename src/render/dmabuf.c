@@ -15,6 +15,7 @@
 
 #include "fdk/fdk_surface.h"
 #include "core/alloc_internal.h"
+#include "surface_internal.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -98,6 +99,84 @@ static int fourcc_row(uint32_t fourcc, fdk__dmabuf_row_fn *out) {
     }
 }
 
+/* ---- the texture payload helpers ---------------------------------------
+ *
+ * The import stores the params (the texture owns dup'd fds); the
+ * realization splits by lane at first draw:
+ *   - the GPU engine's EGL bridge (dmabuf_egl.c) imports zero-copy,
+ *   - everything else falls back to THIS module's linear mmap copy
+ *     — and ONLY for the linear modifier (INVALID never mmaps). */
+void fdk__dmabuf_texture_close_fds(fdk_dmabuf_params *p) {
+    if (p == NULL) {
+        return;
+    }
+    for (int i = 0; i < p->n_planes; i++) {
+        if (p->planes[i].fd >= 0) {
+            close(p->planes[i].fd);
+            p->planes[i].fd = -1;
+        }
+    }
+}
+
+/* The CPU-mode fallback: mmap the (linear) planes and fill the
+ * texture's RGBA8888 storage through the PUBLIC texture API.
+ * Returns FDK_OK, FDK_ERR_UNSUPPORTED (tiled/INVALID — the honest
+ * refusal; never mapped as linear), or the mmap failure as
+ * FDK_ERR_UNSUPPORTED. */
+fdk_result fdk__dmabuf_fallback_realize(fdk_texture *t,
+                                        fdk_dmabuf_params *p) {
+    if (t == NULL || p == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (p->n_planes < 1 || p->n_planes > FDK_DMABUF_MAX_PLANES) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (p->n_planes != 1) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    fdk_dmabuf_plane *pl = &p->planes[0];
+    if (pl->fd < 0) {
+        return FDK_ERR_INVALID_STATE; /* the fds died with the import */
+    }
+    if (pl->modifier != 0) {
+        /* linear only. DRM_FORMAT_MOD_INVALID (the sentinel) and
+         * every tiled modifier refuse here — the zero-copy lane is
+         * where they live. */
+        return FDK_ERR_UNSUPPORTED;
+    }
+    fdk__dmabuf_row_fn row = NULL;
+    if (!fourcc_row(p->fourcc, &row)) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    uint64_t need = (uint64_t)pl->offset +
+                    (uint64_t)pl->stride * (uint64_t)p->height;
+    if (pl->stride < (fdk_u32)p->width * 4u || need > SIZE_MAX) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    uint8_t *base =
+        mmap(NULL, (size_t)need, PROT_READ, MAP_SHARED, pl->fd, 0);
+    if (base == MAP_FAILED) {
+        return FDK_ERR_UNSUPPORTED; /* the honest mapping refusal */
+    }
+    /* rows land DIRECTLY in the texture's storage (the internal
+     * struct is shared via surface_internal.h — routing through the
+     * public update would self-reject while the payload flag is up) */
+    fdk_result rr = FDK_OK;
+    for (int y = 0; y < p->height && fdk_ok(rr); y++) {
+        row(base + pl->offset + (size_t)y * pl->stride,
+            t->pixels + (size_t)y * (size_t)t->width * 4u, p->width);
+    }
+    munmap(base, (size_t)need);
+    return rr;
+}
+
+/* The dmabuf payload accessors for the engine (gpaint.c) and the
+ * context-level query (extend.c). */
+const fdk_dmabuf_params *fdk__dmabuf_texture_params(
+    const fdk_texture *t) {
+    return t != NULL && t->is_dmabuf ? &t->dmabuf : NULL;
+}
+
 /* One mmap per unique fd, shared by the planes that reference it. */
 struct plane_map {
     int fd;
@@ -138,8 +217,6 @@ fdk_result fdk_texture_import_dmabuf(const fdk_dmabuf_params *params,
     if (params->n_planes < 1 || params->n_planes > FDK_DMABUF_MAX_PLANES) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
-    /* single-plane formats only in the supported table (the 8-bit
-     * RGB family is always single-plane) */
     fdk__dmabuf_row_fn row = NULL;
     if (!fourcc_row(params->fourcc, &row)) {
         return FDK_ERR_UNSUPPORTED; /* honest: no lossy conversion */
@@ -149,16 +226,16 @@ fdk_result fdk_texture_import_dmabuf(const fdk_dmabuf_params *params,
     }
     const fdk_dmabuf_plane *p = &params->planes[0];
     /* the modifier policy BEFORE the fd check: an unsupported layout
-     * is unsupported regardless of the descriptor quality */
-    if (p->modifier != FDK_DRM_FORMAT_MOD_LINEAR &&
-        p->modifier != FDK_DRM_FORMAT_MOD_INVALID) {
-        return FDK_ERR_UNSUPPORTED; /* tiled memory: the EGLImage path */
-    }
+     * is unsupported regardless of the descriptor quality. Zero is
+     * DRM_FORMAT_MOD_LINEAR; INVALID (the sentinel) and tiled
+     * modifiers stay eligible for the ZERO-COPY lane only. */
     if (p->fd < 0) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     /* plane arithmetic: the last row must fit under the stride's
-     * extent (overflow-safe in 64 bits) */
+     * extent (overflow-safe in 64 bits) — checked NOW so the caller
+     * learns the descriptor is broken even if the zero-copy lane
+     * would never need the arithmetic */
     uint64_t need = (uint64_t)p->offset +
                     (uint64_t)p->stride * (uint64_t)params->height;
     if (p->stride < (fdk_u32)params->width * 4u || need > SIZE_MAX) {
@@ -170,57 +247,19 @@ fdk_result fdk_texture_import_dmabuf(const fdk_dmabuf_params *params,
     if (!fdk_ok(r)) {
         return r;
     }
-    struct plane_map maps[FDK_DMABUF_MAX_PLANES];
-    int n_maps = 0;
-    uint8_t *base = map_for(maps, &n_maps, p->fd, (size_t)need);
-    if (base == MAP_FAILED) {
-        /* the runtime lacks the mapping right (an anonymous fd, a
-         * sealed memfd, a device that will not mmap) — the honest
-         * unsupported, not a guess */
-        int e = errno;
-        fdk_texture_destroy(t);
-        for (int i = 0; i < n_maps; i++) {
-            if (maps[i].addr != MAP_FAILED) {
-                munmap(maps[i].addr, maps[i].len);
-            }
-        }
-        (void)e;
-        return FDK_ERR_UNSUPPORTED;
-    }
-    /* fill through the PUBLIC texture API (one row at a time — no
-     * texture internals needed here) */
-    uint8_t *rowbuf = fdk_alloc((size_t)params->width * 4u);
-    if (rowbuf == NULL) {
-        fdk_texture_destroy(t);
-        for (int i = 0; i < n_maps; i++) {
-            if (maps[i].addr != MAP_FAILED) {
-                munmap(maps[i].addr, maps[i].len);
-            }
-        }
-        return FDK_ERR_OUT_OF_MEMORY;
-    }
-    for (int y = 0; y < params->height; y++) {
-        row(base + p->offset + (size_t)y * p->stride, rowbuf,
-            params->width);
-        fdk_rect rrow = { 0, y, params->width, 1 };
-        fdk_result rr = fdk_texture_update(t, rrow, rowbuf,
-                                           params->width * 4);
-        if (!fdk_ok(rr)) {
-            fdk_free(rowbuf);
+    /* the texture owns dup'd fds; the caller's stay theirs */
+    t->is_dmabuf = 1;
+    t->dmabuf = *params;
+    for (int i = 0; i < params->n_planes; i++) {
+        int dup_fd = fcntl(params->planes[i].fd, F_DUPFD_CLOEXEC, 0);
+        if (dup_fd < 0) {
+            /* the import fails WHOLE: no half-owned descriptors */
+            t->is_dmabuf = 0;
+            memset(&t->dmabuf, 0, sizeof t->dmabuf);
             fdk_texture_destroy(t);
-            for (int i = 0; i < n_maps; i++) {
-                if (maps[i].addr != MAP_FAILED) {
-                    munmap(maps[i].addr, maps[i].len);
-                }
-            }
-            return rr;
+            return FDK_ERR_OUT_OF_MEMORY;
         }
-    }
-    fdk_free(rowbuf);
-    for (int i = 0; i < n_maps; i++) {
-        if (maps[i].addr != MAP_FAILED) {
-            munmap(maps[i].addr, maps[i].len);
-        }
+        t->dmabuf.planes[i].fd = dup_fd;
     }
     *out_texture = t;
     return FDK_OK;

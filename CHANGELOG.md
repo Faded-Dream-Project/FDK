@@ -1,4 +1,45 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 1: the dmabuf zero-copy path — EGLImage, modifiers, INVALID done right
+
+- src/render/dmabuf_egl.c (+ dmabuf_egl_internal.h): the self-contained
+  libEGL bridge, dlopen'd like every other GL library (no new build
+  dependency). Extension truth per display (EGL_EXT_image_dma_buf_import
+  and _import_modifiers), eglQueryDmaBufFormatsEXT/ModifiersEXT, and the
+  realize path: eglCreateImageKHR(EGL_LINUX_DMA_BUF_EXT) +
+  glEGLImageTargetTexture2DOES in the lane's CURRENT context (the
+  engine's flush contract), the EGLImage released once the texture holds
+  the reference. Tiled and vendor modifiers import with explicit
+  modifier attributes; the INVALID modifier OMITS the modifier
+  attributes entirely — implicit semantics, never read as linear.
+- The import split: fdk_texture_import_dmabuf validates exactly as
+  before, then STORES the params (the texture owns dup'd fds, closed on
+  destroy; the caller's are never used after return). Realization is
+  per lane at first draw: the GPU engine's EGL bridge imports
+  zero-copy (fdk__gpu_dmabuf_name in the tex registry, realized once
+  per lane+texture); lanes without an EGL current display fall back to
+  the EXPLICIT CPU-mode path — a linear-mmap copy in dmabuf.c that
+  refuses INVALID and tiled modifiers with FDK_ERR_UNSUPPORTED (never a
+  linear guess) and keeps the payload flag up so the texture keeps
+  refusing instead of degrading to empty-pixel draws.
+- fdk_texture_update refuses dmabuf payloads (the buffer is the
+  dmabuf's, not ours). fdk_texture_dmabuf_query (public, v3) reports
+  the driver's modifier truth for a fourcc — FDK_ERR_UNSUPPORTED when
+  there is no EGL lane or the query extension is missing, which is
+  exactly when zero-copy cannot serve imports. The X11 GLX lane has no
+  EGL: cap 19 (FDK_EXT_CAP_DMABUF_IMPORT) is false there by the same
+  honesty — the ops carry dmabuf_import_available (Wayland) and the
+  CPU-mode linear fallback decides per draw.
+- struct fdk_texture moved to surface_internal.h (internal layout; the
+  payload helpers in dmabuf.c touch it directly).
+- tests/test_dmabuf.c: the lazy-split semantics run REAL without a DRM
+  device (a memfd is mmap-able exactly like a linear dmabuf): linear
+  stores → the fallback draws → the pixels round-trip through the fb
+  (stride in pixel units, the NEAREST edge tolerance); update refuses;
+  INVALID draws UNSUPPORTED (never mapped); tiled stores then refuses
+  at draw. The GBM round-trip still reports SKIP without /dev/dri (this
+  sandbox has none — and its libEGL is a glvnd dispatch stub with no
+  vendor backend, so the modifier query SKIPs here too; CI's sway leg
+  runs the query for real against mesa/llvmpipe).
 ## Item 5: CI — the P3/P4 legs, the installed-tree examples, the sway rig
 
 - .github/workflows/ci.yml's build-test job gains: the P3 protocol

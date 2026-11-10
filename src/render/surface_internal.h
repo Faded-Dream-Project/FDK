@@ -106,6 +106,26 @@ struct fdk_surface {
     int gpu_failed;
 };
 
+struct fdk_texture {
+    fdk_i32 width;
+    fdk_i32 height;
+    fdk_u8 *pixels; /* RGBA8888, tightly packed (stride = width*4) */
+    size_t length;
+    /* the dma-buf import (extension API v3): the params ride the
+     * texture; the fds are DUP'D COPIES owned by the texture
+     * (closed on destroy). The zero-copy lane realizes an EGLImage
+     * at draw; the CPU fallback mmaps the linear planes lazily. */
+    int is_dmabuf;
+    fdk_dmabuf_params dmabuf;
+};
+
+/* dmabuf.c: the payload helpers (the import's lazy split). */
+void fdk__dmabuf_texture_close_fds(fdk_dmabuf_params *p);
+fdk_result fdk__dmabuf_fallback_realize(fdk_texture *t,
+                                        fdk_dmabuf_params *p);
+const fdk_dmabuf_params *fdk__dmabuf_texture_params(
+    const fdk_texture *t);
+
 /* Implemented in surface.c, called by fdk_window_destroy() (see
  * src/window/window.c) to release the window's lazily-created surface,
  * if any. Safe to call on a window whose surface was never created. */

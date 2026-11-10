@@ -51,6 +51,13 @@
  */
 
 #include "gpaint.h"
+#include "dmabuf_egl_internal.h"
+
+/* dmabuf.c: the texture payload accessor */
+const fdk_dmabuf_params *fdk__dmabuf_texture_params(
+    const fdk_texture *t);
+fdk_result fdk__dmabuf_fallback_realize(fdk_texture *t,
+                                        fdk_dmabuf_params *p);
 
 #include <dlfcn.h>
 #include <stdint.h>
@@ -974,6 +981,61 @@ static unsigned gp_tex_realize(struct fdk_gpu_state *g,
                     GL_UNSIGNED_BYTE, NULL);
     slot->needs_upload = 1;
     return slot->name;
+}
+
+unsigned fdk__gpu_dmabuf_name(struct fdk_surface *s, void *key) {
+    struct fdk_gpu_state *g = gp_state(s);
+    if (g == NULL || g->dead || key == NULL) {
+        return 0;
+    }
+    struct fdk__dmabuf_egl_api *api = NULL;
+    if (!fdk__dmabuf_egl_load(&api)) {
+        return 0;
+    }
+    void *dpy = api->eglGetCurrentDisplay();
+    if (dpy == NULL) {
+        return 0; /* no EGL context current (the X11 GLX lane, CPU
+                   * mode): the fallback rules apply */
+    }
+    if (!gp_ensure_gl(s)) {
+        return 0;
+    }
+    const fdk_dmabuf_params *p = fdk__dmabuf_texture_params(
+        (const fdk_texture *)key);
+    if (p == NULL) {
+        return 0;
+    }
+    struct gp_tex_entry *slot = NULL;
+    for (int i = 0; i < GP_TEX_SLOTS; i++) {
+        struct gp_tex_entry *t = &g->tex[i];
+        if (t->valid && t->key == key) {
+            if (t->gl_ok) {
+                return t->name; /* realized once per (lane, texture) */
+            }
+            slot = t;
+            break;
+        }
+        if (slot == NULL && !t->valid) {
+            slot = t;
+        }
+    }
+    if (slot == NULL) {
+        return 0; /* registry full: bounded, honest */
+    }
+    unsigned name = fdk__dmabuf_egl_realize(api, dpy, p);
+    if (name == 0) {
+        return 0; /* the driver refused: the fallback rules decide */
+    }
+    slot->valid = 1;
+    slot->key = key;
+    slot->w = p->width;
+    slot->h = p->height;
+    slot->rgba = 1;
+    slot->name = name;
+    slot->gl_ok = 1;
+    slot->needs_upload = 0; /* the image owns the content */
+    slot->pend_px = NULL;
+    return name;
 }
 
 unsigned fdk__gpu_texture_name(struct fdk_surface *s, void *key, int width,

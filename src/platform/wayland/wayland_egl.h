@@ -174,3 +174,12 @@ fdk_result fdk_wayland_egl_window_fence_insert(
 fdk_result fdk_wayland_egl_window_fence_wait(
     struct fdk_wayland_egl_window *ewin, fdk_u64 fence);
 #endif /* FDK_WAYLAND_EGL_H */
+
+/* Extension-API v3, cap 19: the connection's zero-copy dma-buf
+ * import truth (the lane's EGL display has
+ * EGL_EXT_image_dma_buf_import). Triggers the lazy lane load. */
+int fdk_wayland_egl_dmabuf_available(fdk_platform_connection *conn);
+
+/* The lane's EGLDisplay (the cap-19 query's entry); NULL when the
+ * lane never loaded. */
+void *fdk_wayland_egl_lane_display(fdk_platform_connection *conn);

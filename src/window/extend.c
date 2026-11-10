@@ -196,6 +196,13 @@ int fdk_ext_has_capability(fdk_context *ctx, fdk_ext_capability cap) {
              * setter; the wayland ops leave it NULL). */
             return ops->x11_set_event_filter != NULL &&
                    fdk_ext_active_backend(ctx) == FDK_EXT_BACKEND_X11;
+        case FDK_EXT_CAP_DMABUF_IMPORT:
+            /* The zero-copy import: the lane's EGL display carries
+             * EGL_EXT_image_dma_buf_import. NULL ops = the CPU-mode
+             * linear fallback only (the X11 GLX lane, a GL-less
+             * context) — the honest false. */
+            return ops->dmabuf_import_available != NULL &&
+                   ops->dmabuf_import_available(ctx->conn) == 1;
         case FDK_EXT_CAP_WL_RAW_EVENTS:
             /* The raw-event surface: Wayland only. The create entry
              * point is defined in the wayland layer itself (the
@@ -1141,3 +1148,68 @@ fdk_result fdk_x11_set_event_filter(fdk_context *ctx,
                                           (int (*)(void *, void *))filter,
                                           user);
 }
+
+
+/* ---- Extension API v3, cap 19: the driver's modifier truth ---------- */
+
+#ifndef FDK_DISABLE_WAYLAND
+/* dmabuf_egl.c's bridge (the internal contract; the header's struct
+ * definition rides with it). */
+#include "render/dmabuf_egl_internal.h"
+
+fdk_result fdk_texture_dmabuf_query(fdk_context *ctx, fdk_u32 fourcc,
+                                    fdk_u64 *out_modifiers,
+                                    fdk_i32 max_modifiers,
+                                    fdk_i32 *out_n,
+                                    fdk_i32 *out_implicit) {
+    if (ctx == NULL || out_n == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    *out_n = 0;
+    if (out_implicit != NULL) {
+        *out_implicit = 0;
+    }
+    if (ctx->ops == NULL || ctx->conn == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    fdk_platform_ops const *ops = ctx->ops;
+    void *dpy = ops->lane_egl_display != NULL
+                    ? ops->lane_egl_display(ctx->conn)
+                    : NULL;
+    if (dpy == NULL) {
+        return FDK_ERR_UNSUPPORTED; /* no EGL lane: no query, no
+                                     * zero-copy (the fallback rules
+                                     * decide per draw) */
+    }
+    struct fdk__dmabuf_egl_api *api = NULL;
+    if (!fdk__dmabuf_egl_load(&api) ||
+        !fdk__dmabuf_egl_dpy_supports(api, dpy, NULL)) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (!fdk__dmabuf_egl_query_modifiers(api, dpy, fourcc, out_modifiers,
+                                         max_modifiers, out_n,
+                                         out_implicit)) {
+        return FDK_ERR_UNSUPPORTED; /* the query extension absent */
+    }
+    return FDK_OK;
+}
+
+#else /* FDK_DISABLE_WAYLAND */
+fdk_result fdk_texture_dmabuf_query(fdk_context *ctx, fdk_u32 fourcc,
+                                    fdk_u64 *out_modifiers,
+                                    fdk_i32 max_modifiers,
+                                    fdk_i32 *out_n,
+                                    fdk_i32 *out_implicit) {
+    (void)fourcc;
+    (void)out_modifiers;
+    (void)max_modifiers;
+    if (ctx == NULL || out_n == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    *out_n = 0;
+    if (out_implicit != NULL) {
+        *out_implicit = 0;
+    }
+    return FDK_ERR_UNSUPPORTED;
+}
+#endif /* FDK_DISABLE_WAYLAND */
