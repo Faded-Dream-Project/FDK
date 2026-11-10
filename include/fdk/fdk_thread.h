@@ -92,6 +92,19 @@ extern "C" {
 fdk_result fdk_post(fdk_context *ctx, void (*fn)(void *user),
                     void *user);
 
+/* The delayed twin: run `fn(user)` on the UI thread NO SOONER THAN
+ * delay_ms from now (fdk_post with a delay — the callback runs inside
+ * the pump exactly like fdk_post's). Built on a one-shot fdk_timer;
+ * the returned handle IS that timer, so fdk_timer_remove() cancels a
+ * not-yet-fired post (removing it leaks the 16-byte adapter node —
+ * callers needing cancelable delayed work should take fdk_timer_add
+ * directly). delay_ms 0 = the next pump call, the fdk_post ordering
+ * not guaranteed between lanes. Returns NULL on invalid arguments
+ * (NULL ctx or fn) or allocation failure; delivery rules (shutdown
+ * drops it) are fdk_post's. */
+fdk_timer *fdk_post_delayed(fdk_context *ctx, void (*fn)(void *user),
+                            void *user, fdk_u32 delay_ms);
+
 /* ---- The worker facility ---------------------------------------------
  *
  * A pool of OS threads owned by the context's UI thread, plus the

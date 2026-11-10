@@ -409,6 +409,8 @@ static fdk_result select_and_connect(
     return last_failure;
 }
 
+static int render_mode_from_env(void);
+
 fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     if (out_ctx == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
@@ -438,11 +440,20 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     ctx->extfd_capacity = 0;
     ctx->extfd_firing = NULL;
     ctx->ext_kinds_head = NULL;
+    ctx->render_mode = FDK_RENDER_AUTO;
+    ctx->render_active = FDK_RENDER_AUTO;
+    ctx->render_reason = NULL;
 
     fdk_platform_backend requested = FDK_PLATFORM_AUTO;
     if (options != NULL) {
         ctx->backend = options->backend;
         requested = options->backend;
+        if (options->render_mode != 0 &&
+            (options->render_mode < FDK_RENDER_CPU ||
+             options->render_mode > FDK_RENDER_GPU)) {
+            fdk_free(ctx);
+            return FDK_ERR_INVALID_ARGUMENT;
+        }
         if (options->app_id != NULL) {
             ctx->app_id = dup_string(options->app_id);
             if (ctx->app_id == NULL) {
@@ -450,6 +461,24 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
                 return FDK_ERR_OUT_OF_MEMORY;
             }
         }
+    }
+
+    /* Render mode resolution (1.0.0): the init option OVERRIDES the
+     * FDK_RENDER environment variable, which OVERRIDES AUTO. */
+    ctx->render_mode = render_mode_from_env();
+    if (options != NULL && options->render_mode != 0) {
+        ctx->render_mode = options->render_mode;
+    }
+    if (ctx->render_mode == FDK_RENDER_AUTO) {
+        /* AUTO is a request shape; HYBRID is what runs. The reason
+         * names the resolution so the field report is unambiguous. */
+        ctx->render_active = FDK_RENDER_HYBRID;
+        ctx->render_reason = "FDK_RENDER_AUTO resolves to HYBRID "
+                             "(CPU paint; GPU present lane where the "
+                             "driver is real)";
+    } else {
+        ctx->render_active = ctx->render_mode;
+        ctx->render_reason = NULL;
     }
 
     /* Actually perform the platform connection. This is what turns
@@ -996,4 +1025,109 @@ fdk_window *fdk_context_find_window_by_pwindow(fdk_context *ctx,
         }
     }
     return NULL;
+}
+
+/* ---- Nested/modal loops (extension API v3, fdk_extend.h) ------------------
+ *
+ * The supported re-entrant run level: same pump primitive fdk_run
+ * wraps, its own exit condition. UNLIKE fdk_run, a modal level does
+ * NOT exit when the last top-level window closes — a menu host keeps
+ * dispatching until explicitly quit. fdk_quit() and a dead connection
+ * end every level. */
+
+fdk_result fdk_ext_modal_run(fdk_context *ctx) {
+    if (ctx == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (ctx->ops == NULL || ctx->conn == NULL) {
+        return FDK_ERR_NOT_INITIALIZED;
+    }
+
+    ctx->modal_depth++;
+    ctx->modal_quit_requested = 0;
+    fdk_result result = FDK_OK;
+    for (;;) {
+        int r = fdk_pump_events(ctx, -1); /* block until something */
+        if (r < 0) {
+            result = (fdk_result)r; /* connection death propagates */
+            break;
+        }
+        if (ctx->modal_quit_requested) {
+            ctx->modal_quit_requested = 0; /* this level consumed it */
+            break;
+        }
+        if (ctx->quit_requested) {
+            break; /* fdk_quit ends the whole application, levels too */
+        }
+    }
+    ctx->modal_depth--;
+    return result;
+}
+
+void fdk_ext_modal_quit(fdk_context *ctx) {
+    if (ctx == NULL) {
+        return;
+    }
+    if (ctx->modal_depth > 0) {
+        ctx->modal_quit_requested = 1;
+    }
+    /* Any thread may call this: nudge the pump's wake fd so a
+     * blocking poll ends now instead of at the next natural event.
+     * NULL/dead thread state is a safe no-op (fdk__thread_nudge). */
+    fdk__thread_nudge(ctx);
+}
+
+int fdk_ext_modal_depth(const fdk_context *ctx) {
+    return (ctx != NULL) ? ctx->modal_depth : 0;
+}
+
+
+/* ---- Render mode (1.0.0, fdk_core.h) -------------------------------------- */
+
+static int render_mode_from_env(void) {
+    /* FDK_RENDER=cpu|hybrid|gpu (case-insensitive); anything else
+     * warns once and means AUTO. getenv happens once per init — a
+     * test flipping the variable between inits gets a fresh decision
+     * (the FDK_GL_FORCE/NO_GL rule). */
+    const char *v = getenv("FDK_RENDER");
+    if (v == NULL || *v == '\0') {
+        return FDK_RENDER_AUTO;
+    }
+    char buf[16];
+    size_t i = 0;
+    for (; v[i] != '\0' && i < sizeof(buf) - 1; i++) {
+        buf[i] = (char)((v[i] >= 'A' && v[i] <= 'Z') ? v[i] + 32 : v[i]);
+    }
+    buf[i] = '\0';
+    if (strcmp(buf, "cpu") == 0) {
+        return FDK_RENDER_CPU;
+    }
+    if (strcmp(buf, "hybrid") == 0) {
+        return FDK_RENDER_HYBRID;
+    }
+    if (strcmp(buf, "gpu") == 0) {
+        return FDK_RENDER_GPU;
+    }
+    FDK_WARN("FDK_RENDER=\"%s\" is not cpu|hybrid|gpu; using AUTO", v);
+    return FDK_RENDER_AUTO;
+}
+
+void fdk_context_render_mode(const fdk_context *ctx,
+                             fdk_render_mode *active,
+                             const char **reason) {
+    if (ctx == NULL) {
+        if (active != NULL) {
+            *active = FDK_RENDER_AUTO;
+        }
+        if (reason != NULL) {
+            *reason = "no context";
+        }
+        return;
+    }
+    if (active != NULL) {
+        *active = (fdk_render_mode)ctx->render_active;
+    }
+    if (reason != NULL) {
+        *reason = ctx->render_reason;
+    }
 }

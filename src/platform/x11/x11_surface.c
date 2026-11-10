@@ -360,34 +360,55 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
      * the same way it overrides the software-renderer gate; the
      * equivalence tests pin both lanes' pixels through that knob. */
     if (pwindow->gl_win == NULL && !pwindow->gl_downgraded) {
-        /* The size gate runs BEFORE the dlopen: a process whose
-         * windows are all small (the panel/popup class) never loads
-         * the GL stack at all — the X1 spirit applied to memory and
-         * startup, not just milliseconds. */
-        int lane_eligible =
-            ((fdk_i64)w * (fdk_i64)h > FDK_GL_MIN_PIXELS ||
-             getenv("FDK_GL_FORCE") != NULL);
-        if (!lane_eligible) {
-            /* Sticky per window (the class of surface that starts
-             * small stays small: popups never resize, bars reconfigure
-             * within a factor of two); one INFO per process so the
-             * policy is discoverable in the field without per-window
-             * log spam. */
+        if (pwindow->render_mode == FDK_RENDER_CPU) {
+            /* CPU mode: no GLX at all — the lane never loads, sticky
+             * for this window's life. */
             pwindow->gl_downgraded = 1;
-            static int small_policy_logged = 0;
-            if (!small_policy_logged) {
-                small_policy_logged = 1;
-                FDK_INFO("GL lane: small surfaces (<= %d px) present on "
-                         "the CPU path (FDK_GL_FORCE=1 overrides)",
-                         FDK_GL_MIN_PIXELS);
-            }
         } else {
-            if (conn->gl == NULL && !conn->gl_tried) {
-                conn->gl = fdk_x11_gl_try_load(conn);
-                conn->gl_tried = 1;
-            }
-            if (conn->gl != NULL) {
-                pwindow->gl_win = fdk_x11_gl_window_try_init(conn->gl, pwindow);
+            /* The size gate runs BEFORE the dlopen: a process whose
+             * windows are all small (the panel/popup class) never loads
+             * the GL stack at all — the X1 spirit applied to memory and
+             * startup, not just milliseconds. GPU mode skips the gate:
+             * the lane is the ONLY presentation path this window has. */
+            int lane_eligible =
+                ((fdk_i64)w * (fdk_i64)h > FDK_GL_MIN_PIXELS ||
+                 getenv("FDK_GL_FORCE") != NULL ||
+                 pwindow->render_mode == FDK_RENDER_GPU);
+            if (!lane_eligible) {
+                /* Sticky per window (the class of surface that starts
+                 * small stays small: popups never resize, bars reconfigure
+                 * within a factor of two); one INFO per process so the
+                 * policy is discoverable in the field without per-window
+                 * log spam. */
+                pwindow->gl_downgraded = 1;
+                static int small_policy_logged = 0;
+                if (!small_policy_logged) {
+                    small_policy_logged = 1;
+                    FDK_INFO("GL lane: small surfaces (<= %d px) present on "
+                             "the CPU path (FDK_GL_FORCE=1 overrides)",
+                             FDK_GL_MIN_PIXELS);
+                }
+            } else {
+                if (conn->gl == NULL && !conn->gl_tried) {
+                    conn->gl = fdk_x11_gl_try_load(conn);
+                    conn->gl_tried = 1;
+                }
+                if (conn->gl != NULL) {
+                    pwindow->gl_win =
+                        fdk_x11_gl_window_try_init(conn->gl, pwindow);
+                }
+                if (pwindow->gl_win == NULL &&
+                    pwindow->render_mode == FDK_RENDER_GPU) {
+                    /* GPU mode: the lane IS the presentation path — a
+                     * failed init is a failed present, never a silent
+                     * XImage fallback (fdk_core.h's FDK_RENDER_GPU). */
+                    FDK_ERROR("GPU render mode: the GLX lane failed to "
+                              "initialize for this window — refusing the "
+                              "present (no CPU fallback exists in GPU mode)");
+                    pwindow->gl_downgraded = 1; /* sticky: presents keep
+                                                 * failing until destroy */
+                    return FDK_ERR_UNSUPPORTED;
+                }
             }
         }
     }
@@ -402,6 +423,11 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
             out_fb->height = h;
             out_fb->stride = w;
             return FDK_OK;
+        }
+        if (pwindow->render_mode == FDK_RENDER_GPU) {
+            FDK_ERROR("GPU render mode: lane staging allocation failed "
+                      "— failing the present (no CPU fallback)");
+            return FDK_ERR_OUT_OF_MEMORY;
         }
         /* Staging allocation failed: this window stays on the classic
          * path for good (the classic path has its own OOM reporting

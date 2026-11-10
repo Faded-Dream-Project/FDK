@@ -143,6 +143,18 @@ int fdk_ext_has_capability(fdk_context *ctx, fdk_ext_capability cap) {
              * the add-on's own protocol negotiation, which FDK cannot
              * vouch for. */
             return fdk_ext_active_backend(ctx) == FDK_EXT_BACKEND_X11;
+        case FDK_EXT_CAP_RENDER_CPU:
+            /* The software rasterizer exists in every mode; in GPU mode
+             * its pixels ride the lane's texture upload. */
+            return (fdk_render_mode)ctx->render_active != FDK_RENDER_GPU;
+        case FDK_EXT_CAP_RENDER_HYBRID:
+            return (fdk_render_mode)ctx->render_active ==
+                   FDK_RENDER_HYBRID;
+        case FDK_EXT_CAP_RENDER_GPU:
+            /* Claimed only when the lane is REQUIRED for this
+             * context's windows — never merely because a driver
+             * exists. */
+            return (fdk_render_mode)ctx->render_active == FDK_RENDER_GPU;
         case FDK_EXT_CAP_FRAME_PACING:
             /* Real pacing = the frame_ready op exists. Wayland:
              * compositor frame callbacks. X11 (round 10): the 17 ms

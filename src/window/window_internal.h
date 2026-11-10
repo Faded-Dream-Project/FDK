@@ -73,6 +73,9 @@ bool fdk__window_is_double_click(fdk_i64 now_ms, fdk_i64 last_ms,
 
 struct fdk_window {
     fdk_context *ctx;                 /* owning context, not owned by us */
+    /* Effective render mode (1.0.0): resolved at creation (window
+     * override > context mode — fdk_core.h's fdk_render_mode). */
+    int render_mode;
     const fdk_platform_ops *ops;      /* same as ctx's ops, cached for convenience */
     bool is_popup;                    /* Phase 9: grabbed dismissal window */
     bool is_subsurface;               /* 1.0.0 D-2: FDK-owned child surface (ext) */

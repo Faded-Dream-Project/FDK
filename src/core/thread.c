@@ -536,3 +536,68 @@ void fdk_worker_pool_destroy(fdk_worker *pool) {
     pthread_cond_destroy(&pool->work_avail);
     fdk_free(pool);
 }
+
+
+/* ---- cross-thread nudge (the modal-quit path) ---------------------------- */
+
+void fdk__thread_nudge(struct fdk_context *ctx) {
+    struct fdk_thread_state *ts = ts_of(ctx);
+    if (ts == NULL || atomic_load(&ts->dead)) {
+        return; /* nothing to wake; the loop notices the flag on its
+                 * next natural event — documented in fdk_extend.h */
+    }
+    int rc = pthread_mutex_lock(&ts->mutex);
+    if (rc != 0) {
+        return;
+    }
+    if (!atomic_load(&ts->dead)) {
+        wake_write(ts);
+    }
+    pthread_mutex_unlock(&ts->mutex);
+}
+
+/* ---- fdk_post_delayed (1.0.0) --------------------------------------------
+ *
+ * The delayed twin of fdk_post, built ON the documented primitive
+ * (fdk_timer_add one-shot) rather than a second queue: the timer is
+ * the loop's delay mechanism, its callback already runs on the UI
+ * thread inside the pump, and the post queue stays what it is — the
+ * NOW lane. The adapter node frees itself after the single fire; a
+ * caller who removes the returned timer before it fires (legal — it
+ * IS an fdk_timer) accepts that the 16-byte adapter goes with the
+ * timer's own leak rules (it does not fire, so nothing frees it —
+ * callers needing cancelable delayed work take fdk_timer_add
+ * directly, which the header says). */
+
+typedef struct delayed_node {
+    void (*fn)(void *user);
+    void *user;
+} delayed_node;
+
+static void delayed_trampoline(fdk_timer *timer, void *user_data) {
+    delayed_node *n = user_data;
+    void (*fn)(void *) = n->fn;
+    void *user = n->user;
+    fdk_free(n);
+    (void)timer; /* one-shot: the handle dangles right after this */
+    fn(user);
+}
+
+fdk_timer *fdk_post_delayed(fdk_context *ctx, void (*fn)(void *user),
+                            void *user, fdk_u32 delay_ms) {
+    if (ctx == NULL || fn == NULL) {
+        return NULL;
+    }
+    delayed_node *n = fdk_alloc(sizeof *n);
+    if (n == NULL) {
+        return NULL;
+    }
+    n->fn = fn;
+    n->user = user;
+    fdk_timer *t = fdk_timer_add(ctx, delay_ms, false, delayed_trampoline, n);
+    if (t == NULL) {
+        fdk_free(n);
+        return NULL; /* the timer add validates the context itself */
+    }
+    return t;
+}

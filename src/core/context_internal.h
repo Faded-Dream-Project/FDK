@@ -37,8 +37,23 @@ struct fdk_context {
      * FDK_ERR_NOT_INITIALIZED instead of crashing a dying worker. */
     struct fdk_thread_state *thread_state;
 
+    /* Render mode (1.0.0, fdk_core.h): the REQUESTED mode (init
+     * option > FDK_RENDER env > AUTO). Windows inherit it unless they
+     * carry their own override; the ACTIVE report lives in
+     * render_active/render_reason (AUTO reports as HYBRID). */
+    int render_mode;
+    int render_active;          /* the mode fdk_context_render_mode reports */
+    const char *render_reason;  /* static string, NULL when same       */
+
     int running;            /* nonzero while inside fdk_run() */
     int quit_requested;     /* set by fdk_quit() */
+
+    /* Nested/modal loop levels (fdk_ext_modal_run, extension API v3).
+     * modal_quit_requested is shared: the innermost running level
+     * consumes it (clears on exit), so quit targets the level that is
+     * actually on top of the stack. */
+    int modal_depth;            /* running fdk_ext_modal_run levels */
+    int modal_quit_requested;   /* set by fdk_ext_modal_quit()       */
 
     /* Phase 2: the backend selected during fdk_init() (X11 or Wayland,
      * per fdk_platform_backend). NULL only between fdk_shutdown() and

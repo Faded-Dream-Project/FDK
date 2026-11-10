@@ -576,6 +576,10 @@ struct fdk_platform_window {
      * back through fdk_ext_surface_notify_configure(). */
     int ext;
     int popup;                    /* Phase 9: xdg_popup window      */
+    int render_mode;              /* 1.0.0: the window's effective
+                                   * fdk_render_mode — gates the GPU
+                                   * lane (CPU never loads it, GPU
+                                   * requires it, HYBRID decides) */
     struct xdg_popup *xdg_popup;  /* set when popup                */
     /* Subsurface role (1.0.0, D-2 / B-16): set when this wrapper
      * carries an FDK-CREATED child surface (wayland_ext.c's

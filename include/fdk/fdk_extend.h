@@ -139,6 +139,19 @@ typedef enum fdk_ext_capability {
      * self-imposed, not compositor feedback, but a real throttle
      * either way). */
     FDK_EXT_CAP_FRAME_PACING = 4,
+    /* 1.0.0 render-mode capabilities (fdk_core.h's fdk_render_mode),
+     * reporting the CONTEXT's ACTIVE mode honestly:
+     *   RENDER_CPU    true unless the context runs GPU-only (the
+     *                 software rasterizer exists in every mode; in GPU
+     *                 mode its pixels ride the lane's texture upload).
+     *   RENDER_HYBRID true only in HYBRID/AUTO contexts (the classic
+     *                 framebuffer path with the optional lane).
+     *   RENDER_GPU    true only when the lane is REQUIRED (GPU mode
+     *                 actually active for this context's windows) —
+     *                 never claimed merely because a driver exists. */
+    FDK_EXT_CAP_RENDER_CPU    = 5,
+    FDK_EXT_CAP_RENDER_HYBRID = 6,
+    FDK_EXT_CAP_RENDER_GPU    = 7,
 } fdk_ext_capability;
 
 /* Returns nonzero when `ctx`'s connected backend has `cap`.
@@ -653,6 +666,52 @@ fdk_result fdk_ext_subsurface_place_above(fdk_ext_surface *surface,
 /* The mirror: BELOW the sibling. Same validation, same failures. */
 fdk_result fdk_ext_subsurface_place_below(fdk_ext_surface *surface,
                                           fdk_ext_surface *sibling);
+
+/* ---- Nested / modal loops (extension API v3, 1.0.0) -----------------------
+ *
+ * A supported re-entrant run level: fdk_ext_modal_run() pumps events
+ * (fdk_pump_events(-1), the same primitive fdk_run wraps) until THIS
+ * level is ended with fdk_ext_modal_quit() — or fdk_quit() ends the
+ * whole application, or the connection dies. This is how a menu, a
+ * combo dropdown, a drag, or a custom dialog runs "until done"
+ * without hand-rolling a pump loop, and how an add-on hosts a popup
+ * that must keep dispatching while the caller's stack is still
+ * unfolded.
+ *
+ * The contract:
+ *   - Levels NEST: each fdk_ext_modal_run() is its own level;
+ *     fdk_ext_modal_quit() ends the INNERMOST running level and it
+ *     alone (the flag is consumed by the loop that reads it).
+ *   - UNLIKE fdk_run(), a modal level does NOT exit when the last
+ *     top-level window closes — a menu host keeps dispatching until
+ *     explicitly quit (fdk_run's no-windows rule is the application
+ *     loop's, not a modal level's).
+ *   - Legal from inside callbacks (a widget handler may run a modal
+ *     level), from fdk_post callbacks, and from fd-source callbacks —
+ *     anything already on the UI thread. NEVER from a worker thread:
+ *     only the UI thread may pump (docs/threading.md). A worker that
+ *     needs the loop unblocked uses fdk_ext_post to arrange it.
+ *   - fdk_ext_modal_quit() is legal from ANY thread: it sets the
+     * innermost level's quit flag and nudges the pump's wake fd, so
+     * a worker can end a UI-thread modal loop promptly.
+ *   - Timers, posts, fd sources, and modal levels compose: a modal
+ *     level dispatches everything fdk_pump_events dispatches.
+ *
+ * Can fail with:
+ *   FDK_ERR_INVALID_ARGUMENT - ctx is NULL
+ *   FDK_ERR_NOT_INITIALIZED  - no live platform connection (or
+ *                              fdk_shutdown already ran)
+ *   (a pump-level fatal propagates as its negative result)
+ */
+fdk_result fdk_ext_modal_run(fdk_context *ctx);
+
+/* Ends the innermost running modal level. Safe from any thread; a
+ * no-op when no level is running. */
+void fdk_ext_modal_quit(fdk_context *ctx);
+
+/* The number of currently running modal levels (0 = none; a
+ * diagnostics helper — NULL ctx is 0). */
+int fdk_ext_modal_depth(const fdk_context *ctx);
 
 /* ---- Event-loop file-descriptor sources ----------------------------------
  *

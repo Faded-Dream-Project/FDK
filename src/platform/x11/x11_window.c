@@ -288,6 +288,23 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     }
 
     pwindow->conn = conn;
+    pwindow->render_mode = (options != NULL) ? options->render_mode
+                                             : FDK_RENDER_HYBRID;
+    if (pwindow->render_mode == FDK_RENDER_GPU) {
+        /* GPU mode: the lane is REQUIRED — probe the GL stack NOW so
+         * window creation fails with a clear error instead of a
+         * silent CPU fallback (fdk_core.h's FDK_RENDER_GPU). */
+        if (conn->gl == NULL && !conn->gl_tried) {
+            conn->gl = fdk_x11_gl_try_load(conn);
+            conn->gl_tried = 1;
+        }
+        if (conn->gl == NULL) {
+            FDK_ERROR("GPU render mode: GLX unavailable — refusing "
+                      "window creation; use HYBRID or CPU");
+            fdk_free(pwindow);
+            return FDK_ERR_UNSUPPORTED;
+        }
+    }
     pwindow->xwindow = xwindow;
     pwindow->popup = (popup != 0);
     pwindow->input_transparent = (input_transparent != 0);

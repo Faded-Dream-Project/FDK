@@ -928,7 +928,24 @@ static fdk_result window_create_full(fdk_context *ctx,
 
     fdk__window_init_fields(window, ctx, options);
 
-    if (options != NULL && options->title != NULL) {
+    /* Render mode resolution (1.0.0): the window's override wins over
+     * the context's; zero means inherit. Resolved ONCE here and handed
+     * to the backend through the options copy — the platform create
+     * (and the lane's engage decisions) see the final answer. */
+    int effective_render = (options != NULL && options->render_mode != 0)
+                               ? options->render_mode
+                               : ctx->render_mode;
+    fdk_window_options ropts;
+    if (options != NULL) {
+        memcpy(&ropts, options, sizeof(ropts));
+    } else {
+        memset(&ropts, 0, sizeof(ropts));
+    }
+    ropts.render_mode = effective_render;
+    window->render_mode = effective_render;
+    options = &ropts;
+
+    if (options->title != NULL) {
         size_t n = strlen(options->title) + 1;
         window->title = fdk_alloc(n);
         if (window->title != NULL) {
@@ -3077,4 +3094,12 @@ int fdk__window_cursor_edge(const fdk_window *window) {
 
 int fdk__window_cursor_applied(const fdk_window *window) {
     return (window != NULL) ? window->cursor_applied : -1;
+}
+
+
+fdk_render_mode fdk_window_render_mode(const fdk_window *window) {
+    if (window == NULL) {
+        return FDK_RENDER_AUTO;
+    }
+    return (fdk_render_mode)window->render_mode;
 }

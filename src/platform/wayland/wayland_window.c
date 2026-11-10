@@ -1078,34 +1078,58 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
      * treat staging allocation failure as the classic path's own OOM.
      * FDK_GL_FORCE overrides the size gate exactly as on X11. */
     if (pwindow->egl_win == NULL && !pwindow->egl_downgraded) {
-        int lane_eligible =
-            ((fdk_i64)size.width * (fdk_i64)size.height >
-                 FDK_WL_GL_MIN_PIXELS ||
-             getenv("FDK_GL_FORCE") != NULL);
-        if (!lane_eligible) {
-            /* Sticky per window (the whole panel/popup class — same
-             * rationale as x11_surface.c's copy of this policy); one
-             * INFO per process. */
+        if (pwindow->render_mode == FDK_RENDER_CPU) {
+            /* CPU mode: no GL/EGL at all — the lane never loads, and
+             * the decision is sticky for this window's life. */
             pwindow->egl_downgraded = 1;
-            static int small_policy_logged = 0;
-            if (!small_policy_logged) {
-                small_policy_logged = 1;
-                FDK_INFO("GL lane: small surfaces (<= %d px) present on "
-                         "the CPU path (FDK_GL_FORCE=1 overrides)",
-                         FDK_WL_GL_MIN_PIXELS);
-            }
         } else {
-            if (pwindow->conn->egl == NULL && !pwindow->conn->egl_tried) {
-                pwindow->conn->egl = fdk_wayland_egl_try_load(pwindow->conn);
-                pwindow->conn->egl_tried = 1;
-            }
-            if (pwindow->conn->egl != NULL) {
-                /* render_size feeds the lane's sizing (wl_egl_window
-                 * needs the size at CREATION time; the SHM path derives
-                 * sizes from the slots themselves). */
-                pwindow->render_size = size;
-                pwindow->egl_win = fdk_wayland_egl_window_try_init(
-                    pwindow->conn->egl, pwindow);
+            /* GPU mode skips the small-surface policy: the lane is the
+             * ONLY presentation path this window has. */
+            int lane_eligible =
+                ((fdk_i64)size.width * (fdk_i64)size.height >
+                     FDK_WL_GL_MIN_PIXELS ||
+                 getenv("FDK_GL_FORCE") != NULL ||
+                 pwindow->render_mode == FDK_RENDER_GPU);
+            if (!lane_eligible) {
+                /* Sticky per window (the whole panel/popup class — same
+                 * rationale as x11_surface.c's copy of this policy); one
+                 * INFO per process. */
+                pwindow->egl_downgraded = 1;
+                static int small_policy_logged = 0;
+                if (!small_policy_logged) {
+                    small_policy_logged = 1;
+                    FDK_INFO("GL lane: small surfaces (<= %d px) present "
+                             "on the CPU path (FDK_GL_FORCE=1 overrides)",
+                             FDK_WL_GL_MIN_PIXELS);
+                }
+            } else {
+                if (pwindow->conn->egl == NULL &&
+                    !pwindow->conn->egl_tried) {
+                    pwindow->conn->egl =
+                        fdk_wayland_egl_try_load(pwindow->conn);
+                    pwindow->conn->egl_tried = 1;
+                }
+                if (pwindow->conn->egl != NULL) {
+                    /* render_size feeds the lane's sizing (wl_egl_window
+                     * needs the size at CREATION time; the SHM path
+                     * derives sizes from the slots themselves). */
+                    pwindow->render_size = size;
+                    pwindow->egl_win = fdk_wayland_egl_window_try_init(
+                        pwindow->conn->egl, pwindow);
+                }
+                if (pwindow->egl_win == NULL &&
+                    pwindow->render_mode == FDK_RENDER_GPU) {
+                    /* GPU mode: the lane IS the presentation path — a
+                     * failed init is a failed present, never a silent
+                     * SHM fallback (fdk_core.h's FDK_RENDER_GPU). */
+                    FDK_ERROR("GPU render mode: the EGL lane failed to "
+                              "initialize for this window — refusing the "
+                              "present (no CPU fallback exists in GPU "
+                              "mode)");
+                    pwindow->egl_downgraded = 1; /* sticky: presents keep
+                                                  * failing until destroy */
+                    return FDK_ERR_UNSUPPORTED;
+                }
             }
         }
     }
@@ -1896,6 +1920,24 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     }
 
     pwindow->conn = conn;
+    pwindow->render_mode = (options != NULL) ? options->render_mode
+                                             : FDK_RENDER_HYBRID;
+    if (pwindow->render_mode == FDK_RENDER_GPU) {
+        /* GPU mode: the lane is REQUIRED — probe the GL stack NOW so a
+         * context that cannot ever present through it fails at window
+         * creation with a clear error, never a silent CPU fallback. */
+        if (conn->egl == NULL && !conn->egl_tried) {
+            conn->egl = fdk_wayland_egl_try_load(conn);
+            conn->egl_tried = 1;
+        }
+        if (conn->egl == NULL) {
+            FDK_ERROR("GPU render mode: EGL/libwayland-egl unavailable "
+                      "(no GL stack, or software-only and refused) — "
+                      "refusing window creation; use HYBRID or CPU");
+            fdk_free(pwindow);
+            return FDK_ERR_UNSUPPORTED;
+        }
+    }
     pwindow->last_size.width = width;
     pwindow->last_size.height = height;
     pwindow->pending_size = pwindow->last_size;

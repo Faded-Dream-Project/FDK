@@ -13,6 +13,10 @@ struct fdk_context;
 fdk_result fdk__thread_init(struct fdk_context *ctx);
 void fdk__thread_shutdown(struct fdk_context *ctx);
 int fdk__thread_wake_fd(const struct fdk_context *ctx);
+/* Wake the pump WITHOUT enqueueing work (the modal-quit path:
+ * fdk_ext_modal_quit from a worker thread must end a blocking poll
+ * now, not at the next event). Same wake-byte discipline as post. */
+void fdk__thread_nudge(struct fdk_context *ctx);
 int fdk__thread_drain(struct fdk_context *ctx);
 bool fdk__on_main_thread(const struct fdk_context *ctx);
 fdk_result fdk__wrong_thread_refused(const char *what);

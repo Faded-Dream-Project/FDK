@@ -518,6 +518,7 @@ struct fdk_platform_window {
      * them (translated to a close request in x11_events.c, never
      * delivered as a button event). */
     int popup;
+    int render_mode;  /* 1.0.0: the window's effective fdk_render_mode */
     /* Input-transparent popup (1.0.0, tooltips): set at CREATE from
      * fdk_window_options.input_transparent — empty XShape input
      * region applied at create, popup grab never taken (see

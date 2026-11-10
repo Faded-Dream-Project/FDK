@@ -43,6 +43,42 @@ typedef enum fdk_platform_backend {
 /* Initialization options for fdk_init(). Zero-initialize (or pass NULL
  * for defaults) to accept every default: FDK_PLATFORM_AUTO backend,
  * default log level, no explicit application id. */
+/* ---- Render modes (1.0.0) -------------------------------------------------
+ *
+ * How a context (and each window) drives the pixel path:
+ *
+ *   FDK_RENDER_AUTO    zero-init default; resolves to HYBRID semantics
+ *                      (the CPU rasterizer paints, the GPU present lane
+ *                      engages where the driver is real — FDK's
+ *                      "presentation lane" design, docs/rendering.md).
+ *   FDK_RENDER_CPU     the software path only. No EGL/GLX is ever
+ *                      loaded: no dlopen, no driver contact, no lane.
+ *   FDK_RENDER_HYBRID  explicit AUTO's meaning: lane where available
+ *                      (hardware GL, size policy permitting), the
+ *                      classic SHM/XImage path otherwise — including
+ *                      the documented present-time downgrade.
+ *   FDK_RENDER_GPU     the lane is REQUIRED. The classic framebuffer
+ *                      presentation path is disabled for the context's
+ *                      windows: if the GL stack cannot initialize, the
+ *                      WINDOW CREATION FAILS (FDK_ERR_UNSUPPORTED, a
+ *                      logged reason — never a silent fallback), and a
+ *                      lane that dies mid-flight fails the present
+ *                      instead of downgrading. Widgets keep painting
+ *                      software pixels: the lane's texture upload IS
+ *                      the explicit CPU-pixels-to-GPU path (there is
+ *                      no hidden CPU presentation behind it).
+ *
+ * Selection: fdk_init_options.render_mode (nonzero wins), else the
+ * FDK_RENDER environment variable (cpu|hybrid|gpu, case-insensitive),
+ * else AUTO. Per window: fdk_window_options.render_mode (0 = inherit
+ * the context). */
+typedef enum fdk_render_mode {
+    FDK_RENDER_AUTO   = 0,
+    FDK_RENDER_CPU    = 1,
+    FDK_RENDER_HYBRID = 2,
+    FDK_RENDER_GPU    = 3,
+} fdk_render_mode;
+
 typedef struct fdk_init_options {
     fdk_platform_backend backend;
 
@@ -50,7 +86,21 @@ typedef struct fdk_init_options {
      * "org.example.myapp"), used where the platform wants one — Wayland
      * app-id, X11 WM_CLASS, etc. May be NULL to use a generated default. */
     const char *app_id;
+
+    /* 1.0.0 appended (zero-init = FDK_RENDER_AUTO): the render mode.
+     * Nonzero OVERRIDES the FDK_RENDER environment variable. Values
+     * outside the enum refuse fdk_init with FDK_ERR_INVALID_ARGUMENT. */
+    int render_mode;
 } fdk_init_options;
+
+/* Reports the context's ACTIVE render mode and, when it differs from
+ * what was requested, a human-readable reason (a static string, valid
+ * for the process lifetime; NULL when active == requested). *active
+ * or *reason may be NULL to skip. AUTO reports as HYBRID with the
+ * resolution named — AUTO is a request shape, HYBRID is what runs. */
+void fdk_context_render_mode(const fdk_context *ctx,
+                             fdk_render_mode *active,
+                             const char **reason);
 
 /* Initializes FDK and creates a new toolkit context, writing it to
  * *out_ctx on success. `options` may be NULL to accept all defaults.

@@ -21,6 +21,7 @@
 
 #include "fdk_error.h"
 #include "fdk_types.h"
+#include "fdk_core.h" /* fdk_render_mode */
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,6 +54,12 @@ typedef struct fdk_window_options {
      * popup paths; applications building custom passive popups may
      * set it too. */
     int input_transparent;   /* nonzero = click-through popup       */
+    /* 1.0.0 appended: per-window render-mode override (fdk_core.h's
+     * fdk_render_mode). 0 = inherit the context's mode (the zero-init
+     * default every existing caller keeps). A window may narrow the
+     * context's choice (GPU context, CPU window) — the effective mode
+     * is resolved at creation and never re-negotiated. */
+    int render_mode;
 } fdk_window_options;
 
 /* Creates a top-level window on `ctx`'s platform connection. Writes
@@ -69,6 +76,12 @@ typedef struct fdk_window_options {
 /* The context this window lives on (the print dialog and other
  * window-spawned helpers need it; the accessor is the clean seam). */
 fdk_context *fdk_window_get_context(fdk_window *window);
+
+/* The window's effective render mode (resolved at creation: the
+ * window's own override, else the context's — see fdk_core.h's
+ * fdk_render_mode). A per-window diagnostics accessor over the
+ * context-level query. */
+fdk_render_mode fdk_window_render_mode(const fdk_window *window);
 
 fdk_result fdk_window_create(fdk_context *ctx,
                               const fdk_window_options *options,

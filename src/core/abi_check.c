@@ -63,10 +63,10 @@ _Static_assert(sizeof(fdk_font_cache_stats) == 16,
 /* ---- input structs: sizes recorded, fields append-only ---- */
 _Static_assert(sizeof(fdk_dialog_options) == 40,
               "fdk_dialog_options 1.0 size (append-only after)");
-_Static_assert(sizeof(fdk_init_options) == 16,
-              "fdk_init_options 1.0 size (append-only after)");
-_Static_assert(sizeof(fdk_window_options) == 32,
-              "fdk_window_options 1.0 size (append-only after)");
+_Static_assert(sizeof(fdk_init_options) == 24,
+              "fdk_init_options 1.0 size (render_mode appended 1.0)");
+_Static_assert(sizeof(fdk_window_options) == 40,
+              "fdk_window_options 1.0 size (render_mode appended 1.0)");
 _Static_assert(sizeof(fdk_number_options) == 16,
               "fdk_number_options 1.0 size (append-only after)");
 
