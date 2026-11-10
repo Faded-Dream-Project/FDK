@@ -346,7 +346,7 @@ const fdk_widget_class fdk_revealer_class_def = {
     .paint = revealer_paint,
     .measure = revealer_measure,
     .arrange = revealer_arrange,
-    .destroy = NULL,
+    .instance_finalize = NULL,
     .a11y = &revealer_a11y,
     .max_children = 1, /* the content IS the one slot */
 };

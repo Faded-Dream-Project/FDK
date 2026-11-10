@@ -156,7 +156,7 @@ const fdk_widget_class fdk_levelbar_class_def = {
     .paint = levelbar_paint,
     .measure = levelbar_measure,
     .arrange = NULL,
-    .destroy = NULL,
+    .instance_finalize = NULL,
     .a11y = &levelbar_a11y,
     .max_children = 0,
 };

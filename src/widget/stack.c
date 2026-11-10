@@ -161,7 +161,7 @@ const fdk_widget_class fdk_stack_class_def = {
     .paint = stack_paint,
     .measure = stack_measure,
     .arrange = stack_arrange,
-    .destroy = stack_destroy,
+    .instance_finalize = stack_destroy,
     .a11y = &stack_a11y,
 };
 

@@ -1318,7 +1318,7 @@ static const fdk_widget_class fdk_list_row_class_def = {
     .paint = row_paint,
     .measure = NULL,
     .arrange = NULL,
-    .destroy = row_destroy,
+    .instance_finalize = row_destroy,
     .a11y = &list_row_a11y,
 };
 
@@ -2078,7 +2078,7 @@ const fdk_widget_class fdk_list_class_def = {
     .paint = list_paint,
     .measure = list_measure,
     .arrange = list_arrange,
-    .destroy = list_destroy, /* the row POINTER array; the rows
+    .instance_finalize = list_destroy, /* the row POINTER array; the rows
                                 themselves die with the subtree */
     .a11y = &list_a11y,
 };

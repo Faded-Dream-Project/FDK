@@ -549,7 +549,7 @@ const fdk_widget_class fdk_slider_class_def = {
     .paint = slider_paint,
     .measure = slider_measure,
     .arrange = NULL,
-    .destroy = slider_destroy,
+    .instance_finalize = slider_destroy,
     .a11y = &slider_a11y,
 };
 

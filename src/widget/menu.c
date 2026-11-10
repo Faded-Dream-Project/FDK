@@ -938,7 +938,7 @@ const fdk_widget_class fdk_menu_view_class_def = {
     .paint = fdk__menu_view_paint,
     .measure = fdk__menu_view_measure,
     .arrange = NULL,
-    .destroy = view_destroy,
+    .instance_finalize = view_destroy,
     .a11y = &menu_view_a11y,
 };
 
@@ -2104,7 +2104,7 @@ const fdk_widget_class fdk_menu_bar_class_def = {
     .paint = bar_paint,
     .measure = bar_measure,
     .arrange = bar_arrange,
-    .destroy = bar_destroy,
+    .instance_finalize = bar_destroy,
     .a11y = &menu_bar_a11y,
 };
 

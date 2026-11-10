@@ -313,7 +313,7 @@ static void combo_destroy(fdk_widget *w) {
     c->count = 0;
     /* An open dropdown outlives us safely: this hook runs before our
      * memory is freed (immediately, or at the deferred flush — either
-     * way klass->destroy precedes the free), so NULLing the guard's
+     * way klass->instance_finalize precedes the free), so NULLing the guard's
      * combo pointer here makes every later dropdown callback (item
      * activation, the closed hook) skip widget access and free only
      * the temporary model. The popup itself is dismissed by the next
@@ -434,7 +434,7 @@ const fdk_widget_class fdk_combo_class_def = {
     .paint = combo_paint,
     .measure = combo_measure,
     .arrange = combo_arrange,
-    .destroy = combo_destroy,
+    .instance_finalize = combo_destroy,
     .a11y = &combo_a11y,
 };
 

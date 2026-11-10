@@ -1230,7 +1230,7 @@ static const fdk_widget_class fdk_scrollbar_class_def = {
     .paint = scrollbar_paint,
     .measure = NULL,
     .arrange = NULL,
-    .destroy = scrollbar_destroy,
+    .instance_finalize = scrollbar_destroy,
 };
 
 /* ---- a11y ---- */
@@ -1290,7 +1290,7 @@ const fdk_widget_class fdk_scrollview_class_def = {
     .paint = NULL, /* base paint (background fill) + children */
     .measure = scrollview_measure,
     .arrange = scrollview_arrange,
-    .destroy = NULL,
+    .instance_finalize = NULL,
     .a11y = &scrollview_a11y,
 };
 

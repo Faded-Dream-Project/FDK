@@ -117,7 +117,7 @@ const fdk_widget_class fdk_toolbar_class_def = {
     .paint = toolbar_paint,
     .measure = toolbar_measure,
     .arrange = toolbar_arrange,
-    .destroy = NULL,
+    .instance_finalize = NULL,
     .a11y = &toolbar_a11y,
 };
 

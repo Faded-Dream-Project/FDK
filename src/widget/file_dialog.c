@@ -2130,7 +2130,7 @@ static const fdk_widget_class fdk_path_bar_class = {
     .paint = pbar_paint,
     .measure = pbar_measure,
     .arrange = pbar_arrange,
-    .destroy = pbar_destroy,
+    .instance_finalize = pbar_destroy,
 };
 
 /* Syncs the path bar to d->dir — unless the user is mid-typing in
@@ -3156,7 +3156,7 @@ static const fdk_widget_class fdk_file_dialog_body_class = {
     .paint = fdlg_body_paint, /* window + sidebar surfaces (1.0.0) */
     .measure = NULL,
     .arrange = fdlg_body_arrange,
-    .destroy = fdlg_body_destroy,
+    .instance_finalize = fdlg_body_destroy,
 };
 
 /* ---- public API ---- */

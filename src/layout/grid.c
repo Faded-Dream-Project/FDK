@@ -434,7 +434,7 @@ const fdk_widget_class fdk_grid_class_def = {
     .paint = NULL, /* container: the tree walk paints the children */
     .measure = fdk_grid_measure_hook,
     .arrange = fdk_grid_arrange_hook,
-    .destroy = grid_destroy_hook,
+    .instance_finalize = grid_destroy_hook,
 };
 
 /* ---- public API ------------------------------------------------------------ */

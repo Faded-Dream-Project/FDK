@@ -447,7 +447,7 @@ const fdk_widget_class fdk_spin_class_def = {
     .paint = spin_paint,
     .measure = spin_measure,
     .arrange = spin_arrange,
-    .destroy = spin_destroy,
+    .instance_finalize = spin_destroy,
     .a11y = &spin_a11y,
 };
 

@@ -168,7 +168,7 @@ static const fdk_widget_class counted_class = {
     .paint = NULL,
     .measure = counted_measure,
     .arrange = NULL,
-    .destroy = counted_destroy,
+    .instance_finalize = counted_destroy,
 };
 
 static fdk_widget *mk_counted(fdk_widget *parent, int x, int y, int w,
@@ -977,8 +977,86 @@ static void test_tree_isolation(void) {
     printf("[ok] standalone trees are isolated (events + damage)\n");
 }
 
+
+/* ---- per-instance subclassing (1.0.0: struct_size / instance_init /
+ * instance_finalize / fdk_widget_instance) ---- */
+
+typedef struct {
+    fdk_widget base;            /* first member, always */
+    int inited;                 /* instance_init ran        */
+    int finalized;              /* instance_finalize ran    */
+    int payload;                /* reachable through the accessor */
+} inst_widget;
+
+static int inst_init_runs = 0;
+
+static void inst_init(fdk_widget *w) {
+    inst_widget *self = fdk_widget_instance(w);
+    assert(self != NULL);
+    self->inited = 1;
+    inst_init_runs++;
+}
+
+static int inst_finalized_runs = 0;
+
+static void inst_finalize(fdk_widget *w) {
+    (void)FDK_WIDGET_INSTANCE(w, inst_widget);
+    inst_finalized_runs++; /* observed OUTSIDE the freed allocation */
+}
+
+static const fdk_widget_class inst_class = {
+    .struct_size = sizeof(fdk_widget_class),
+    .size = sizeof(inst_widget),
+    .name = "inst",
+    .instance_init = inst_init,
+    .instance_finalize = inst_finalize,
+};
+
+static void test_instance_state(void) {
+    fdk_widget *root = mk_widget(NULL, 0, 0, 100, 100);
+    fdk_widget *w = NULL;
+    fdk_rect b = {0, 0, 40, 20};
+    assert(fdk_ok(fdk_widget_create(root, &inst_class, b, &w)));
+    /* instance_init ran inside create, before attach */
+    assert(inst_init_runs == 1);
+    inst_widget *self = fdk_widget_instance(w);
+    assert(self != NULL);
+    assert(self->inited == 1 && self->finalized == 0);
+    self->payload = 42;
+    /* the typed-checked form reaches the same memory */
+    assert(FDK_WIDGET_INSTANCE(w, inst_widget)->payload == 42);
+    /* the subclass struct and the widget are ONE allocation: the
+     * accessor returns the same object the widget handle points at */
+    assert((void *)self == (void *)w);
+    /* the finalize hook sees the per-instance fields one last time */
+    self->finalized = 7;
+    assert(inst_finalized_runs == 0);
+    fdk_widget_destroy(root);
+    /* finalize ran during teardown */
+    assert(inst_finalized_runs == 1);
+    /* NULL is safe */
+    assert(fdk_widget_instance(NULL) == NULL);
+    /* a table compiled against struct_size-less FDK (zero) still
+     * registers: the base tables use it */
+    fdk_widget *plain = mk_widget(NULL, 0, 0, 10, 10);
+    assert(plain != NULL);
+    fdk_widget_destroy(plain);
+}
+
+static void test_struct_size_rejects_newer_table(void) {
+    /* a table claiming MORE fields than this FDK knows is refused */
+    fdk_widget_class too_new = inst_class;
+    too_new.struct_size = sizeof(fdk_widget_class) + 64;
+    fdk_widget *w = NULL;
+    fdk_rect b = {0, 0, 10, 10};
+    assert(!fdk_ok(fdk_widget_create(NULL, &too_new, b, &w)));
+    assert(w == NULL);
+}
+
 int main(void) {
     test_create_hierarchy_destroy();
+    test_instance_state();
+    test_struct_size_rejects_newer_table();
     test_argument_checks();
     test_reparent_raise_lower();
     test_visibility_enabled();

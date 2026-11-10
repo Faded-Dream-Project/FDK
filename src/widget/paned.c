@@ -458,7 +458,7 @@ const fdk_widget_class fdk_paned_class_def = {
     .paint = paned_paint,
     .measure = paned_measure,
     .arrange = paned_arrange,
-    .destroy = NULL,
+    .instance_finalize = NULL,
     .a11y = &paned_a11y,
     .max_children = 2, /* the panes ARE the layout */
 };

@@ -388,7 +388,7 @@ const fdk_widget_class fdk_button_class_def = {
     .paint = button_paint,
     .measure = button_measure,
     .arrange = NULL,
-    .destroy = button_destroy,
+    .instance_finalize = button_destroy,
     .a11y = &button_a11y,
 };
 
@@ -747,7 +747,7 @@ const fdk_widget_class fdk_toggle_class_def = {
     .paint = toggle_paint,
     .measure = check_measure,
     .arrange = NULL,
-    .destroy = check_destroy,
+    .instance_finalize = check_destroy,
     .a11y = &toggle_a11y,
 };
 
@@ -864,7 +864,7 @@ const fdk_widget_class fdk_checkbox_class_def = {
     .paint = checkbox_paint,
     .measure = check_measure,
     .arrange = NULL,
-    .destroy = check_destroy,
+    .instance_finalize = check_destroy,
     .a11y = &checkbox_a11y,
 };
 
@@ -1129,7 +1129,7 @@ const fdk_widget_class fdk_radio_class_def = {
     .paint = radio_paint,
     .measure = check_measure,
     .arrange = NULL,
-    .destroy = check_destroy,
+    .instance_finalize = check_destroy,
     .a11y = &radio_a11y,
 };
 
@@ -1610,7 +1610,7 @@ const fdk_widget_class fdk_scale_button_class_def = {
     .paint = sb_paint,
     .measure = sb_measure,
     .arrange = NULL,
-    .destroy = sb_destroy,
+    .instance_finalize = sb_destroy,
     .a11y = &sb_a11y,
 };
 

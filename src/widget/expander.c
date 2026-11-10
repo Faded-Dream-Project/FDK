@@ -456,7 +456,7 @@ const fdk_widget_class fdk_expander_class_def = {
     .paint = expander_paint,
     .measure = expander_measure,
     .arrange = expander_arrange,
-    .destroy = expander_destroy,
+    .instance_finalize = expander_destroy,
     .a11y = &expander_a11y,
     .max_children = 1, /* the content IS the one slot */
 };

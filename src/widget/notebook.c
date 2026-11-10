@@ -542,7 +542,7 @@ const fdk_widget_class fdk_notebook_class_def = {
     .paint = nb_paint,
     .measure = nb_measure,
     .arrange = nb_arrange,
-    .destroy = nb_destroy,
+    .instance_finalize = nb_destroy,
     .a11y = &nb_a11y,
 };
 

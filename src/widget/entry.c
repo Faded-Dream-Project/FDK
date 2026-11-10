@@ -2049,7 +2049,7 @@ const fdk_widget_class fdk_entry_class_def = { /* widgets_internal.h: hover-curs
     .paint = entry_paint,
     .measure = entry_measure,
     .arrange = NULL,
-    .destroy = entry_destroy,
+    .instance_finalize = entry_destroy,
     .a11y = &entry_a11y,
 };
 

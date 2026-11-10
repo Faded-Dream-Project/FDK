@@ -452,7 +452,7 @@ const struct fdk_widget_class fdk_box_class_def = {
     .paint = box_paint,
     .measure = fdk_box_measure_hook,
     .arrange = fdk_box_arrange_hook,
-    .destroy = NULL,
+    .instance_finalize = NULL,
 };
 
 /* ---- public box API ---- */

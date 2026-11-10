@@ -342,7 +342,7 @@ static const fdk_widget_class fdk_dialog_body_class = {
     .paint = NULL, /* base paint: the window_background fill set below */
     .measure = NULL,
     .arrange = dialog_body_arrange,
-    .destroy = dialog_body_destroy,
+    .instance_finalize = dialog_body_destroy,
     .a11y = &dialog_body_a11y,
 };
 

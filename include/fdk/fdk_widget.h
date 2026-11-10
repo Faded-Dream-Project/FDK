@@ -166,16 +166,41 @@ typedef bool (*fdk_widget_event_fn)(fdk_widget *widget,
  * allocation big enough for the subclass, and the allocation beyond
  * the base fields is zero-initialized. The hook contracts themselves
  * are public API (the Phase 5 layout engine drives measure/arrange
- * through them), but the embedding pattern is internal until the ABI
- * freeze makes the struct layout embeddable for applications.
+ * through them), and the embedding pattern is PUBLIC for add-on
+ * authors: a subclass struct embeds fdk_widget as its first member,
+ * sets size to sizeof(subclass), and reaches its per-instance fields
+ * through fdk_widget_instance() (the library knows where its own
+ * layout ends; the add-on never needs sizeof(fdk_widget)).
+ *
+ * The table itself carries struct_size: FDK copies exactly that many
+ * bytes of the table, so fields can be APPENDED in future FDK
+ * versions without breaking tables compiled against older headers
+ * (the input-struct discipline of docs/abi-policy.md, applied to the
+ * class table). A zero struct_size means "the FDK version this table
+ * was written against" (the compiled-in table size) — the default
+ * every table written before struct_size existed keeps relying on.
  *
  * Every hook is optional (NULL) except `size`; the defaults give you
  * a plain colored rectangle widget.
  */
 typedef struct fdk_widget_class {
+    /* sizeof(fdk_widget_class) of the FDK this table was written
+     * against; 0 = exactly this build's table. FDK reads only this
+     * many bytes (fields are appended, never reordered). */
+    size_t struct_size;
+
     /* sizeof the subclass struct (>= sizeof(fdk_widget)). Used for the
-     * single allocation in fdk_widget_create(). */
+     * single allocation in fdk_widget_create(). The subclass struct
+     * embeds fdk_widget FIRST; its own fields follow the library's
+     * layout and are reached with fdk_widget_instance(). */
     size_t size;
+
+    /* Per-instance constructor. Runs ONCE inside fdk_widget_create(),
+     * after the allocation is zeroed and the core fields are set, but
+     * BEFORE the widget is attached to its parent — a NULL return
+     * cannot undo the attach, so init work that can fail belongs in
+     * the create call sites instead. May be NULL. */
+    void (*instance_init)(fdk_widget *widget);
 
     /* Diagnostic name ("button", "my-panel", ...); shown in logs. May
      * be NULL. */
@@ -215,10 +240,12 @@ typedef struct fdk_widget_class {
      * fdk_widget_set_bounds(). */
     void (*arrange)(fdk_widget *widget, fdk_rect assigned);
 
-    /* Destroy hook: subclass cleanup (release owned strings, etc).
-     * Called once, immediately before the widget's memory is freed.
-     * NULL = nothing extra. */
-    void (*destroy)(fdk_widget *widget);
+    /* Instance-finalize hook: subclass cleanup (release owned strings,
+     * etc). Called once, immediately before the widget's memory is
+     * freed — even when the subtree is being torn down around it.
+     * NULL = nothing extra. (Renamed from `destroy` pre-release: the
+     * name says what it finalizes.) */
+    void (*instance_finalize)(fdk_widget *widget);
 
     /* Accessibility class descriptor (Phase 10): role + dynamic
      * describe/action hooks for fdk_a11y_describe / fdk_a11y_perform.
@@ -240,6 +267,40 @@ typedef struct fdk_widget_class {
      * same safe-append policy as a11y above. */
     size_t max_children;
 } fdk_widget_class;
+
+/* ---- Per-instance state ----
+ *
+ * A subclass struct embeds fdk_widget FIRST and fills the class's
+ * `size` — the single allocation fdk_widget_create makes IS the
+ * subclass struct. fdk_widget_instance() returns the pointer to that
+ * struct, typed by the add-on's cast — the one accessor a subclass
+ * needs, with the library owning where its own layout ends:
+ *
+ *     typedef struct {
+ *         fdk_widget base;            (first member, always)
+ *         int     presses;
+ *         char   *label_copy;         (owned)
+ *     } my_button;
+ *
+ *     static void my_finalize(fdk_widget *w) {
+ *         my_button *self = FDK_WIDGET_INSTANCE(w, my_button);
+ *         free(self->label_copy);
+ *     }
+ *
+ * The class table sets .size = sizeof(my_button) and
+ * .instance_finalize = my_finalize. The returned pointer is valid for
+ * the widget's whole lifetime (the subclass struct and the widget are
+ * one allocation, freed together); NULL widget returns NULL. It also
+ * keeps a subclass working if FDK ever moves per-instance storage
+ * (the allocation-callback pattern in docs/abi-policy.md) — the
+ * accessor absorbs the move, the casts do not.
+ */
+void *fdk_widget_instance(fdk_widget *widget);
+
+/* The typed-checked convenience: compiles to the same call, the cast
+ * spelled once. No runtime type tag (the class pointer IS the type in
+ * C) — misuse is a review finding, not a crash FDK can catch. */
+#define FDK_WIDGET_INSTANCE(w, type) ((type *)fdk_widget_instance(w))
 
 /* ---- Lifecycle ---- */
 

@@ -504,7 +504,7 @@ static const fdk_widget_class fdk_iv_cell_class_def = {
     .paint = iv_cell_paint,
     .measure = NULL,
     .arrange = NULL,
-    .destroy = iv_cell_destroy,
+    .instance_finalize = iv_cell_destroy,
     .a11y = &iv_cell_a11y,
 };
 
@@ -951,7 +951,7 @@ const fdk_widget_class fdk_iconview_class_def = {
     .paint = iv_view_paint,
     .measure = iv_measure,
     .arrange = iv_arrange,
-    .destroy = iv_view_destroy,
+    .instance_finalize = iv_view_destroy,
     .a11y = &iv_view_a11y,
 };
 

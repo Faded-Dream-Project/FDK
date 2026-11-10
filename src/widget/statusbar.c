@@ -162,7 +162,7 @@ const fdk_widget_class fdk_statusbar_class_def = {
     .paint = statusbar_paint,
     .measure = statusbar_measure,
     .arrange = NULL,
-    .destroy = statusbar_destroy,
+    .instance_finalize = statusbar_destroy,
     .a11y = &statusbar_a11y,
     .max_children = 0,
 };

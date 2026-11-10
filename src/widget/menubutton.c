@@ -345,7 +345,7 @@ const fdk_widget_class fdk_menu_button_class_def = {
     .paint = mbtn_paint,
     .measure = mbtn_measure,
     .arrange = NULL,
-    .destroy = mbtn_destroy,
+    .instance_finalize = mbtn_destroy,
     .a11y = &mbtn_a11y,
 };
 

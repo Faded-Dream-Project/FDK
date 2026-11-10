@@ -809,7 +809,7 @@ const fdk_widget_class fdk_label_class_def = {
     .paint = label_paint,
     .measure = label_measure,
     .arrange = label_arrange,
-    .destroy = label_destroy,
+    .instance_finalize = label_destroy,
     .a11y = &label_a11y,
 };
 
@@ -1132,7 +1132,7 @@ const fdk_widget_class fdk_progress_class_def = {
     .paint = progress_paint,
     .measure = progress_measure,
     .arrange = NULL,
-    .destroy = progress_destroy,
+    .instance_finalize = progress_destroy,
     .a11y = &progress_a11y,
 };
 
@@ -1277,7 +1277,7 @@ const fdk_widget_class fdk_separator_class_def = {
     .paint = separator_paint,
     .measure = NULL,
     .arrange = NULL,
-    .destroy = NULL,
+    .instance_finalize = NULL,
     .a11y = &separator_a11y,
 };
 
@@ -1372,7 +1372,7 @@ const fdk_widget_class fdk_frame_class_def = {
      * the title band reserved via title_inset). */
     .measure = fdk_box_measure_hook,
     .arrange = fdk_box_arrange_hook,
-    .destroy = frame_destroy,
+    .instance_finalize = frame_destroy,
     .a11y = &frame_a11y,
 };
 

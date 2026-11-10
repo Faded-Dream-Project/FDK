@@ -176,7 +176,7 @@ const fdk_widget_class fdk_picture_class_def = {
     .paint = pic_paint,
     .measure = pic_measure,
     .arrange = NULL,
-    .destroy = pic_destroy,
+    .instance_finalize = pic_destroy,
     .a11y = &pic_a11y,
 };
 

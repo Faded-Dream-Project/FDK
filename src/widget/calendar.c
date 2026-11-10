@@ -640,7 +640,7 @@ const fdk_widget_class fdk_calendar_class_def = {
     .paint = cal_paint,
     .measure = cal_measure,
     .arrange = NULL,
-    .destroy = cal_destroy,
+    .instance_finalize = cal_destroy,
     .a11y = &cal_a11y,
 };
 
@@ -1196,7 +1196,7 @@ const fdk_widget_class fdk_date_picker_class_def = {
     .paint = dp_paint,
     .measure = dp_measure,
     .arrange = NULL,
-    .destroy = dp_destroy,
+    .instance_finalize = dp_destroy,
     .a11y = &dp_a11y,
 };
 
@@ -1775,7 +1775,7 @@ const fdk_widget_class fdk_time_picker_class_def = {
     .paint = tp_paint,
     .measure = tp_measure,
     .arrange = NULL,
-    .destroy = tp_destroy,
+    .instance_finalize = tp_destroy,
     .a11y = &tp_a11y,
 };
 

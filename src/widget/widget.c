@@ -239,13 +239,14 @@ static void base_paint(fdk_widget *widget, fdk_surface *surface,
 }
 
 static const fdk_widget_class fdk_widget_base_class_def = {
+    .struct_size = 0, /* pre-struct_size table: the compiled-in size */
     .size = sizeof(fdk_widget),
     .name = "widget",
     .handle_event = NULL,
     .paint = base_paint,
     .measure = NULL,
     .arrange = NULL,
-    .destroy = NULL,
+    .instance_finalize = NULL,
 };
 
 /* Window-owned roots use this class: the base widget + the WINDOW
@@ -259,13 +260,14 @@ static const fdk_a11y_class window_root_a11y = {
 };
 
 static const fdk_widget_class window_root_class_def = {
+    .struct_size = 0, /* pre-struct_size table: the compiled-in size */
     .size = sizeof(fdk_widget),
     .name = "window-root",
     .handle_event = NULL,
     .paint = base_paint,
     .measure = NULL,
     .arrange = NULL,
-    .destroy = NULL,
+    .instance_finalize = NULL,
     .a11y = &window_root_a11y,
 };
 
@@ -396,8 +398,8 @@ static void teardown_free(fdk_widget *w) {
         w->watch_count = 0;
         w->watch_capacity = 0;
     }
-    if (w->klass->destroy != NULL) {
-        w->klass->destroy(w);
+    if (w->klass->instance_finalize != NULL) {
+        w->klass->instance_finalize(w);
     }
     while (w->child_count > 0) {
         fdk_widget *child = w->children[0];
@@ -930,8 +932,27 @@ fdk_result fdk_widget_create(fdk_widget *parent,
     if (out_widget == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
-    if (klass != NULL && klass->size < sizeof(fdk_widget)) {
-        return FDK_ERR_INVALID_ARGUMENT;
+    size_t table_bytes = 0;
+    if (klass != NULL) {
+        if (klass->size < sizeof(fdk_widget)) {
+            return FDK_ERR_INVALID_ARGUMENT;
+        }
+        /* The struct_size discipline (fdk_widget.h): the table lives
+         * as long as the widget (w->klass IS the caller's table), so
+         * it is validated, never copied — a static table zero-fills
+         * the fields this build doesn't know, and a table written by
+         * a NEWER FDK is refused here instead of half-read. */
+        table_bytes = (klass->struct_size != 0) ? klass->struct_size
+                                                : sizeof(fdk_widget_class);
+        if (table_bytes > sizeof(fdk_widget_class)) {
+            FDK_WARN("widget class \"%s\" declares struct_size %zu > "
+                     "this library's %zu (newer table, older library); "
+                     "refusing create",
+                     (klass->name != NULL) ? klass->name : "(unnamed)",
+                     table_bytes, sizeof(fdk_widget_class));
+            return FDK_ERR_INVALID_ARGUMENT;
+        }
+        (void)table_bytes;
     }
     if (parent != NULL && (parent->flags & FDK_WF_DESTROYING) != 0) {
         return FDK_ERR_INVALID_ARGUMENT; /* attaching to a dying subtree */
@@ -991,9 +1012,16 @@ fdk_result fdk_widget_create(fdk_widget *parent,
     w->grid_attached = false;
     w->flags = FDK_WF_VISIBLE | FDK_WF_ENABLED;
 
+    if (k->instance_init != NULL) {
+        k->instance_init(w);
+    }
+
     if (parent != NULL) {
         fdk_result r = child_append(parent, w);
         if (!fdk_ok(r)) {
+            if (k->instance_finalize != NULL) {
+                k->instance_finalize(w); /* symmetric with instance_init */
+            }
             fdk_free(w);
             return r;
         }
@@ -2623,4 +2651,17 @@ void fdk_widget_root_resized(fdk_widget *root, fdk_size new_size) {
 void *fdk__widget_window_owner(fdk_widget *any) {
     fdk_widget *root = (any != NULL) ? find_root(any) : NULL;
     return (root != NULL) ? root->window_owner : NULL;
+}
+
+
+/* ---- Per-instance state (1.0.0) ------------------------------------------ */
+
+void *fdk_widget_instance(fdk_widget *widget) {
+    /* The subclass struct IS the allocation: it embeds fdk_widget as
+     * its first member, so the subclass pointer and the widget pointer
+     * are the same object. The accessor exists so a subclass never
+     * casts the opaque handle blind — and so a future per-instance
+     * storage move (docs/abi-policy.md's allocation-callback pattern)
+     * is absorbed here instead of in every cast site. */
+    return widget;
 }

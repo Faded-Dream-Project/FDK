@@ -1563,7 +1563,7 @@ static const fdk_widget_class fdk_tv_page_class_def = {
     .paint = tv_page_paint,
     .measure = NULL,
     .arrange = NULL,
-    .destroy = NULL,
+    .instance_finalize = NULL,
 };
 
 /* The selection fill + text + caret + preedit for every line that
@@ -1953,7 +1953,7 @@ const fdk_widget_class fdk_textview_class_def = {
     .paint = tv_view_paint,
     .measure = tv_view_measure,
     .arrange = tv_view_arrange,
-    .destroy = tv_view_destroy,
+    .instance_finalize = tv_view_destroy,
     .a11y = &tv_a11y,
 };
 

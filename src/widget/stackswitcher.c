@@ -415,7 +415,7 @@ const fdk_widget_class fdk_stackswitcher_class_def = {
     .paint = sw_paint,
     .measure = sw_measure,
     .arrange = NULL,
-    .destroy = sw_destroy,
+    .instance_finalize = sw_destroy,
     .a11y = &sw_a11y,
     .max_children = 0,
 };

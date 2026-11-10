@@ -644,7 +644,7 @@ static const fdk_widget_class fdk_tree_row_class_def = {
     .paint = row_paint,
     .measure = NULL,
     .arrange = NULL,
-    .destroy = row_destroy,
+    .instance_finalize = row_destroy,
     .a11y = &tree_row_a11y,
 };
 
@@ -1099,7 +1099,7 @@ const fdk_widget_class fdk_tree_class_def = {
     .paint = tree_paint,
     .measure = tree_measure,
     .arrange = tree_arrange,
-    .destroy = tree_destroy,
+    .instance_finalize = tree_destroy,
     .a11y = &tree_a11y,
 };
 

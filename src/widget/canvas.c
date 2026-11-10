@@ -68,7 +68,7 @@ const fdk_widget_class fdk_canvas_class_def = {
     .paint = canvas_paint,
     .measure = canvas_measure,
     .arrange = NULL,
-    .destroy = NULL,
+    .instance_finalize = NULL,
     .a11y = &canvas_a11y,
 };
 

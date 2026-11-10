@@ -323,7 +323,7 @@ static const fdk_widget_class fdk_about_body_class = {
     .paint = NULL, /* base paint: the window_background fill */
     .measure = NULL,
     .arrange = about_body_arrange,
-    .destroy = about_body_destroy,
+    .instance_finalize = about_body_destroy,
     .a11y = &about_body_a11y,
 };
 
@@ -910,7 +910,7 @@ static const fdk_widget_class fdk_fc_body_class = {
     .handle_event = NULL,
     .paint = NULL,
     .arrange = fc_body_arrange,
-    .destroy = fc_body_destroy,
+    .instance_finalize = fc_body_destroy,
     .a11y = &fc_body_a11y,
 };
 
@@ -1204,7 +1204,7 @@ static const fdk_widget_class fdk_fcw_class = {
     .handle_event = NULL,
     .paint = NULL,
     .arrange = fcw_arrange,
-    .destroy = fcw_destroy,
+    .instance_finalize = fcw_destroy,
     .a11y = &fcw_a11y,
 };
 
@@ -2032,7 +2032,7 @@ static const fdk_widget_class fdk_cc_body_class = {
     .handle_event = NULL,
     .paint = NULL,
     .arrange = cc_body_arrange,
-    .destroy = cc_body_destroy,
+    .instance_finalize = cc_body_destroy,
     .a11y = &cc_body_a11y,
 };
 
@@ -2273,7 +2273,7 @@ static const fdk_widget_class fdk_ccw_class = {
     .handle_event = NULL,
     .paint = NULL,
     .arrange = ccw_arrange,
-    .destroy = ccw_destroy,
+    .instance_finalize = ccw_destroy,
     .a11y = &ccw_a11y,
 };
 
@@ -2710,7 +2710,7 @@ const fdk_widget_class fdk_colorbutton_class_def = {
     .paint = cbtn_paint,
     .measure = cbtn_measure,
     .arrange = NULL,
-    .destroy = cbtn_destroy,
+    .instance_finalize = cbtn_destroy,
     .a11y = &cbtn_a11y,
 };
 
@@ -3129,7 +3129,7 @@ const fdk_widget_class fdk_fontbutton_class_def = {
     .paint = fbtn_paint,
     .measure = fbtn_measure,
     .arrange = NULL,
-    .destroy = fbtn_destroy,
+    .instance_finalize = fbtn_destroy,
     .a11y = &fbtn_a11y,
 };
 

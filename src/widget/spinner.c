@@ -149,7 +149,7 @@ const fdk_widget_class fdk_spinner_class_def = {
     .paint = spinner_paint,
     .measure = spinner_measure,
     .arrange = NULL,
-    .destroy = NULL,
+    .instance_finalize = NULL,
     .a11y = &spinner_a11y,
     .max_children = 0,
 };

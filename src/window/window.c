@@ -479,7 +479,7 @@ static const fdk_widget_class deco_bar_class = {
     .paint = deco_bar_paint,
     .measure = NULL,
     .arrange = NULL,
-    .destroy = NULL,
+    .instance_finalize = NULL,
 };
 
 /* ---- Band interaction ---- */
