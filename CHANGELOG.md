@@ -1,4 +1,20 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The LSan suppression question CLOSED (with evidence)
+
+The deciding CI run surfaced clang's own verdict: "Supported
+suppression types are: interceptor_name / interceptor_via_fun /
+interceptor_via_lib / odr_violation" - NO leak type. Ubuntu's
+packaged clang runtime compiles LSan out of clang_rt.asan, so the
+suppression file is unconsumable there AND gcc-14's parser rejects
+it non-deterministically. The file's syntax, encoding and newline
+were never the problem - the runtimes are.
+
+FINAL SHAPE: CI runs BOTH sway lanes (gcc + clang) with leak
+detection fully ON and NO suppression file - the suite is leak-clean
+under plain detection, and the clang leg already earned its keep by
+catching a GCC-only nested function. tests/lsan-wayland.supp stays
+as the documented reference for full-LLVM toolchains (official LLVM
+releases carry LSan), with the whole story in its header.
 ## The clang leg's first catch: a GCC-only nested function
 
 textview.c defined is_word_cp as a NESTED function — a GCC extension
