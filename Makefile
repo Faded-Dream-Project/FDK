@@ -936,3 +936,19 @@ test-examples-wayland: $(BUILD_DIR)/examples/panel-layer-shell
 	@if [ -z "$$WAYLAND_DISPLAY" ]; then echo "needs a compositor"; exit 1; fi
 	LD_LIBRARY_PATH=$(EX_PREFIX)/lib WAYLAND_DISPLAY=$$WAYLAND_DISPLAY \
 	ASAN_OPTIONS=detect_leaks=0 $(BUILD_DIR)/examples/panel-layer-shell
+
+# X11 share-root evidence (P2): two GPU windows exchange a texture
+# through the lane's share group (the fdk_ext_gl contract).
+XSHARE_BIN := $(BUILD_DIR)/tests/test_x11_share
+
+$(XSHARE_BIN): tests/test_x11_share.c $(STATIC_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
+	       $(STATIC_LIB) -o $@ $(LDFLAGS)
+
+test-x11-share: $(XSHARE_BIN)
+	@pkill -x Xvfb 2>/dev/null; sleep 1; set -e; N=$$((90 + RANDOM % 400)); \
+	rm -f /tmp/.X11-unix/X$$N; Xvfb :$$N -screen 0 800x600x24 >/dev/null 2>&1 & XP=$$!; sleep 1; \
+	DISPLAY=:$$N FDK_GL_FORCE=1 LSAN_OPTIONS=suppressions=$(CURDIR)/tests/data/lsan-gl.supp \
+	"$(XSHARE_BIN)"; rc=$$?; kill $$XP 2>/dev/null; wait $$XP 2>/dev/null; \
+	if [ $$rc -eq 1 ]; then exit 1; fi

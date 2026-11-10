@@ -1,4 +1,15 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 3a: the X11 lane share-root (parity with Wayland)
+
+- x11_gl.c: every window context is now created sharing a lane-wide
+  share-root GLX context (same FBConfig, never made current) — the
+  documented fdk_ext_gl contract "shared with every other window's
+  context on the connection — texture objects cross between them" was
+  already true on Wayland (root_ctx) and false on X11 (share=NULL).
+- tests/test_x11_share.c + make test-x11-share: two GPU windows; a
+  texture uploaded in window A's lane context reads back
+  byte-identical in window B's. Also pins that both windows keep
+  presenting after the cross-context exchange.
 ## Item 2: multi-angle circle cross-sections — the ring band fix
 
 - tests/crosssection.c now dumps radial cross-sections (samples ON the

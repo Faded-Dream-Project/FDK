@@ -163,6 +163,13 @@ struct fdk_x11_gl {
     fdk_platform_connection *conn; /* owner */
     void *lib;                     /* dlopen handle; never dlclose'd */
     struct fdk_gl_fns fn;
+    GLXContext root_ctx;           /* the share-root (never current):
+                                    * every window context is created
+                                    * sharing it, so texture objects
+                                    * cross between windows — the
+                                    * documented fdk_ext_gl contract
+                                    * (parity with the Wayland lane's
+                                    * root_ctx) */
     int refused;                   /* policy verdict: stop offering the
                                     * lane to further windows on this
                                     * connection (software renderer, no
@@ -601,13 +608,31 @@ struct fdk_x11_gl_window *fdk_x11_gl_window_try_init(
         return NULL;
     }
 
+    /* The share-root: created ONCE per lane with the same FBConfig
+     * every window uses (glX sharing requires one config), never made
+     * current. Every window context then shares it — the documented
+     * "texture objects cross between windows" contract. */
+    if (gl->root_ctx == NULL) {
+        gl->root_ctx = gl->fn.glXCreateNewContext(
+            gl->conn->display, cfg, GLXC_RGBA_TYPE, NULL, True);
+        if (gl->root_ctx == NULL) {
+            gl->root_ctx = gl->fn.glXCreateNewContext(
+                gl->conn->display, cfg, GLXC_RGBA_TYPE, NULL, False);
+        }
+        if (gl->root_ctx == NULL) {
+            FDK_DEBUG("share-root glXCreateNewContext failed — contexts "
+                      "will not share on this connection");
+        }
+    }
     /* Direct first (local: DRI or client-side swrast); indirect second
      * (remote X, the only option there). Both failing = no context. */
     GLXContext ctx = gl->fn.glXCreateNewContext(gl->conn->display, cfg,
-                                                GLXC_RGBA_TYPE, NULL, True);
+                                                GLXC_RGBA_TYPE,
+                                                gl->root_ctx, True);
     if (ctx == NULL) {
         ctx = gl->fn.glXCreateNewContext(gl->conn->display, cfg,
-                                         GLXC_RGBA_TYPE, NULL, False);
+                                         GLXC_RGBA_TYPE, gl->root_ctx,
+                                         False);
     }
     if (ctx == NULL) {
         FDK_DEBUG("glXCreateNewContext failed — CPU present path for this "
@@ -1299,4 +1324,13 @@ fdk_result fdk_x11_gl_window_fence_wait(struct fdk_x11_gl_window *gwin,
     gl->fn.glDeleteSync((void *)(uintptr_t)fence);
     /* 0x911D = GL_ALREADY_SIGNALED, 0x911E = GL_CONDITION_SATISFIED */
     return (r == 0x911D || r == 0x911E) ? FDK_OK : FDK_ERR_UNSUPPORTED;
+}
+
+
+/* Test seam: the lane's pinned libGL dlopen handle (share-root test). */
+void *fdk_x11_gl_lib_for_test(fdk_platform_window *pw) {
+    if (pw == NULL || pw->conn == NULL || pw->conn->gl == NULL) {
+        return NULL;
+    }
+    return ((struct fdk_x11_gl *)pw->conn->gl)->lib;
 }
