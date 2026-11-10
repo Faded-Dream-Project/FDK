@@ -989,3 +989,20 @@ test-p3-x11: $(P3_BIN)
 test-p3-wayland: $(P3_BIN)
 	@if [ -z "$$WAYLAND_DISPLAY" ]; then echo "needs a compositor (the sway rig)"; exit 1; fi
 	WAYLAND_DISPLAY=$$WAYLAND_DISPLAY "$(P3_BIN)" wayland
+
+# P5 (d)/(f): the protocol add-on examples — built against the
+# INSTALLED tree with public headers only (make install first).
+EX_PROTOCOLS_DIR := examples/protocols
+
+.PHONY: test-examples-protocols
+test-examples-protocols:
+	@if [ ! -d "$(EX_PROTOCOLS_DIR)" ]; then echo "no vendored protocol headers"; exit 1; fi
+	@set -e; P=$(CURDIR)/build/fdk-install; \
+	$(MAKE) install PREFIX=$$P > /dev/null; \
+	WL_CFLAGS=$$(pkg-config --cflags wayland-client 2>/dev/null || echo -I/usr/include); \
+	WL_LIBS=$$(pkg-config --libs wayland-client 2>/dev/null || echo -lwayland-client); \
+	WL_LIBDIR=$$(pkg-config --variable=libdir wayland-client 2>/dev/null || echo /usr/lib); \
+	mkdir -p $(BUILD_DIR)/examples; \
+	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/d-input-method.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lm -ldl -lpthread -o $(BUILD_DIR)/examples/d-input-method; \
+	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/f-session-lock.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lm -ldl -lpthread -o $(BUILD_DIR)/examples/f-session-lock; \
+	echo "examples (d)/(f) built against the installed tree"

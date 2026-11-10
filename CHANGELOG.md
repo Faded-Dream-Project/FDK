@@ -1,4 +1,29 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 2: P5 examples (d) input-method add-on, (f) session-lock screen
+
+- examples/d-input-method.c: the on-screen-keyboard half — the
+  add-on's own event queue, a raw wl_seat bind, the
+  zwp_input_method_v2 object with the FULL vendor-carried listener
+  (activate grabs the keyboard, done commits a string), clean
+  teardown. Runs green under sway: seat name 45 raw-bound, IM minted,
+  grab taken.
+- examples/f-session-lock.c: a registered ext-surface kind whose
+  create callback performs the lock role handshake and hands FDK the
+  raw wl_surface (the documented ownership transfer) — FDK then
+  renders and presents the lock screen. Runs green under sway: the
+  lock mints, sway GRANTS it (locked=1 — the committed buffer was
+  accepted for the output), the screen presents, unlock is clean.
+- Both build with make test-examples-protocols against the INSTALLED
+  tree using public headers only; the protocols the toolkit does not
+  model are vendored under examples/protocols/ (standard Wayland
+  client practice). make install first, as with the other examples.
+- Walls found: none in FDK. The example-side lessons (recorded in the
+  examples): the IM v2 listener has no commit_state/preedit members
+  (draft error, not an API gap) and its commit request takes the
+  CLIENT-SIDE count of done events as the serial; the ext native
+  handle's Wayland payload is .pointer + .backend (the header prose
+  said ".native" — prose fixed here by example; the struct itself was
+  right).
 ## Item 1: the sway lane runs the full protocol test — teardown fixed
 
 - The abort at the add-on queue teardown is gone: the destroy order
