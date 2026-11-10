@@ -1,4 +1,19 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The virtual keyboard delivers — the real assertion runs and passes
+
+- The P3 test now asserts DELIVERY, not just clean emission: the
+  window gets an event callback, the VK injects Q (evdev 16), and the
+  test requires a KEY_DOWN with that scancode within the pump window.
+  Both checks pass on the two-output sway rig under ASan and LSan
+  (downs=1, scancode=16, all green, no leaks).
+- The key finding (caught with a standalone probe): the emission must
+  SETTLE first — sway adds the virtual device, fires the seat's
+  capabilities event (FDK binds wl_keyboard on the appearance — the
+  existing handler was already correct), and focuses the window only
+  after the device lands. Keys emitted before that land hit a NULL
+  focus and are dropped by the compositor, silently. The test now
+  pumps a settle window between mint and emit. The capability rebind
+  needed no code change — the latency contract was the gap.
 ## D9 applied: the shared pwindow init (the 0xe5 class closed)
 
 - The two-output lock flow (the un-pinned test: two headless outputs,

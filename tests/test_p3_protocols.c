@@ -29,6 +29,20 @@ static int g_fail = 0;
     } while (0)
 
 static int g_lock_events = 0;
+static int g_key_downs = 0; /* the VK delivery counter (Item: the
+                             * virtual keyboard injects, the window
+                             * receives) */
+static fdk_scancode g_last_key = 0;
+
+static void vk_key_cb(fdk_window *win, const fdk_event_data *event,
+                      void *user) {
+    (void)win;
+    (void)user;
+    if (event->type == FDK_EVENT_KEY_DOWN) {
+        g_key_downs++;
+        g_last_key = event->key.scancode;
+    }
+}
 static int g_lock_state = -1;
 static void on_lock(void *user, int locked) {
     (void)user;
@@ -180,15 +194,37 @@ fdk_toplevel_list_close(tl);
                 void *vk = fdk_virtual_keyboard_create(ctx, fdk_ext_wl_seat(ctx, 0), NULL, 0);
                 CHECK(vk != NULL, "virtual keyboard mints");
                 if (vk != NULL) {
-                    /* KEY_Q down/up (evdev 16); delivery needs the
-                     * seat's focused client — the headless rig has no
-                     * input devices, so the CONTRACT check is
-                     * crash-free emission + teardown, and the delivery
-                     * shape is documented in the report */
-                    fdk_virtual_keyboard_key(vk, 0, 16, 1);
-                    fdk_virtual_keyboard_key(vk, 10, 16, 0);
-                    fdk_pump_events(ctx, 16);
-                    CHECK(1, "virtual keyboard keys emitted cleanly");
+                    /* the REAL delivery assertion (Item: the virtual
+                     * keyboard injects, the window receives): this
+                     * window is the seat's only mapped toplevel, so
+                     * sway focuses it — the VK's key must arrive as a
+                     * normal KEY_DOWN with the evdev scancode. The
+                     * default keymap (installed at create) keeps the
+                     * compositor from killing the connection. */
+                    fdk_window_set_event_callback(w, vk_key_cb, NULL);
+                    g_key_downs = 0;
+                    g_last_key = 0;
+                    /* the settle (the probe's finding): sway adds the
+                     * device, fires the capabilities event (FDK binds
+                     * wl_keyboard), focuses the window — the keys must
+                     * come AFTER that lands, or they hit a NULL focus */
+                    for (int i = 0; i < 25; i++) {
+                        fdk_pump_events(ctx, 16);
+                    }
+                    fdk_virtual_keyboard_key(vk, 0, 16, 1);  /* Q down */
+                    fdk_virtual_keyboard_key(vk, 10, 16, 0); /* Q up  */
+                    int delivered = 0;
+                    for (int i = 0; i < 30 && !delivered; i++) {
+                        fdk_pump_events(ctx, 16);
+                        delivered = g_key_downs > 0;
+                    }
+                    printf("[info] VK delivery: downs=%d scancode=%u\n",
+                           g_key_downs, (unsigned)g_last_key);
+                    CHECK(delivered,
+                          "virtual keyboard key DELIVERED to the window");
+                    CHECK(g_last_key == 16,
+                          "the delivered scancode is the injected one");
+                    fdk_window_set_event_callback(w, NULL, NULL);
                     fdk_virtual_keyboard_destroy(vk);
                 }
             } else {
