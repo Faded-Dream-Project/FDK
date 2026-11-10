@@ -387,7 +387,9 @@ EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
 # the static archive, on the public headers only (tools/toolutil.h is
 # the one tools-local header). They link the full LDFLAGS set like
 # every other consumer of libfdk.a.
-TOOL_SRCS := $(wildcard tools/*.c)
+# widget_sizes.c is NOT a shipped CLI tool: it is the D1 measurement
+# probe (private include path), built by the `sizes` target below.
+TOOL_SRCS := $(filter-out tools/widget_sizes.c,$(wildcard tools/*.c))
 TOOL_BINS := $(patsubst tools/%.c,$(BUILD_DIR)/tools/%,$(TOOL_SRCS))
 
 # test_cli_tools stat()s the three tools next to itself; the test

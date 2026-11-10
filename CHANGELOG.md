@@ -1,4 +1,12 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Fix-forward: widget_sizes.c left the shipped-tools set
+
+- The generic tools/% pattern rule auto-adopted the D1 probe and
+  built it without its private include path (make test's tool chain
+  died on it — the D1 commit went out before the battery was green;
+  that was a process error, fixed here without a force-push).
+- TOOL_SRCS now filters the probe out; it builds only via `sizes`.
+- Battery green (0 failures).
 ## D1 applied: the embed budget is data-ruled (stays 1024)
 
 - `make sizes` measures what decision D1 is ruled by: the shared
