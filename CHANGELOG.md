@@ -1,4 +1,24 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## P3(c): the add-on raw-event surface (queues + raw binds)
+
+- New public API (fdk_extend.h) with FDK_EXT_CAP_WL_RAW_EVENTS (17):
+  fdk_wl_queue_create (an add-on-owned named wl_event_queue), 
+  fdk_wl_queue_registry (the private wl_registry ON that queue — the
+  add-on's own listener receives raw global events), fdk_wl_raw_bind
+  (bind by advertised name onto the queue; the returned proxy is the
+  add-on's), fdk_wl_queue_dispatch (one non-blocking pass to the
+  add-on's listeners), fdk_wl_queue_attach (integrate the queue into
+  FDK's pump loop, which gives it one non-blocking dispatch pass
+  after the main round each frame).
+- Dispatch goes only to the add-on's listeners (FDK never sees those
+  proxies); read-side discipline stays with FDK's pump. The impls
+  live in the wayland layer (the queue's type is internal);
+  wayland_disabled builds provide honest stubs. X11: the cap is
+  false; create answers NULL.
+- libwayland's proxy-wrapper filtering is unavailable in the pinned
+  version, so the "raw-event filter" is realized at the layer the
+  protocol actually supports: the add-on owns its objects and their
+  events end to end.
 ## P3(b): session-lock, input-method-v2, virtual-keyboard bound
 
 - Fetched the protocol XMLs (ext-session-lock-v1 from

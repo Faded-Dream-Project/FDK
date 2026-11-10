@@ -201,6 +201,7 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
         /* Key repeat (1.0.0) fires AFTER the real events: a queued
          * RELEASE of the held key must win over a synthetic repeat. */
         int repeats = fdk_wayland_key_repeat_fire(conn);
+        fdk_wayland_addon_queues_dispatch(conn); /* P3: add-on queues */
         return flush_output(conn) < 0 ? (int)FDK_ERR_NO_DISPLAY
                                       : dispatched + repeats;
     }
@@ -232,6 +233,7 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
         if (repeats == 0) {
             return 0;
         }
+        fdk_wayland_addon_queues_dispatch(conn); /* P3: add-on queues */
         return flush_output(conn) < 0 ? (int)FDK_ERR_NO_DISPLAY : repeats;
     }
 
@@ -245,6 +247,7 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
     }
     (void)fdk_wayland_release_queue_dispatch(conn);
     int repeats = fdk_wayland_key_repeat_fire(conn);
+    fdk_wayland_addon_queues_dispatch(conn); /* P3: add-on queues */
     return flush_output(conn) < 0 ? (int)FDK_ERR_NO_DISPLAY
                                   : dispatched + repeats;
 }

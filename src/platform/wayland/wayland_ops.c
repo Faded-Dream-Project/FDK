@@ -20,6 +20,7 @@ static const fdk_platform_ops g_wayland_ops = {
     .session_lock_available = fdk_wayland_session_lock_available,
     .input_method_available = fdk_wayland_input_method_available,
     .virtual_keyboard_available = fdk_wayland_virtual_keyboard_available,
+    .wl_queue_create = fdk_wayland_queue_create,
     .window_activation_available = fdk_wayland_activation_available,
     .window_set_idle_inhibit = fdk_wayland_window_set_idle_inhibit,
     .window_activate = fdk_wayland_window_activate,

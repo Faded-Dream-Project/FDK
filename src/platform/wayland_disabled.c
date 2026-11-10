@@ -46,3 +46,39 @@ int fdk_platform_wayland_display_present(void) {
      * path in select_and_connect(). */
     return 0;
 }
+
+
+/* P3: the add-on raw-event surface — Wayland-only by definition. */
+fdk_wl_queue *fdk_wl_queue_create(fdk_context *ctx, const char *name) {
+    (void)ctx;
+    (void)name;
+    return NULL;
+}
+
+void fdk_wl_queue_destroy(fdk_wl_queue *queue) {
+    (void)queue;
+}
+
+void *fdk_wl_queue_registry(fdk_wl_queue *queue) {
+    (void)queue;
+    return NULL;
+}
+
+void *fdk_wl_raw_bind(fdk_wl_queue *queue, fdk_u32 name,
+                      const void *wl_interface, fdk_u32 version) {
+    (void)queue;
+    (void)name;
+    (void)wl_interface;
+    (void)version;
+    return NULL;
+}
+
+int fdk_wl_queue_dispatch(fdk_wl_queue *queue) {
+    (void)queue;
+    return 0;
+}
+
+void fdk_wl_queue_attach(fdk_wl_queue *queue, int on_pump) {
+    (void)queue;
+    (void)on_pump;
+}

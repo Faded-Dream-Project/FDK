@@ -348,6 +348,10 @@ typedef struct fdk_platform_ops {
     int (*session_lock_available)(fdk_platform_connection *conn);
     int (*input_method_available)(fdk_platform_connection *conn);
     int (*virtual_keyboard_available)(fdk_platform_connection *conn);
+    /* P3: the add-on raw-event surface — only CREATE rides the ops
+     * (it needs the conn); the rest goes through the queue's vtable. */
+    void *(*wl_queue_create)(fdk_platform_connection *conn,
+                             const char *name);
     int (*window_activation_available)(fdk_platform_connection *conn);
     fdk_result (*window_set_idle_inhibit)(fdk_platform_window *pwindow,
                                           int inhibit);

@@ -188,6 +188,14 @@ int fdk_ext_has_capability(fdk_context *ctx, fdk_ext_capability cap) {
         case FDK_EXT_CAP_VIRTUAL_KEYBOARD:
             return ops->virtual_keyboard_available != NULL &&
                    ops->virtual_keyboard_available(ctx->conn);
+        case FDK_EXT_CAP_WL_RAW_EVENTS:
+            /* The raw-event surface: Wayland only. The create entry
+             * point is defined in the wayland layer itself (the
+             * queue's type is incomplete outside it); wayland_disabled
+             * builds provide the stubs, so this cap is simply whether
+             * the backend IS Wayland. */
+            return fdk_ext_active_backend(ctx) == FDK_EXT_BACKEND_WAYLAND &&
+                   ops->wl_queue_create != NULL;
         case FDK_EXT_CAP_RENDER_CPU:
             /* The software rasterizer exists in every mode; in GPU mode
              * its pixels ride the lane's texture upload. */
@@ -1025,4 +1033,18 @@ fdk_result fdk__ext_layer_set(fdk_ext_surface *surface, int what, fdk_i32 a,
  * this TU. */
 fdk_window *fdk__ext_surface_window(fdk_ext_surface *surface) {
     return surface != NULL ? surface->window : NULL;
+}
+
+
+
+
+/* The create entry routes through the ops (ctx->conn is complete
+ * here); the rest of the fdk_wl_* surface is defined in the wayland
+ * layer where the queue's type is complete. */
+fdk_wl_queue *fdk_wl_queue_create(fdk_context *ctx, const char *name) {
+    if (ctx == NULL || ctx->ops == NULL ||
+        ctx->ops->wl_queue_create == NULL) {
+        return NULL;
+    }
+    return (fdk_wl_queue *)ctx->ops->wl_queue_create(ctx->conn, name);
 }

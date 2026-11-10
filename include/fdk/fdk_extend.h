@@ -183,6 +183,8 @@ typedef enum fdk_ext_capability {
     FDK_EXT_CAP_SESSION_LOCK = 14,  /* ext_session_lock_manager_v1   */
     FDK_EXT_CAP_INPUT_METHOD_V2 = 15, /* zwp_input_method_manager_v2 */
     FDK_EXT_CAP_VIRTUAL_KEYBOARD = 16, /* zwp_virtual_keyboard_mgr_v1 */
+    FDK_EXT_CAP_WL_RAW_EVENTS = 17,  /* the add-on raw-event surface
+                                       * (own event queues + raw binds) */
 } fdk_ext_capability;
 
 /* Returns nonzero when `ctx`'s connected backend has `cap`.
@@ -904,6 +906,35 @@ void fdk_ext_loop_remove_fd(fdk_ext_fd_source *source);
 
 /* The watched fd (diagnostics; -1 on a NULL source). */
 int fdk_ext_fd_source_fd(const fdk_ext_fd_source *source);
+
+
+
+/* ---- P3: the Wayland add-on raw-event surface ---------------------------
+ *
+ * An add-on that wants a protocol FDK does not model creates its OWN
+ * event queue (fdk_wl_queue_create), reads the advertised globals
+ * through the private registry on that queue (fdk_wl_queue_registry —
+ * set your own wl_registry listener; it fires on YOUR queue), binds
+ * them by NAME with fdk_wl_raw_bind, sets listeners on the returned
+ * raw proxies, and either dispatches the queue itself
+ * (fdk_wl_queue_dispatch) or attaches it to FDK's pump
+ * (fdk_wl_queue_attach) — the pump then gives the queue one
+ * non-blocking dispatch pass after the main round each frame.
+ * Dispatch goes only to the add-on's listeners; FDK's handlers are
+ * never involved. Wayland-only: create answers NULL (and the rest
+ * are no-ops) wherever FDK_EXT_CAP_WL_RAW_EVENTS is false. */
+typedef struct fdk_wl_queue fdk_wl_queue;
+
+fdk_wl_queue *fdk_wl_queue_create(fdk_context *ctx, const char *name);
+void fdk_wl_queue_destroy(fdk_wl_queue *queue);
+/* The add-on's private wl_registry proxy (lives on the queue). */
+void *fdk_wl_queue_registry(fdk_wl_queue *queue);
+/* Binds the advertised global `name` (from the add-on's own listener)
+ * onto the queue; returns the raw wl_proxy* the add-on owns. */
+void *fdk_wl_raw_bind(fdk_wl_queue *queue, fdk_u32 name,
+                      const void *wl_interface, fdk_u32 version);
+int fdk_wl_queue_dispatch(fdk_wl_queue *queue);
+void fdk_wl_queue_attach(fdk_wl_queue *queue, int on_pump);
 
 #ifdef __cplusplus
 }

@@ -114,6 +114,8 @@ struct fdk_platform_connection {
     struct ext_session_lock_manager_v1 *session_lock_manager;
     struct zwp_input_method_manager_v2 *input_method_manager;
     struct zwp_virtual_keyboard_manager_v1 *virtual_keyboard_manager;
+    /* P3: the add-on-owned event queues (wayland_addon.c). */
+    struct fdk_wl_queue *addon_queues;
     char *launch_token;
 
     /* text-input-v3 (1.0.0, M-1): the OPTIONAL IME manager + the
@@ -1234,3 +1236,34 @@ fdk_result fdk_wayland_clipboard_set_uris(fdk_platform_connection *conn,
                                           const char *const *uris,
                                           size_t count);
 char *fdk_wayland_clipboard_get_uris(fdk_platform_connection *conn);
+
+
+/* wayland_addon.c — the fdk_wl_queue impl (the public wrappers in
+ * extend.c call through the vtable the impl sets at create time). */
+struct fdk_wl_queue {
+    struct wl_event_queue *q;
+    struct wl_display *wrapped;
+    struct wl_display *real;
+    struct wl_registry *registry;
+    struct fdk_wl_queue *next;
+    int on_pump;
+    fdk_platform_connection *conn;
+    /* impl vtable (wayland_addon.c) */
+    void (*do_destroy)(struct fdk_wl_queue *);
+    void *(*get_registry)(struct fdk_wl_queue *);
+    void *(*do_raw_bind)(struct fdk_wl_queue *, fdk_u32, const void *,
+                         fdk_u32);
+    int (*do_dispatch)(struct fdk_wl_queue *);
+    void (*do_attach)(struct fdk_wl_queue *, int);
+};
+
+/* ---- wayland_addon.c: the add-on raw-event surface (P3) ---------------- */
+void *fdk_wayland_queue_create(fdk_platform_connection *conn,
+                               const char *name);
+void fdk_wayland_queue_destroy_pub(struct fdk_wl_queue *q);
+void *fdk_wayland_queue_registry_pub(struct fdk_wl_queue *q);
+void *fdk_wayland_raw_bind_pub(struct fdk_wl_queue *q, fdk_u32 name,
+                               const void *iface, fdk_u32 version);
+int fdk_wayland_queue_dispatch_pub(struct fdk_wl_queue *q);
+void fdk_wayland_queue_attach_pub(struct fdk_wl_queue *q, int on_pump);
+void fdk_wayland_addon_queues_dispatch(fdk_platform_connection *conn);
