@@ -1,4 +1,21 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The hardware test kit: docs/HARDWARE-TESTING.md + tests/run-hardware.sh
+
+- One POSIX-sh script, no arguments, no network, no token: builds the
+  lib + test_gpu_paint + test_dmabuf, prints the GL facts (glxinfo/
+  eglinfo when present, an honest ABSENT otherwise), captures the
+  CPU-vs-GPU interior/edge split table, builds and runs the GL canvas
+  example, and runs the dmabuf round-trip ONLY on a readable
+  /dev/dri/renderD128 — a loud SKIP otherwise, never a fake PASS.
+  Writes ONE fdk-hardware-report.txt to paste back.
+- Proven live in the sandbox (Xvfb, software GL): make OK, the
+  interior/edge table captured (interior mean ~0, the edge stats
+  sane), gl-canvas rc=0, the dmabuf SKIP recorded. The dry run
+  caught and fixed two script bugs (the make step must build the
+  test binaries; the example must config-match the lib's sanitizers —
+  the same lesson the CI popup step taught).
+- docs/HARDWARE-TESTING.md documents what it runs, the prerequisites,
+  and what to paste back.
 ## Release-candidate dry run recorded (no tag, no version bump)
 
 The six-step sign-off checklist (docs/PRE-1.0-AUDIT.md §6) was run
