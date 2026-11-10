@@ -97,7 +97,10 @@ static void layer_surface_configure(void *data,
      * handshake; FDK acks HERE so the add-on's next present carries a
      * legal state (the same discipline the toplevel path follows). */
     zwlr_layer_surface_v1_ack_configure(role, serial);
-    if (width > 0 && height > 0 && width <= 0x7fffffff &&
+    /* A layer surface may be sized in only ONE dimension (the other
+     * comes from its anchors and arrives as 0) — notify whenever the
+     * configure carries at least one real dimension. */
+    if ((width > 0 || height > 0) && width <= 0x7fffffff &&
         height <= 0x7fffffff) {
         fdk_ext_surface_notify_configure(st->surface, (fdk_i32)width,
                                          (fdk_i32)height);
@@ -182,6 +185,12 @@ static fdk_result layer_kind_create(fdk_ext_surface *surface,
     st->output = output;
     zwlr_layer_surface_v1_add_listener(role, &layer_surface_listener, st);
     layer_state_add(st);
+    /* Commit the initial role state: without this commit the
+     * compositor never sends the first configure (zwlr-layer-shell
+     * hands out configures only after a wl_surface commit) and the
+     * add-on's configure callback never fires — the layer-shell
+     * example hung at 0 configured frames. */
+    wl_surface_commit(wls);
 
     out_native->backend = FDK_EXT_BACKEND_WAYLAND;
     out_native->pointer = wls;
@@ -247,6 +256,7 @@ fdk_result fdk_wayland_layer_surface_create(
 /* The setters route through ONE op with a selector. */
 enum {
     FDK_WL_LAYER_SET_LAYER = 1,
+    FDK_WL_LAYER_SET_SIZE = 6, /* the extend.c setter's `what` code */
     FDK_WL_LAYER_SET_ANCHOR = 2,
     FDK_WL_LAYER_SET_EXCLUSIVE = 3,
     FDK_WL_LAYER_SET_MARGINS = 4,
@@ -267,19 +277,29 @@ fdk_result fdk_wayland_layer_surface_set(fdk_platform_window *pwindow,
     switch (what) {
         case FDK_WL_LAYER_SET_LAYER:
             zwlr_layer_surface_v1_set_layer(st->role, (uint32_t)a);
+            wl_surface_commit(st->wls);
             return FDK_OK;
         case FDK_WL_LAYER_SET_ANCHOR:
             zwlr_layer_surface_v1_set_anchor(st->role, (uint32_t)a);
+            wl_surface_commit(st->wls);
             return FDK_OK;
         case FDK_WL_LAYER_SET_EXCLUSIVE:
             zwlr_layer_surface_v1_set_exclusive_zone(st->role, a);
+            wl_surface_commit(st->wls);
             return FDK_OK;
         case FDK_WL_LAYER_SET_MARGINS:
             zwlr_layer_surface_v1_set_margin(st->role, a, b, c, d);
+            wl_surface_commit(st->wls);
             return FDK_OK;
         case FDK_WL_LAYER_SET_KEYBOARD:
             zwlr_layer_surface_v1_set_keyboard_interactivity(st->role,
                                                              (uint32_t)a);
+            wl_surface_commit(st->wls);
+            return FDK_OK;
+        case FDK_WL_LAYER_SET_SIZE:
+            zwlr_layer_surface_v1_set_size(st->role, (uint32_t)a,
+                                           (uint32_t)b);
+            wl_surface_commit(st->wls);
             return FDK_OK;
         default:
             return FDK_ERR_INVALID_ARGUMENT;

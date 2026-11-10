@@ -773,6 +773,11 @@ fdk_result fdk_ext_layer_surface_set_anchor(fdk_ext_surface *surface,
                                             fdk_u32 anchor);
 fdk_result fdk_ext_layer_surface_set_exclusive_zone(fdk_ext_surface *surface,
                                                     fdk_i32 zone);
+/* The client-chosen dimensions (0 = the anchored dimension is the
+ * compositor's). Applies with the role state; call before the first
+ * configure like the other adjustments. */
+fdk_result fdk_ext_layer_surface_set_size(fdk_ext_surface *surface,
+                                          fdk_i32 width, fdk_i32 height);
 fdk_result fdk_ext_layer_surface_set_margins(fdk_ext_surface *surface,
                                              fdk_i32 top, fdk_i32 bottom,
                                              fdk_i32 left, fdk_i32 right);

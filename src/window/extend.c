@@ -968,6 +968,13 @@ fdk_result fdk_ext_layer_surface_set_keyboard(fdk_ext_surface *surface,
     return fdk__ext_layer_set(surface, 5, mode, 0, 0, 0);
 }
 
+/* The client-chosen dimensions of the layer surface (0 = the anchored
+ * dimension is the compositor's). Applies with the role state. */
+fdk_result fdk_ext_layer_surface_set_size(fdk_ext_surface *surface,
+                                          fdk_i32 width, fdk_i32 height) {
+    return fdk__ext_layer_set(surface, 6, width, height, 0, 0);
+}
+
 /* The shared setter body: validate the surface is live, then ride the
  * platform op (NULL on X11 / wayland-less builds = UNSUPPORTED). */
 fdk_result fdk__ext_layer_set(fdk_ext_surface *surface, int what, fdk_i32 a,

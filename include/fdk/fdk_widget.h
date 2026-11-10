@@ -277,7 +277,7 @@ typedef struct fdk_widget_class {
  * needs, with the library owning where its own layout ends:
  *
  *     typedef struct {
- *         fdk_widget base;            (first member, always)
+ *         fdk_widget_embed base;      (first member, always)
  *         int     presses;
  *         char   *label_copy;         (owned)
  *     } my_button;
@@ -296,6 +296,25 @@ typedef struct fdk_widget_class {
  * accessor absorbs the move, the casts do not.
  */
 void *fdk_widget_instance(fdk_widget *widget);
+
+/* The embeddable base for subclasses. `fdk_widget` itself stays
+ * opaque (field access goes through the API); this type is the
+ * GUARANTEED-LAYOUT-COMPATIBLE storage a subclass embeds as its first
+ * member — sizeof(fdk_widget_embed) == sizeof(fdk_widget), enforced
+ * by a static assert inside the library, so the subclass overlays the
+ * widget's own fields exactly as the class contract requires:
+ *
+ *     typedef struct {
+ *         fdk_widget_embed base;      (first member, always)
+ *         int     presses;
+ *     } my_button;
+ *
+ * The constant grows with the library's widget struct; a mismatch is
+ * a build failure inside FDK, never a silent ABI break for add-ons. */
+#define FDK_WIDGET_EMBED_U64 61u /* sizeof(struct fdk_widget) == 488 */
+typedef struct fdk_widget_embed {
+    fdk_u64 opaque_[FDK_WIDGET_EMBED_U64];
+} fdk_widget_embed;
 
 /* The typed-checked convenience: compiles to the same call, the cast
  * spelled once. No runtime type tag (the class pointer IS the type in

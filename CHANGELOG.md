@@ -1,4 +1,36 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## P5(a)(b)(c)(e): the proof examples — and the walls they tore down
+
+examples/ (built against an INSTALLED FDK, no internal include paths,
+public API only; make test-examples runs (b)(c)(e) under Xvfb,
+test-examples-wayland runs (a) on a layer-shell compositor):
+
+- (a) panel-layer-shell.c — a bottom panel with an exclusive zone.
+  (b) gl-canvas.c — 5 GPU frames presented. (c) custom-widget.c — a
+  subclass with per-instance fields painted. (e) worker-post.c — 6/6
+  worker results delivered on the UI thread.
+
+WALLS FOUND (each a bug, each fixed):
+
+1. The widget-subclass contract requires embedding fdk_widget first,
+   but the type was opaque in the public header — the header's own
+   documented example could not compile. Fixed with
+   `fdk_widget_embed` (a sized opaque embed, FDK_WIDGET_EMBED_U64,
+   static-asserted in the library against sizeof(struct fdk_widget));
+   field access stays API-only.
+2. The layer-shell role state was set but never committed: the
+   compositor never sent the first configure (wlr-layer-shell hands
+   out configures only after a wl_surface commit). Creation and every
+   setter now commit.
+3. No way to give a layer surface its client-chosen size: a
+   bottom-anchored panel configured at 0x0 and FDK's configure gate
+   dropped it. New public fdk_ext_layer_surface_set_size(w, h)
+   (routed through the layer setter op with its own commit), and the
+   configure notify gate now accepts one-sided sizes (the anchored
+   dimension arrives as 0).
+
+The debug install is sanitizer-instrumented; example runs preload the
+ASan runtime (recorded in the targets).
 ## P1.2: explicit texture filter — fdk_texture_draw_ex
 
 - NEW public API (fdk_surface.h): `fdk_texture_filter`

@@ -315,6 +315,10 @@ struct fdk_widget {
     void *window_owner;
 };
 
+/* the public subclass embed overlays the real widget exactly */
+_Static_assert(sizeof(struct fdk_widget) == sizeof(fdk_widget_embed),
+               "FDK_WIDGET_EMBED_U64 drifted from sizeof(struct fdk_widget)");
+
 /* Marks every live root's full bounds damaged, so each tree fully
  * repaints on its next paint walk. Used by the theme engine on a
  * default-theme switch (src/theme/theme.c). */

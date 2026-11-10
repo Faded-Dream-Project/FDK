@@ -905,3 +905,34 @@ test-dpi-wayland: $(DPI_BIN)
 	WAYLAND_DISPLAY=$$WAYLAND_DISPLAY FDK_GL_FORCE=1 \
 	LSAN_OPTIONS=suppressions=$(CURDIR)/tests/data/lsan-gl.supp \
 	"$(DPI_BIN)" wayland 2
+
+# P5 proof examples — built against an INSTALLED FDK (make install
+# first; no internal include paths), public API only. (a) needs a
+# layer-shell compositor (the sway rig); (b)(c)(e) run under Xvfb.
+EX_PREFIX ?= /tmp/fdk-inst
+
+$(BUILD_DIR)/examples/%: examples/%.c | $(EX_PREFIX)/lib/libfdk.a
+	@mkdir -p $(dir $@)
+	$(CC) -I$(EX_PREFIX)/include $< -L$(EX_PREFIX)/lib -lfdk -lm -ldl -lpthread -o $@
+
+$(EX_PREFIX)/lib/libfdk.a:
+	make install PREFIX=$(EX_PREFIX)
+
+.PHONY: test-examples
+test-examples: $(BUILD_DIR)/examples/gl-canvas $(BUILD_DIR)/examples/custom-widget $(BUILD_DIR)/examples/worker-post $(BUILD_DIR)/examples/panel-layer-shell
+	@set -e; N=$$((90 + RANDOM % 400)); rm -f /tmp/.X11-unix/X$$N; \
+	Xvfb :$$N -screen 0 800x600x24 >/dev/null 2>&1 & XP=$$!; sleep 1; \
+	LD_LIBRARY_PATH=$(EX_PREFIX)/lib DISPLAY=:$$N \
+	ASAN_OPTIONS=detect_leaks=0 $(BUILD_DIR)/examples/gl-canvas; \
+	LD_LIBRARY_PATH=$(EX_PREFIX)/lib DISPLAY=:$$N \
+	ASAN_OPTIONS=detect_leaks=0 $(BUILD_DIR)/examples/custom-widget; \
+	LD_LIBRARY_PATH=$(EX_PREFIX)/lib DISPLAY=:$$N \
+	ASAN_OPTIONS=detect_leaks=0 $(BUILD_DIR)/examples/worker-post; \
+	kill $$XP 2>/dev/null; \
+	echo "examples (a) runs under a layer-shell compositor: see test-examples-wayland"
+
+.PHONY: test-examples-wayland
+test-examples-wayland: $(BUILD_DIR)/examples/panel-layer-shell
+	@if [ -z "$$WAYLAND_DISPLAY" ]; then echo "needs a compositor"; exit 1; fi
+	LD_LIBRARY_PATH=$(EX_PREFIX)/lib WAYLAND_DISPLAY=$$WAYLAND_DISPLAY \
+	ASAN_OPTIONS=detect_leaks=0 $(BUILD_DIR)/examples/panel-layer-shell
