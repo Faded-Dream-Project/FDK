@@ -2,15 +2,16 @@
 # lane's two libwayland-client-internal allocations (CI catch,
 # 2026-11-10; refined 2026-11-11).
 #
-# ROLE: documentation + a clang-LSan option file. CI consumes NEITHER:
-# the shutdown-leak fixes (the five registry manager proxies, the
-# test's discarded queue) made both sway targets leak-clean under
-# plain detection, and gcc-14's libasan parser cannot consume
-# suppression files reliably (the same valid file flips between
-# parse-ok and a fatal parse-error). Leak detection stays fully ON in
-# CI; this file names the two allocations so the pattern is on record
-# for any run using clang's sanitizer runtime:
+# ROLE: the CLANG-LSan option file for CI's sway lane. gcc-14's
+# libasan parser cannot consume suppression files reliably (the same
+# valid file flips between parse-ok and a fatal parse-error; the
+# message is a non-fatal warning on some binaries and fatal on
+# others — non-deterministic), so the sway lane builds its two tests
+# with CLANG in CI and consumes this file there:
 #   ASAN_OPTIONS=detect_leaks=1:suppressions=tests/lsan-wayland.supp
+# Leak detection stays fully ON on BOTH lanes: the gcc lane runs
+# unsuppressed (the suite is leak-clean now), the clang lane runs
+# with exactly these two documented entries and nothing else.
 #
 # WHY THESE TWO
 #
@@ -41,5 +42,9 @@
 #   - the 2026-11-11 audit fixed the last real leaks (five registry
 #     manager proxies in the connection shutdown, one discarded test
 #     queue in test_matrix.c).
-leak:wl_proxy_marshal_array_flags
-leak:wl_proxy_create_wrapper
+# The wildcard form is deliberate: compiler-rt's matcher treats a
+# pattern with '*' as a template match against the frame name, which
+# is the portable shape across clang versions; a bare name requires an
+# exact frame match that link-order-dependent symbolization breaks.
+leak:*wl_proxy_marshal_array_flags*
+leak:*wl_proxy_create_wrapper*

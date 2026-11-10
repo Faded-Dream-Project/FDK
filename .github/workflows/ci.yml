@@ -167,17 +167,26 @@ jobs:
             ls "$XDG_RUNTIME_DIR" | grep -q '^wayland-' && break
             sleep 0.5
           done
-          # Leak detection fully ON — no blanket detect_leaks=0. The
-          # shutdown-leak fixes (the five manager proxies, the test's
-          # queue) made both targets leak-clean under plain
-          # detection. tests/lsan-wayland.supp documents the two
-          # libwayland-internal 1.22 allocations for clang-LSan runs;
-          # gcc-14's runtime here cannot consume suppression files
-          # reliably (verified: the same valid file flips between
-          # parse-ok and fatal parse-error), so CI relies on the
-          # actual fixes, not on suppression.
+          # Leak detection fully ON on BOTH lanes — no blanket
+          # detect_leaks=0.
+          # Lane 1 (gcc): unsuppressed — the suite is leak-clean.
+          # Lane 2 (clang): the same two targets rebuilt with clang
+          # and run with tests/lsan-wayland.supp naming the two
+          # libwayland-1.22-internal allocations. gcc-14's libasan
+          # parser cannot consume suppression files reliably (the
+          # same valid file flips between parse-ok and a fatal
+          # parse-error), which is why lane 2 exists; clang's
+          # compiler-rt parser is the reference implementation.
           WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR" | grep -o 'wayland-[0-9]*' | head -1) \
             make test-p3-wayland test-matrix-wayland
+          make clean
+          make CC=clang -j4 build/tests/test_p3_protocols build/tests/test_matrix
+          WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR" | grep -o 'wayland-[0-9]*' | head -1) \
+            ASAN_OPTIONS=detect_leaks=1:suppressions=$GITHUB_WORKSPACE/tests/lsan-wayland.supp \
+            ./build/tests/test_p3_protocols wayland
+          WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR" | grep -o 'wayland-[0-9]*' | head -1) \
+            ASAN_OPTIONS=detect_leaks=1:suppressions=$GITHUB_WORKSPACE/tests/lsan-wayland.supp \
+            ./build/tests/test_matrix wayland
           kill $SWAY_PID 2>/dev/null || true
 
       - name: Optimized build (-O2) + examples + export surface

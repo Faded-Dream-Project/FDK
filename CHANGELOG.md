@@ -1,4 +1,26 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The LSan suppression: the sway lane's second, clang-based leg
+
+- The gcc-14 libasan parser verdict, with evidence: the same valid
+  suppression file flips between parse-ok and "failed to parse
+  suppressions" — and the message itself is non-deterministic in
+  severity (a non-fatal warning on some binaries, a startup abort on
+  others; even a non-instrumented /bin/echo with the runtime
+  LD_PRELOADed reproduces the warning). File encoding, trailing
+  newline and entry syntax were ruled out one by one: ASCII-only, a
+  trailing newline, and entries that clang's reference parser
+  accepts. The parser is the bug.
+- The fix is the brief's alternative: CI's sway lane now runs BOTH
+  legs — the gcc leg unsuppressed (the suite is leak-clean; detection
+  fully ON) and a clang-rebuilt leg of the same two tests consuming
+  tests/lsan-wayland.supp with
+  ASAN_OPTIONS=detect_leaks=1:suppressions=... (compiler-rt's parser
+  is the reference implementation; the file's two entries moved to
+  the wildcard form — *wl_proxy_marshal_array_flags*,
+  *wl_proxy_create_wrapper* — the portable template shape, and the
+  file's role note documents all of it). Leak detection stays ON
+  everywhere; the file names two libwayland-1.22-internal
+  allocations and nothing else.
 ## The virtual keyboard delivers — the real assertion runs and passes
 
 - The P3 test now asserts DELIVERY, not just clean emission: the
