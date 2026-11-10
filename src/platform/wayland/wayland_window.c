@@ -1646,6 +1646,15 @@ static fdk_result commit_render_pending(fdk_platform_window *pwindow,
  * and the engine's pwindow registry resolves it. */
 fdk_result fdk_wayland_window_gpu_flush(fdk_platform_window *pwindow,
                                         void *surface) {
+    if (pwindow != NULL && !pwindow->configured) {
+        /* The xdg-shell gate applies to this shim exactly as it does
+         * to the classic present path (the shim BYPASSES that path's
+         * configured check — the UNCONFIGURED_BUFFER protocol error
+         * the wl GPU smoke caught). Defer; the configure handler's
+         * lane_frame_deferred flush commits it. */
+        pwindow->lane_frame_deferred = 1;
+        return FDK_OK;
+    }
     if (pwindow != NULL && pwindow->gl_frame_fn != NULL &&
         pwindow->egl_win != NULL) {
         /* Present arbitration: the add-on's GL frame callback owns

@@ -325,14 +325,6 @@ int main(void) {
     }
     CHECK(1, "GPU window created (lane + engine up)");
     fdk_window_show(wgpu);
-    /* Pump BEFORE the first present: presenting while unconfigured
-     * (the lane_frame_deferred path) currently trips the compositor's
-     * xdg_surface UNCONFIGURED_BUFFER protocol error — a found bug,
-     * recorded for the deferred-flush fix. Pumping first exercises the
-     * configured present path, which is what this smoke proves. */
-    for (int i = 0; i < 3; i++) {
-        fdk_pump_events(ctx, 16);
-    }
 
     fdk_surface *sgpu = NULL;
     fdk_window_get_surface(wgpu, &sgpu);
