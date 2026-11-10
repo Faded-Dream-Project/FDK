@@ -149,3 +149,17 @@ compiled against v1 links and runs unchanged against a v2 library
 function compiles against the v2 header and refuses to run against
 a v1 library at its own startup check. This is the version bump's
 documented first use.
+
+
+## Pre-release posture (the 1.0 fold, 2026-11)
+
+Until the 1.0 tag the stability promise is OFF: public headers may
+change freely, extension API folds into the current version
+(fdk_extend.h v3) instead of spawning v4, and renames/removals are
+in scope when they buy a better shape. The DISCIPLINE stays binding
+now because it is what makes the freeze real at 1.0: opaque core
+types, the version-scripted export map (stable + FDK_UNSTABLE
+nodes), input-struct append-only growth with recorded sizes in
+abi_check.c, honest capability flags, and FDK_ERR_UNSUPPORTED where
+support would be faked. The freeze happens AT 1.0 — the rules in
+this document then bind as written.

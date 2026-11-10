@@ -474,9 +474,9 @@ $(STATIC_LIB): $(LIB_OBJS)
 	@rm -f $@
 	$(AR) rcs $@ $^
 
-$(SHARED_LIB): $(LIB_OBJS_PIC) $(EXPORT_MAP) $(EXPORT_MAP).unstable
+$(SHARED_LIB): $(LIB_OBJS_PIC) $(EXPORT_MAP)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -fPIC -shared -Wl,-soname,$(FDK_SONAME) -Wl,--version-script=$(EXPORT_MAP) -Wl,--version-script=$(EXPORT_MAP).unstable -o $@ $(LIB_OBJS_PIC) $(LDFLAGS)
+	$(CC) $(CFLAGS) -fPIC -shared -Wl,-soname,$(FDK_SONAME) -Wl,--version-script=$(EXPORT_MAP) -o $@ $(LIB_OBJS_PIC) $(LDFLAGS)
 	@# the SONAME link in-tree: anything linking -lfdk needs
 	# libfdk.so.<major> at RUN time, not just at install time
 	# (any dlopen consumer resolves the same libfdk.so.1 —
@@ -489,26 +489,28 @@ $(SHARED_LIB): $(LIB_OBJS_PIC) $(EXPORT_MAP) $(EXPORT_MAP).unstable
 # it; depends on the headers so adding/removing a public function does
 # too. nm/sed/sort/uniq/tr are binutils+coreutils — no build-time
 # dependency beyond what the build already uses.
-$(EXPORT_MAP): $(STATIC_LIB) $(wildcard include/fdk/*.h) Makefile
+$(EXPORT_MAP): $(STATIC_LIB) $(wildcard include/fdk/*.h) $(wildcard include/fdk/ext/*.h) Makefile
 	@echo "== generating $(EXPORT_MAP) (public API only; internals stay local) =="
+	@# One script, two named nodes (the standard multi-node layout):
+	@# FDK_1.0 for the stable API, FDK_UNSTABLE for the explicitly
+	@# unstable tier (include/fdk/unstable.h — "may break any
+	@# release"); verify-exports checks both tiers.
 	@printf 'FDK_1.0 {\n  global:\n' > $@
 	@{ nm --defined-only $(STATIC_LIB) \
 	           | awk '$$2 ~ /^[TDBRW]$$/ { print $$3 }' | sort -u; \
-	   grep -hoE '\bfdk_[a-z0-9_]+[[:space:]]*\(' include/fdk/*.h \
+	   grep -hoE '\bfdk_[a-z0-9_]+[[:space:]]*\(' \
+	           include/fdk/*.h include/fdk/ext/*.h \
 	           | tr -d ' (' | sort -u; } \
 	  | sort | uniq -d | grep -v '^fdk_unstable_' \
-	  | sed 's/^/      /; s/$$/;/' >> $@
-	@printf '  };\n  local:\n    *;\n};\n' >> $@
-	@# The EXPLICITLY UNSTABLE tier (include/fdk/unstable.h) gets its
-	@# own version node: same linkage rules, a separate compatibility
-	@# promise — "may break any release". verify-exports checks it.
-	@printf 'FDK_UNSTABLE {\n  global:\n' > $(EXPORT_MAP).unstable
+	  | sed 's/^/  /; s/$$/;/' >> $@
+	@printf '  local:\n    *;\n};\n' >> $@
+	@printf 'FDK_UNSTABLE {\n  global:\n' >> $@
 	@{ nm --defined-only $(STATIC_LIB) \
 	           | awk '$$2 ~ /^[TDBRW]$$/ { print $$3 }' | sort -u; \
 	   grep -hoE '\bfdk_unstable_[a-z0-9_]+[[:space:]]*\(' \
 	           include/fdk/unstable.h | tr -d ' (' | sort -u; } \
-	  | sort | uniq -d | sed 's/^/    /; s/$$/;/' >> $(EXPORT_MAP).unstable
-	@printf '};\n' >> $(EXPORT_MAP).unstable
+	  | sort | uniq -d | sed 's/^/  /; s/$$/;/' >> $@
+	@printf '};\n' >> $@
 
 # Belt-and-braces check for the one blind spot the map generator has
 # (a declaration whose name/paren wrapped across lines would be missed
@@ -521,7 +523,8 @@ $(EXPORT_MAP): $(STATIC_LIB) $(wildcard include/fdk/*.h) Makefile
 verify-exports: $(SHARED_LIB)
 	@echo "== verifying the shared library's exported surface =="
 	@exports=$$(nm -D --defined-only $(SHARED_LIB) \
-	           | awk '$$2 ~ /^[TDBRW]$$/ { print $$3 }' | sort -u); \
+	           | awk '$$2 ~ /^[TDBRW]$$/ { print $$3 }' \
+	           | sed 's/@@.*//' | sort -u); \
 	echo "exported symbols: $$(printf '%s\n' "$$exports" | wc -l)"; \
 	bad=$$(printf '%s\n' "$$exports" | grep -v '^fdk_' || true); \
 	if [ -n "$$bad" ]; then \
@@ -785,6 +788,8 @@ $(BUILD_DIR)/fdk.pc.prefix: FORCE
 install: all $(BUILD_DIR)/fdk.pc
 	install -d $(DESTDIR)$(INCDIR)/fdk
 	install -m 644 include/fdk/*.h $(DESTDIR)$(INCDIR)/fdk/
+	mkdir -p $(DESTDIR)$(INCDIR)/fdk/ext
+	install -m 644 include/fdk/ext/*.h $(DESTDIR)$(INCDIR)/fdk/ext/
 	install -d $(DESTDIR)$(LIBDIR)
 	install -m 644 $(STATIC_LIB) $(DESTDIR)$(LIBDIR)/
 # Versioned shared-library install (the soname scheme, active since

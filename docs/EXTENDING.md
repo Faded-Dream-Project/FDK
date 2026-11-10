@@ -335,6 +335,16 @@ if (fdk_ext_has_capability(ctx, FDK_EXT_CAP_EWMH_DOCK)) { ... }
 | `FDK_EXT_CAP_POPUP_GRAB` | yes | yes* | popups grab input + dismiss properly |
 | `FDK_EXT_CAP_EWMH_DOCK` | yes | no | dock hints settable by the add-on |
 | `FDK_EXT_CAP_FRAME_PACING` | yes | yes | `fdk_surface_frame_ready()` really paces (Wayland: frame callbacks; X11: interval floor + slot backpressure) |
+| `FDK_EXT_CAP_RENDER_CPU` | yes | yes | the software rasterizer exists for this context's mode |
+| `FDK_EXT_CAP_RENDER_HYBRID` | yes | yes | the classic path + optional lane are active (AUTO/HYBRID contexts) |
+| `FDK_EXT_CAP_RENDER_GPU` | yes* | yes* | the lane is REQUIRED for this context's windows (GPU mode active) |
+| `FDK_EXT_CAP_LAYER_SHELL` | no | yes* | a first-class zwlr_layer_shell_v1 role via `fdk_ext_layer_surface_create` |
+| `FDK_EXT_CAP_GL` | yes* | yes* | the GPU lane actually loaded — EGL/GLX programming rides the native accessors |
+
+\* honest conditionals: RENDER_GPU only when GPU mode is active (never
+"because a driver exists"); LAYER_SHELL only when the compositor offers
+the protocol; GL only when the lane actually initialized (software
+renderers refused).
 
 \* the Wayland caveat every toolkit documents: compositors may
 refuse a grab whose serial predates all input (the popup still
@@ -369,6 +379,17 @@ On Wayland, bind your own globals through your OWN
 roundtrip collects them; FDK's listeners are dispatch-safe so the
 trip is harmless at any time.
 
+For TYPED native access there are now the opt-in headers —
+`fdk/ext/wayland.h` and `fdk/ext/x11.h` (1.0.0): including one IS the
+opt-in (they pull the native headers themselves; the core public
+headers stay clean). Wayland: `wl_display`, `wl_registry`, the seats,
+`wl_data_device_manager`, FDK's `xkb_context`. X11: `Display*`, the
+window XID, EWMH dock helpers (`_NET_WM_WINDOW_TYPE`,
+`_NET_WM_STRUT_PARTIAL`). Coexistence rules are in the headers: bind
+your own globals (dispatch-safe), integrate your own event queue
+through the fd-source API, and treat raw input objects as read-only
+truth — synthetic input goes through FDK's public APIs.
+
 ## 11. The quality gates an add-on inherits
 
 - Threading: everything is UI-thread-only, like FDK (docs/threading.md).
@@ -387,28 +408,53 @@ trip is harmless at any time.
   only third-party allocations by module (the GL-driver pattern in
   tests/data/lsan-gl.supp).
 
-## 12. What FDK deliberately does NOT provide
+## 12. What FDK provides — and the honest residue
 
-- No GL/EGL surface access for extension surfaces — the extension
-  render path is the software `fdk_surface` path (identical pixels
-  everywhere, the hybrid renderer's CPU half).
-- No wl_seat / wl_data_device handles: input and clipboard flow
-  through FDK's translated events and the public clipboard API. An
-  add-on needing RAW seat access would need a new accessor — raise
-  it as an API proposal, never work around it.
-- X11 per-output geometry exists since 1.0.0 (M-6: RandR
-  enumeration, per-output anchoring; output events ride the
-  add-on's own connection). The X11 residue is the EWMH one:
-  _NET_WM_STRUT_PARTIAL is screen-global, so an exclusive-zone
-  layer on a SECONDARY monitor reserves space the way the running
-  WM interprets per-monitor struts (modern WMs clamp to the
-  window's monitor; simpler ones apply it screen-wide) — the
-  honest limit of the X11 protocol, documented rather than faked.
-- Layer stacking LEVELS are protocol truth on Wayland; on X11 they
-  ride whatever the WM gives dock-typed windows (document this
-  delta in your add-on instead of faking fidelity).
+The old "workarounds banned" list is gone; the model since the
+extension-API v3 folding is opt-in access + honest capability flags:
 
----
+- **Render modes** (fdk_core.h): AUTO / CPU / HYBRID / GPU, selected
+  by init option > `FDK_RENDER` env > AUTO, overridable per window
+  (`fdk_window_options.render_mode`), queried via
+  `fdk_context_render_mode` / `fdk_window_render_mode`. GPU mode
+  makes the presentation lane REQUIRED: creation fails
+  `FDK_ERR_UNSUPPORTED` when the GL stack cannot initialize and no
+  present-time downgrade exists — never a silent fallback. Software
+  pixels ride the lane's explicit texture upload.
+- **Widget subclassing** (fdk_widget.h): `struct_size`, `size`,
+  `instance_init`, `instance_finalize`, and
+  `fdk_widget_instance()`/`FDK_WIDGET_INSTANCE()` — per-instance
+  state in the single allocation, the embedding pattern public.
+- **Layer-shell panels** (fdk_extend.h):
+  `fdk_ext_layer_surface_create` + setters — the
+  zwlr_layer_shell_v1 role built BY FDK, configures bridged into the
+  ordinary ext-surface flow, `FDK_EXT_CAP_LAYER_SHELL` honest.
+- **Threading**: `fdk_post`/`fdk_post_delayed` (UI-thread delivery),
+  `fdk_ext_modal_run/quit/depth` (supported nested/modal loops —
+  menus, dropdowns, custom dialogs), fd sources for your own queues.
+- **GL**: `FDK_EXT_CAP_GL` when the lane loaded; EGL/GLX contexts on
+  the native-display accessor, surfaces on
+  `fdk_ext_surface_native()`. Per-surface present arbitration and
+  dmabuf/EGLImage import are the recorded next increments — the
+  current answer is FDK's present owns the buffers.
+- **The unstable tier** (include/fdk/unstable.h): deeper access
+  exported under the `FDK_UNSTABLE` version node — may change or
+  vanish any release; graduates move into the public headers.
+
+What still is NOT provided (raise an API proposal; never work
+around it):
+
+- First-class input-method (zwp_input_method_v2/v3), session-lock,
+  and xdg-activation host APIs — the protocols are generated and
+  text-input/foreign-toplevel already serve FDK's own IME and taskbar
+  substrate; hosting roles for add-ons is queued.
+- dmabuf/EGLImage import into FDK's compositing path (video
+  surfaces): capability-flagged UNSUPPORTED today.
+- X11 residues (protocol truth, documented rather than faked):
+  _NET_WM_STRUT_PARTIAL is screen-global — a secondary-monitor
+  panel reserves space the way the running WM interprets; layer
+  stacking LEVELS on X11 ride whatever the WM gives dock-typed
+  windows.
 
 ## 13. The D-Bus client — a first-class native subsystem (1.0.0)
 

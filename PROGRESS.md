@@ -38,6 +38,55 @@
 > checks on every push. See `docs/versioning.md` for the record.
 
 
+## Round 60-62 (2026-11-10) — the add-on surface: every limit the owner named, removed; bug-rate: 0 new library bugs
+
+The owner's work order: an add-on author should do what GTK/Qt plugin
+authors do — panels/docks, lock screens, IMs, GL canvases, video,
+per-instance widget state, background threads, ANY protocol. "Nothing
+may be a dead end." Eight work items, five commits:
+
+- **WI2 (5ebcae1→rewritten)**: widget subclassing public —
+  struct_size/instance_init/instance_finalize (renamed from destroy;
+  the compiler drove all ~35 in-tree tables; the undo-op/ext-ops
+  destroy members are distinct APIs and stayed) +
+  fdk_widget_instance()/FDK_WIDGET_INSTANCE. Self-caught: the first
+  accessor returned w+sizeof(fdk_widget) — double-applying the offset
+  the cast carries; ASan caught it before any test green. The
+  struct_size copy was also dropped for validation-only (a stack
+  kcopy dangles — w->klass must outlive create; static tables
+  zero-fill).
+- **WI1+WI5 (eed8bc3→rewritten)**: render modes AUTO/CPU/HYBRID/GPU
+  with the honest GPU contract (the lane is the PRESENTATION lane —
+  CPU rasterizes; GPU mode = lane REQUIRED, no SHM fallback, software
+  pixels ride the explicit texture upload; a true GPU paint engine is
+  the pre-1.0 gap, said plainly in the docs). Env FDK_RENDER, options,
+  queries, caps. Plus fdk_post_delayed + the modal loop trio.
+- **WI4 (2effb22→rewritten)**: the opt-in ext/ headers + the
+  first-class layer shell (xml fetched from the GitHub wlr-protocols
+  mirror after gitlab's bot wall; generated + checked in; bound
+  eagerly; the role bridges into the ext-surface machinery via an
+  internal kind — FDK implements itself through the same seam add-ons
+  use) + EWMH dock helpers.
+- **WI3+WI6**: FDK_EXT_CAP_GL + the lane's native display through the
+  ops (EGL types never leave wayland_egl.c — the accessor hands the
+  display out as void*); the unstable tier (unstable.h +
+  FDK_UNSTABLE node + verify split). The version-script journey:
+  anonymous+named nodes don't mix → both nodes named → local: must
+  live INSIDE a node → one script, two nodes (the standard layout);
+  nm -D now prints @@versions so verify-exports strips the suffix;
+  the ext/ headers joined the map grep and the install rule.
+- **The commit identity**: the owner flagged "GLM" (and the stray
+  sandbox "Z User") as fake contributors — filter-branch rewrote all
+  11 to the canonical Faded Dream Project identity (389/389 now).
+
+**Honest residue** (recorded, not faked): no GPU paint engine
+(presentation lane only); no dmabuf/EGLImage import; no per-surface
+present arbitration; IM/session-lock/activation hosting queued; the
+Wayland raw-event filter is documented-recipe (own queue + fd source)
+not a hook; X11 filter hook + OR windows queued. Example add-ons +
+CI builds: queued (the APIs land first; the examples exercise them
+next round).
+
 ## Round 59 (2026-11-09) — the release withdrawn: back to development; bug-rate: 0 new library bugs
 
 1. **The owner's call, their words**: "a few things i saw i dont

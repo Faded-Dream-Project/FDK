@@ -1,5 +1,29 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
 
+### Added — the add-on surface (extension API v3 fold, pre-release)
+
+- Render modes: `FDK_RENDER_AUTO/CPU/HYBRID/GPU` (init option >
+  `FDK_RENDER` env > AUTO; per-window override; `fdk_context_render_mode`/
+  `fdk_window_render_mode`; `FDK_EXT_CAP_RENDER_CPU/HYBRID/GPU`). GPU
+  mode requires the presentation lane: creation fails UNSUPPORTED
+  without GL, no present-time downgrade.
+- Widget subclassing goes public: `fdk_widget_class.struct_size`,
+  `instance_init`, `instance_finalize` (renamed from `destroy`),
+  `fdk_widget_instance()` + `FDK_WIDGET_INSTANCE()`.
+- First-class layer-shell: `fdk_ext_layer_surface_create` + setters,
+  `FDK_EXT_CAP_LAYER_SHELL` (zwlr_layer_shell_v1 generated + bound).
+- Opt-in backend headers `fdk/ext/wayland.h` and `fdk/ext/x11.h`
+  (typed wl_display/registry/seats/xkb; Display*/XID + EWMH dock
+  helpers) — the "workarounds banned" rule replaced by documented
+  native access.
+- Threading: `fdk_post_delayed`; nested/modal loops
+  `fdk_ext_modal_run/quit/depth` (quit-able from any thread).
+- GL access for add-ons: `FDK_EXT_CAP_GL` + the lane's native display
+  via the ops; recipe on the cap (EGL/GLX on the native accessors).
+- The explicitly unstable tier: `include/fdk/unstable.h`, the
+  `FDK_UNSTABLE` version node in the export map, verify-exports
+  split checks.
+
 The project owner set the first release to **1.0.0**
 (docs/versioning.md, 2026-11-08): the 1.0.0-rcN candidate numbering
 is retired, the pre-release suffix is dropped, and the cycle labels
