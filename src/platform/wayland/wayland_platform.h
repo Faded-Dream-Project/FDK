@@ -1229,7 +1229,6 @@ int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow);
  * frame regression observable — see wayland_window.c). */
 int fdk_wayland_window_ever_presented(fdk_platform_window *pwindow);
 
-#endif /* FDK_WAYLAND_PLATFORM_H */
 
 /* §23/B2a: the clipboard's text/uri-list surface. */
 fdk_result fdk_wayland_clipboard_set_uris(fdk_platform_connection *conn,
@@ -1293,3 +1292,5 @@ void *fdk_wayland_virtual_keyboard_create(fdk_platform_connection *conn,
                                           fdk_u32 size);
 void fdk_wayland_virtual_keyboard_key(void *kb, fdk_u32 time_ms,
                                       fdk_u32 key, fdk_u32 state);
+
+#endif /* FDK_WAYLAND_PLATFORM_H */

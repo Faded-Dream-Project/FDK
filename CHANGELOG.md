@@ -1,4 +1,15 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 3 (cont.): the wayland_platform.h guard bug — fixed
+
+- The ubuntu job's Wayland-integration step failed to COMPILE:
+  wayland_platform.h's #endif sat at line 1232 while declarations
+  (the clipboard URI seam, the fdk_wl_queue struct, the addon/lock/
+  keyboard decls — some mine this session, some older) sat stranded
+  AFTER it; the integration test includes the header twice (the D-4
+  and D-3 seams) and the second pass re-declared everything.
+- Fix: the guard now closes at the true end of the file. The
+  integration suite builds and self-skips cleanly without a
+  compositor (the documented runner behavior); battery green.
 ## Item 3: CI verification — the libwayland 1.22 wall, fixed
 
 - The Actions run for 178530e: build + test (ubuntu) FAILED at the
