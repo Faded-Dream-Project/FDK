@@ -61,11 +61,25 @@ The extension surface is deliberate and sufficient:
 - **Canvas**: custom drawing with the full surface primitive set;
 - **composition**: the catalog's 20+ widget types plus boxes/grids.
 
-If real applications hit the wall where per-instance fields in C
-require layout exposure, the answer is an allocation-callback
-pattern (the library allocates `klass->size` bytes the subclass
-requests), not layout exposure — recorded here so the decision has
-its paper trail.
+Per-instance fields in C WERE the wall, and the decision is
+recorded here. `klass->size` + `fdk_widget_instance()` alone cannot
+carry per-instance state: FDK allocates the widget itself and reads
+its own fields through that same pointer, so a subclass can only
+share the single allocation if its first member overlays the
+widget's own bytes — which requires a public, stable notion of "how
+big the widget part is". An offset scheme (the library allocates
+`klass->size`, the subclass's fields start past the widget, the
+instance accessor returns the offset pointer) would avoid embedding
+but breaks the shipped v3 contract ("the single allocation IS the
+subclass struct") and forces every subclass through a second
+pointer. The chosen shape is a BOUNDED embed: `fdk_widget_embed` is
+a fixed 1024-byte opaque block (FDK_WIDGET_EMBED_U64 = 128 u64);
+the library static-asserts `sizeof(struct fdk_widget) <= 1024`, so
+internals grow without any add-on-visible change. Layout exposure
+is thereby bounded, padded, and growth-safe; the allocation-callback
+pattern remains the documented fallback if the budget itself must
+ever be raised (that raise is a deliberate ABI event, not a silent
+one).
 
 ## What "ABI-safe" means for FDK
 

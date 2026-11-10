@@ -300,18 +300,23 @@ void *fdk_widget_instance(fdk_widget *widget);
 /* The embeddable base for subclasses. `fdk_widget` itself stays
  * opaque (field access goes through the API); this type is the
  * GUARANTEED-LAYOUT-COMPATIBLE storage a subclass embeds as its first
- * member — sizeof(fdk_widget_embed) == sizeof(fdk_widget), enforced
- * by a static assert inside the library, so the subclass overlays the
- * widget's own fields exactly as the class contract requires:
+ * member — the subclass overlays the widget's own fields exactly as
+ * the class contract requires:
  *
  *     typedef struct {
  *         fdk_widget_embed base;      (first member, always)
  *         int     presses;
  *     } my_button;
  *
- * The constant grows with the library's widget struct; a mismatch is
- * a build failure inside FDK, never a silent ABI break for add-ons. */
-#define FDK_WIDGET_EMBED_U64 61u /* sizeof(struct fdk_widget) == 488 */
+ * The embed is a FIXED, PADDED budget: 1024 bytes. The library
+ * static-asserts that its real widget struct FITS inside this budget
+ * (sizeof(fdk_widget) <= 1024), so internals can grow without
+ * changing the public contract — an add-on compiled against this
+ * header keeps working while the internal struct is anywhere under
+ * the budget. A build failure inside FDK (not in add-ons) is the
+ * signal that the budget itself must be raised, which is a
+ * deliberate, documented ABI event (see docs/abi-policy.md). */
+#define FDK_WIDGET_EMBED_U64 128u /* a fixed 1024-byte budget */
 typedef struct fdk_widget_embed {
     fdk_u64 opaque_[FDK_WIDGET_EMBED_U64];
 } fdk_widget_embed;

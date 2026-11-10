@@ -424,7 +424,11 @@ extension-API v3 folding is opt-in access + honest capability flags:
 - **Widget subclassing** (fdk_widget.h): `struct_size`, `size`,
   `instance_init`, `instance_finalize`, and
   `fdk_widget_instance()`/`FDK_WIDGET_INSTANCE()` — per-instance
-  state in the single allocation, the embedding pattern public.
+  state in the single allocation; the subclass embeds
+  `fdk_widget_embed` (a fixed, padded 1024-byte block,
+  FDK_WIDGET_EMBED_U64) as its first member. The internal widget
+  struct is static-asserted to fit the budget, so library growth
+  never changes the public embed.
 - **Layer-shell panels** (fdk_extend.h):
   `fdk_ext_layer_surface_create` + setters — the
   zwlr_layer_shell_v1 role built BY FDK, configures bridged into the

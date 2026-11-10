@@ -1,4 +1,20 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 1: the widget embed is a fixed padded budget
+
+- fdk_widget_embed / FDK_WIDGET_EMBED_U64 goes 61 u64 (488 bytes,
+  exact-size) -> 128 u64 (a fixed 1024-byte budget). The library
+  static-asserts sizeof(struct fdk_widget) <= the budget, so the
+  internal struct can grow add-on-invisibly; exhausting the budget is
+  a deliberate FDK-side build failure, not an add-on break.
+- Why klass->size + fdk_widget_instance was not enough (recorded in
+  docs/abi-policy.md): FDK allocates the widget and reads its own
+  fields through that same pointer, so per-instance fields can only
+  share the allocation by overlaying the widget's own bytes — which
+  requires a public size. The allocation-callback/offset scheme stays
+  the documented fallback.
+- docs/abi-policy.md and docs/EXTENDING.md updated; the example is
+  unchanged (it embeds fdk_widget_embed) and rebuilds against the
+  installed tree.
 ## P5(a)(b)(c)(e): the proof examples — and the walls they tore down
 
 examples/ (built against an INSTALLED FDK, no internal include paths,

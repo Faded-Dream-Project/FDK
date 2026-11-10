@@ -315,9 +315,12 @@ struct fdk_widget {
     void *window_owner;
 };
 
-/* the public subclass embed overlays the real widget exactly */
-_Static_assert(sizeof(struct fdk_widget) == sizeof(fdk_widget_embed),
-               "FDK_WIDGET_EMBED_U64 drifted from sizeof(struct fdk_widget)");
+/* The public subclass embed is a padded 1024-byte budget (see
+ * fdk_widget.h): the real widget must FIT inside it. Growing the
+ * internal struct stays an add-on-invisible change until the budget
+ * itself is exhausted. */
+_Static_assert(sizeof(struct fdk_widget) <= sizeof(fdk_widget_embed),
+               "struct fdk_widget outgrew the FDK_WIDGET_EMBED_U64 budget");
 
 /* Marks every live root's full bounds damaged, so each tree fully
  * repaints on its next paint walk. Used by the theme engine on a
