@@ -36,6 +36,7 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -1445,6 +1446,8 @@ static int run_fc_fontconfig_leg(void) {
     return 0;
 }
 
+static void test_p4_layout(void);
+
 int main(int argc, char **argv) {
     if (argc == 2 && argv != NULL &&
         strcmp(argv[1], "--fc-fontconfig-leg") == 0) {
@@ -1471,6 +1474,7 @@ int main(int argc, char **argv) {
     test_font_style();
     test_subpixel_positioning();
     test_system_font_discovery();
+    test_p4_layout(); /* last: rides the discovery fixture */
     /* Round 13: the shaped-string cache holds borrowed results past
      * the last use (g_sans intentionally lives to process exit);
      * drain it so the exit state is clean under LSan — the same
@@ -1478,4 +1482,66 @@ int main(int argc, char **argv) {
     fdk__shaped_cache_invalidate_all();
     printf("all headless text tests passed\n");
     return 0;
+}
+
+/* ---- P4: the public layout/shaping API (the tier + clusters +
+ * the caret/hit-test pair) ------------------------------------------- */
+static void test_p4_layout(void) {
+    /* the suite's own discovered fixture (g_sans), NOT
+     * load_system_default — that probe perturbs the later
+     * font-discovery test's expectations */
+    fdk_font *f = g_sans != NULL ? fdk_font_load(g_sans, 16) : NULL;
+    if (f == NULL) {
+        printf("p4: SKIP (no fixture font discovered)\n");
+        return;
+    }
+    fdk_text_shaping_tier tier = fdk_text_shaping_tier_get();
+    int avail = fdk_text_shaping_available();
+    printf("p4: tier=%d available=%d\n", (int)tier, avail);
+    assert((tier != FDK_TEXT_SHAPING_LEGACY) == (avail == 1));
+
+    const char *txt = "Hello, world!";
+    size_t n = 0;
+    fdk_f32 advance = 0.0f;
+    fdk_result r = fdk_font_layout_utf8(f, txt, strlen(txt), NULL, 0,
+                                        &n, &advance);
+    assert(fdk_ok(r));
+    fdk_text_cluster *cl = malloc(sizeof(fdk_text_cluster) * n);
+    fdk_f32 adv2 = -1.0f;
+    r = fdk_font_layout_utf8(f, txt, strlen(txt), cl, n, &n, &adv2);
+    assert(fdk_ok(r));
+    printf("p4: %zu clusters, advance %.1f vs %.1f\n", n, advance, adv2);
+    assert(n == strlen(txt)); /* ASCII: one cluster per byte */
+    assert(fabsf((double)(advance - adv2)) < 0.01f);
+    assert(cl[0].byte_lo == 0);
+    for (size_t k = 0; k < n; k++) {
+        assert(cl[k].byte_lo < cl[k].byte_hi);
+        if (k > 0) {
+            assert(cl[k].byte_lo == cl[k - 1].byte_hi);
+            assert(cl[k].x_end >= cl[k - 1].x_end);
+        }
+    }
+    assert(cl[n - 1].byte_hi == strlen(txt));
+
+    fdk_text_metrics met;
+    memset(&met, 0, sizeof met);
+    fdk_font_measure_utf8(f, txt, strlen(txt), &met);
+    assert(fabsf((double)(met.advance_width - (int)advance)) <= 1.0f); /* advance_width is the documented integer round */
+
+    for (size_t b = 0; b <= strlen(txt); b += 4) {
+        fdk_f32 x = -1.0f;
+        r = fdk_font_layout_x_at_byte(f, txt, strlen(txt), b, &x);
+        assert(fdk_ok(r));
+        size_t back = 0;
+        r = fdk_font_layout_byte_at_x(f, txt, strlen(txt), x, &back);
+        assert(fdk_ok(r));
+        assert(back == b);
+    }
+    fdk_f32 xend = -1.0f;
+    fdk_font_layout_x_at_byte(f, txt, strlen(txt), (size_t)9999, &xend);
+    assert(fabsf((double)(xend - advance)) < 0.5f);
+
+    free(cl);
+    fdk_font_destroy(f);
+    printf("p4: layout OK\n");
 }

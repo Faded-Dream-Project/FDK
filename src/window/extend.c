@@ -165,9 +165,12 @@ int fdk_ext_has_capability(fdk_context *ctx, fdk_ext_capability cap) {
                    ops->window_idle_inhibit_available != NULL &&
                    ops->window_idle_inhibit_available(ctx->conn);
         case FDK_EXT_CAP_XDG_ACTIVATION:
+            /* Wayland: xdg_activation_v1. X11: the startup-
+             * notification id (the same contract, the older
+             * mechanism) — the token mints on both. */
             return ops->window_activation_token != NULL &&
-                   ops->window_activation_available != NULL &&
-                   ops->window_activation_available(ctx->conn);
+                   (ops->window_activation_available == NULL ||
+                    ops->window_activation_available(ctx->conn));
         case FDK_EXT_CAP_FOREIGN_TOPLEVEL:
             /* The fdk_toplevel.h list: NULL from list_open IS the
              * taskbar-absent branch; the cap mirrors the ops truth. */
@@ -1085,12 +1088,12 @@ void fdk_session_lock_unlock(void *lock) {
 
 
 /* ---- P3: input-method-v2 + virtual-keyboard (Wayland) ------------------ */
-void *fdk_input_method_open(fdk_context *ctx, void *wl_seat) {
+void *fdk_input_method_open(fdk_context *ctx, void *seat_raw) {
     if (ctx == NULL || ctx->ops == NULL ||
         ctx->ops->input_method_create == NULL) {
         return NULL;
     }
-    return ctx->ops->input_method_create(ctx->conn, wl_seat);
+    return ctx->ops->input_method_create(ctx->conn, seat_raw);
 }
 
 void fdk_input_method_close(void *im) {
@@ -1108,14 +1111,14 @@ void fdk_input_method_commit(void *im, const char *text) {
     fdk_wayland_input_method_commit(im, text);
 }
 
-void *fdk_virtual_keyboard_create(fdk_context *ctx, void *wl_seat,
+void *fdk_virtual_keyboard_create(fdk_context *ctx, void *seat_raw,
                                   const char *keymap,
                                   fdk_u32 keymap_size) {
     if (ctx == NULL || ctx->ops == NULL ||
         ctx->ops->virtual_keyboard_create == NULL) {
         return NULL;
     }
-    return ctx->ops->virtual_keyboard_create(ctx->conn, wl_seat, keymap,
+    return ctx->ops->virtual_keyboard_create(ctx->conn, seat_raw, keymap,
                                              keymap_size);
 }
 

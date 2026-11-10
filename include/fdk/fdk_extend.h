@@ -1037,12 +1037,13 @@ void fdk_session_lock_unlock(void *lock);
  * fdk_virtual_keyboard_key emits key/press-release events.
  * Wayland-only: NULL/UNSUPPORTED where FDK_EXT_CAP_INPUT_METHOD_V2 /
  * FDK_EXT_CAP_VIRTUAL_KEYBOARD are false. */
-void *fdk_input_method_open(fdk_context *ctx, void *wl_seat);
+void *fdk_input_method_open(fdk_context *ctx, void *seat_raw);
 void fdk_input_method_close(void *im);
 void *fdk_input_method_grab_keyboard(void *im);
 void fdk_input_method_commit(void *im, const char *text);
-void *fdk_virtual_keyboard_create(fdk_context *ctx, void *wl_seat,
-                                  const char *keymap, fdk_u32 keymap_size);
+void *fdk_virtual_keyboard_create(fdk_context *ctx, void *seat_raw,
+                                  const char *keymap,
+                                  fdk_u32 keymap_size);
 void fdk_virtual_keyboard_key(void *kb, fdk_u32 time_ms, fdk_u32 key,
                               fdk_u32 state);
 

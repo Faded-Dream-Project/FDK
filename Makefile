@@ -308,7 +308,7 @@ SHARED_LIB := $(BUILD_DIR)/libfdk.so
 # lists may wrap freely). Every header already follows this.
 EXPORT_MAP := $(BUILD_DIR)/libfdk.exports.map
 
-TEST_SRCS := $(filter-out tests/crosssection.c tests/test_dpi_scale.c tests/test_gpu_paint_wl.c tests/test_x11_share.c tests/test_arbitration.c tests/test_p3_protocols.c tests/test_x11_integration.c tests/test_gpu_paint.c tests/probe_cpu.c tests/test_wayland_integration.c tests/test_dbus_live.c tests/test_notify_client.c tests/test_tray_item.c tests/test_clip_uris.c tests/bench.c,$(wildcard tests/*.c))
+TEST_SRCS := $(filter-out tests/crosssection.c tests/test_dpi_scale.c tests/test_gpu_paint_wl.c tests/test_x11_share.c tests/test_arbitration.c tests/test_p3_protocols.c tests/test_matrix.c tests/test_x11_integration.c tests/test_gpu_paint.c tests/probe_cpu.c tests/test_wayland_integration.c tests/test_dbus_live.c tests/test_notify_client.c tests/test_tray_item.c tests/test_clip_uris.c tests/bench.c,$(wildcard tests/*.c))
 TEST_BINS := $(patsubst tests/%.c,$(BUILD_DIR)/tests/%,$(TEST_SRCS))
 
 X11_TEST_SRC := tests/test_x11_integration.c
@@ -1006,3 +1006,28 @@ test-examples-protocols:
 	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/d-input-method.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lm -ldl -lpthread -o $(BUILD_DIR)/examples/d-input-method; \
 	$(CC) $$WL_CFLAGS -I$$P/include -Iexamples examples/f-session-lock.c -L$$P/lib -L$$WL_LIBDIR $$WL_LIBS -lfdk -lm -ldl -lpthread -o $(BUILD_DIR)/examples/f-session-lock; \
 	echo "examples (d)/(f) built against the installed tree"
+
+# P4: the capability x backend x API matrix (both lanes) + the export-map gate.
+MATRIX_BIN := $(BUILD_DIR)/tests/test_matrix
+
+$(MATRIX_BIN): tests/test_matrix.c $(STATIC_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
+	       $(STATIC_LIB) -o $@ $(LDFLAGS)
+
+test-matrix-x11: $(MATRIX_BIN)
+	@pkill -x Xvfb 2>/dev/null; sleep 1; set -e; N=$$((90 + RANDOM % 400)); \
+	rm -f /tmp/.X11-unix/X$$N; Xvfb :$$N -screen 0 800x600x24 >/dev/null 2>&1 & XP=$$!; sleep 1; \
+	DISPLAY=:$$N "$(MATRIX_BIN)" x11; rc=$$?; kill $$XP 2>/dev/null; wait $$XP 2>/dev/null; \
+	if [ $$rc -eq 1 ]; then exit 1; fi
+
+test-matrix-wayland: $(MATRIX_BIN)
+	@set -e; test -n "$$WAYLAND_DISPLAY" || { echo "needs a compositor"; exit 1; }; \
+	"$(MATRIX_BIN)" wayland
+
+test-exports: build/libfdk.so
+	@set -e; nm -D --defined-only build/libfdk.so | awk '$$2 ~ /T/ {n=$$3; sub(/@@.*/, "", n); print n}' | sort > $(BUILD_DIR)/exports.actual; \
+	awk '/local:/{g=0} /global:/{g=1} g && /;/ {gsub(/;/,""); gsub(/^[ \t]+|[ \t]+$$/,""); if ($$0 != "" && index($$0,"*")==0) print}' build/libfdk.exports.map | sort -u > $(BUILD_DIR)/exports.mapped; \
+	comm -23 $(BUILD_DIR)/exports.actual $(BUILD_DIR)/exports.mapped > $(BUILD_DIR)/exports.leaked; \
+	if [ -s $(BUILD_DIR)/exports.leaked ]; then echo "EXPORT LEAKS:"; cat $(BUILD_DIR)/exports.leaked; exit 1; fi; \
+	echo "export map: no leaks"

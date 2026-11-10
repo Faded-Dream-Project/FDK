@@ -241,6 +241,68 @@ fdk_result fdk_font_selection_spans_utf8(const fdk_font *font,
                                          size_t max_spans,
                                          size_t *out_n_spans);
 
+/* ---- The layout/shaping API (P4) ---------------------------------------
+ *
+ * One-line layout introspection: what shaping actually produced.
+ * The Entry/TextView ride this machinery privately; these functions
+ * make the same truth public for add-ons that draw or edit text
+ * themselves.
+ *
+ * The shaping LEVEL is a process-wide fact: FDK dlopens
+ * libharfbuzz.so.0 + libfribidi.so.0 at font load (no build
+ * dependency — the documented M-2 contract). Level 0 = the legacy
+ * per-codepoint walk (single-direction exact, mixed-direction
+ * approximate); level 2 = full HarfBuzz shaping + FriBidi bidi. */
+typedef enum fdk_text_shaping_tier {
+    FDK_TEXT_SHAPING_LEGACY   = 0, /* no shaping libraries found  */
+    FDK_TEXT_SHAPING_HARFBUZZ = 2, /* hb + fribidi loaded         */
+} fdk_text_shaping_tier;
+
+/* The effective tier (fdk_text_shaping_available's detailed form). */
+fdk_text_shaping_tier fdk_text_shaping_tier_get(void);
+
+/* One shaped cluster: a byte range with the LOGICAL cumulative pen
+ * position at its END (x from the line origin; the value is the
+ * caret x after this cluster — kerning/ligature effects are
+ * attributed to the cluster's last codepoint, the same rule as the
+ * widgets' caret geometry). `rtl` is 1 when the cluster sits in an
+ * RTL visual segment (segment granularity without FriBidi's detail,
+ * exactly the documented mixed-direction class). */
+typedef struct fdk_text_cluster {
+    fdk_u32 byte_lo, byte_hi; /* the cluster's byte range [lo, hi)   */
+    fdk_f32 x_end;            /* caret x after the cluster           */
+    fdk_i32 rtl;              /* 1 = inside an RTL visual segment    */
+} fdk_text_cluster;
+
+/* Shapes one line and reports its clusters plus the total advance
+ * (the same value fdk_font_measure_utf8 returns — one shaping, one
+ * truth). out receives at most max_clusters entries; *out_n always
+ * receives the true count (call once to count, once to fill).
+ * out_advance may be NULL. RTL: clusters come in LOGICAL order with
+ * the pen attributions the caret contract uses.
+ *
+ * Can fail with FDK_ERR_INVALID_ARGUMENT (NULL font/utf8/out_n) or
+ * FDK_ERR_OUT_OF_MEMORY. */
+fdk_result fdk_font_layout_utf8(const fdk_font *font, const char *utf8,
+                                size_t byte_len,
+                                fdk_text_cluster *out_clusters,
+                                size_t max_clusters, size_t *out_n,
+                                fdk_f32 *out_advance);
+
+/* The caret x for a byte offset (snapped to a codepoint boundary
+ * like every byte-range API here). The same geometry the Entry
+ * draws its caret from. byte > byte_len clamps. */
+fdk_result fdk_font_layout_x_at_byte(const fdk_font *font,
+                                     const char *utf8, size_t byte_len,
+                                     size_t byte, fdk_f32 *out_x);
+
+/* The hit test: which byte offset (codepoint boundary) a visual x
+ * on the line lands in. Mixed-direction text resolves at segment
+ * granularity (the documented level-0/1 caret class). */
+fdk_result fdk_font_layout_byte_at_x(const fdk_font *font,
+                                     const char *utf8, size_t byte_len,
+                                     fdk_f32 x, size_t *out_byte);
+
 /* ---- Drawing ---- */
 
 /* Draws one line of UTF-8 text onto `surface`.

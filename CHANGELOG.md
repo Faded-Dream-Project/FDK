@@ -1,4 +1,29 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 3: P4 — the public layout/shaping API + the full test matrix
+
+- fdk_text.h: the layout/shaping surface. fdk_text_shaping_tier_get
+  (FDK_TEXT_SHAPING_LEGACY / _HARFBUZZ — the detailed form of
+  fdk_text_shaping_available), fdk_font_layout_utf8 (per-cluster
+  byte ranges + the logical cumulative pen + the total advance — one
+  shaping, one truth with measure_utf8), fdk_font_layout_x_at_byte
+  (the caret geometry the Entry draws), and fdk_font_layout_byte_at_x
+  (the hit test). test_text.c rides the suite's own fixture font and
+  asserts the tier/availability agreement, cluster tiling, measure
+  agreement, and the caret/hit-test round trip.
+- tests/test_matrix.c + make test-matrix-x11 / test-matrix-wayland:
+  every capability flag (1-18) answers the platform truth per lane;
+  the UNSUPPORTED paths answer UNSUPPORTED; the render-mode caps
+  resolve exclusively. Both lanes green.
+- The unstable-tier gate: no unstable-protocol TYPE declaration may
+  appear in a public header (comment prose may name them — the
+  raw-event surface documents what an add-on can bind). Found and
+  fixed one real violation: the input-method/virtual-keyboard
+  declarations' `wl_seat` parameter names became `seat_raw`.
+- make test-exports: the export-map gate (every dynamic T symbol
+  named by the map; no leaks). The matrix also corrected the
+  activation-cap truth: X11 mints the startup-notification id — the
+  same contract on the older mechanism — so FDK_EXT_CAP_XDG_ACTIVATION
+  is true on both backends (the matrix asserts the X11 mint works).
 ## Item 2: P5 examples (d) input-method add-on, (f) session-lock screen
 
 - examples/d-input-method.c: the on-screen-keyboard half — the

@@ -507,3 +507,90 @@ fdk_result fdk_font_ellipsize_spans_utf8(
     fdk_free(runs);
     return r;
 }
+
+
+/* ---- P4: the public layout/shaping API --------------------------------- */
+
+int fdk__shaping_hb_available(void); /* shaping.c's probe */
+
+fdk_text_shaping_tier fdk_text_shaping_tier_get(void) {
+    return fdk__shaping_hb_available() ? FDK_TEXT_SHAPING_HARFBUZZ
+                                       : FDK_TEXT_SHAPING_LEGACY;
+}
+
+fdk_result fdk_font_layout_utf8(const fdk_font *font, const char *utf8,
+                                size_t byte_len,
+                                fdk_text_cluster *out_clusters,
+                                size_t max_clusters, size_t *out_n,
+                                fdk_f32 *out_advance) {
+    if (font == NULL || utf8 == NULL || out_n == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk__shaped *s = fdk__shape_range((fdk_font *)font, utf8, byte_len,
+                                      0, byte_len, NULL, 0);
+    if (s == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    *out_n = s->n_cp;
+    for (size_t k = 0; k < s->n_cp && k < max_clusters; k++) {
+        out_clusters[k].byte_lo = (fdk_u32)s->cp_byte[k];
+        out_clusters[k].byte_hi =
+            (fdk_u32)(k + 1 < s->n_cp ? s->cp_byte[k + 1] : byte_len);
+        out_clusters[k].x_end = s->cp_pen[k + 1];
+        out_clusters[k].rtl = s->rtl_visual;
+    }
+    if (out_advance != NULL) {
+        *out_advance = s->total;
+    }
+    fdk__shaped_free(s);
+    return FDK_OK;
+}
+
+fdk_result fdk_font_layout_x_at_byte(const fdk_font *font,
+                                     const char *utf8, size_t byte_len,
+                                     size_t byte, fdk_f32 *out_x) {
+    if (font == NULL || utf8 == NULL || out_x == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (byte > byte_len) {
+        byte = byte_len;
+    }
+    fdk__shaped *s = fdk__shape_range((fdk_font *)font, utf8, byte_len,
+                                      0, byte_len, NULL, 0);
+    if (s == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    *out_x = fdk__shaped_caret_x(s, byte);
+    fdk__shaped_free(s);
+    return FDK_OK;
+}
+
+fdk_result fdk_font_layout_byte_at_x(const fdk_font *font,
+                                     const char *utf8, size_t byte_len,
+                                     fdk_f32 x, size_t *out_byte) {
+    if (font == NULL || utf8 == NULL || out_byte == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk__shaped *s = fdk__shape_range((fdk_font *)font, utf8, byte_len,
+                                      0, byte_len, NULL, 0);
+    if (s == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    /* the logical pen walk: the boundary whose caret x is nearest */
+    size_t best = 0;
+    fdk_f32 best_d = -1.0f;
+    for (size_t k = 0; k <= s->n_cp; k++) {
+        fdk_f32 cx = s->cp_pen[k];
+        fdk_f32 d = cx - x;
+        if (d < 0.0f) {
+            d = -d;
+        }
+        if (best_d < 0.0f || d < best_d) {
+            best_d = d;
+            best = k;
+        }
+    }
+    *out_byte = best < s->n_cp ? s->cp_byte[best] : byte_len;
+    fdk__shaped_free(s);
+    return FDK_OK;
+}

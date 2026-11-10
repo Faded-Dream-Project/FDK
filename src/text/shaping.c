@@ -2204,3 +2204,10 @@ fdk__shaped *fdk__shape_range_cached(fdk_font *font, const char *utf8,
 int fdk__sh_script_of_for_tests(fdk_u32 cp) {
     return sh_script_of(cp);
 }
+
+
+/* P4: the shaping-tier probe (the public fdk_text_shaping_tier_get). */
+int fdk__shaping_hb_available(void) {
+    sh_probe(); /* the lazy init the availability probe also runs */
+    return g_shaping_state == 1;
+}
