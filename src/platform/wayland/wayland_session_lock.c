@@ -96,16 +96,78 @@ void *fdk_wayland_session_lock_surface(
 struct managed_surface {
     struct ext_session_lock_surface_v1 *proxy;
     fdk_ext_surface *es;
+    struct wl_surface *surface; /* FDK's role-less surface */
+    struct managed_surface *next;
 };
+
+/* The live managed surfaces, process-wide (the lock is exclusive by
+ * protocol, so there is never more than a handful). The destroy path
+ * MUST tear the ROLE OBJECT down before the wl_surface — the
+ * compositor answers "surface was destroyed before its role object"
+ * (error 4) otherwise; caught live by the multi-output rig. */
+static struct managed_surface *g_managed = NULL;
+
+static struct managed_surface *managed_find(fdk_ext_surface *es) {
+    for (struct managed_surface *m = g_managed; m != NULL; m = m->next) {
+        if (m->es == es) {
+            return m;
+        }
+    }
+    return NULL;
+}
+
+void fdk_wayland_session_lock_surface_managed_destroy(
+    void *es) {
+    for (struct managed_surface *m = g_managed; m != NULL; m = m->next) {
+        if (m->es == es) {
+            /* the ROLE OBJECT first, the wl_surface second (the
+             * compositor's error 4 otherwise); the ms ITSELF stays
+             * as a tombstone until the unlock sweep — a configure
+             * queued before this moment still fires into the
+             * listener, and it must not touch the freed ext surface */
+            if (m->proxy != NULL) {
+                ext_session_lock_surface_v1_destroy(m->proxy);
+                m->proxy = NULL;
+            }
+            /* the wl_surface stays FDK's: the adopted window destroys
+             * it (double-destroying here SEGVs inside libwayland) */
+            m->es = NULL;
+            return;
+        }
+    }
+}
+
+/* The unlock sweep: whatever tombstones remain go now — every role
+ * object is destroyed, no event can name them. */
+void fdk_wayland_session_lock_managed_sweep(void) {
+    struct managed_surface *m = g_managed;
+    while (m != NULL) {
+        struct managed_surface *next = m->next;
+        if (m->proxy != NULL) {
+            ext_session_lock_surface_v1_destroy(m->proxy);
+        }
+        /* the wl_surface is FDK's (the adopted window's) — never
+         * touched here */
+        fdk_free(m);
+        m = next;
+    }
+    g_managed = NULL;
+}
 
 static void ms_configure(void *data,
                          struct ext_session_lock_surface_v1 *proxy,
                          uint32_t serial, uint32_t width,
                          uint32_t height) {
-    (void)proxy;
     struct managed_surface *ms = data;
+    if (ms == NULL) {
+        return;
+    }
+    /* a configure queued before the surface's destroy still fires
+     * here AFTER the free — the tombstone (es detached at destroy,
+     * the ms freed only at unlock) is the guard: ack the compositor
+     * (the protocol wants it) and drop the event */
     ext_session_lock_surface_v1_ack_configure(proxy, serial);
-    if (ms != NULL && ms->es != NULL) {
+    if (ms->es != NULL) {
         fdk_ext_surface_notify_configure(
             ms->es, (fdk_i32)width, (fdk_i32)height);
     }
@@ -122,17 +184,32 @@ static const struct ext_session_lock_surface_v1_listener ms_listener = {
  * the ext-surface native accessor's surfaces already carry the layer
  * role and CANNOT take this one (the compositor kills the
  * connection: protocol error 2, the wall this API exists for). */
+fdk_result fdk_wayland_session_lock_surface_managed_on_output(
+    fdk_platform_connection *conn, void *handle, void *es,
+    fdk_i32 output_index, void **out_native);
+
 fdk_result fdk_wayland_session_lock_surface_managed(
     fdk_platform_connection *conn, void *handle, void *es,
     void **out_native) {
+    return fdk_wayland_session_lock_surface_managed_on_output(
+        conn, handle, es, 0, out_native);
+}
+
+fdk_result fdk_wayland_session_lock_surface_managed_on_output(
+    fdk_platform_connection *conn, void *handle, void *es,
+    fdk_i32 output_index, void **out_native) {
     struct session_lock_state *st = handle;
     if (conn == NULL || st == NULL || st->lock == NULL ||
         es == NULL || out_native == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
-    if (conn->compositor == NULL || conn->output_count < 1 ||
-        conn->outputs[0].output == NULL) {
+    if (conn->compositor == NULL || conn->output_count < 1) {
         return FDK_ERR_UNSUPPORTED; /* no compositor/output to lock */
+    }
+    if (output_index < 0 ||
+        (size_t)output_index >= conn->output_count ||
+        conn->outputs[output_index].output == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT; /* no such bound output */
     }
     struct managed_surface *ms = fdk_alloc(sizeof *ms);
     if (ms == NULL) {
@@ -147,7 +224,7 @@ fdk_result fdk_wayland_session_lock_surface_managed(
         return FDK_ERR_OUT_OF_MEMORY;
     }
     ms->proxy = ext_session_lock_v1_get_lock_surface(
-        st->lock, surface, conn->outputs[0].output);
+        st->lock, surface, conn->outputs[output_index].output);
     if (ms->proxy == NULL) {
         wl_surface_destroy(surface);
         fdk_free(ms);
@@ -155,6 +232,9 @@ fdk_result fdk_wayland_session_lock_surface_managed(
     }
     ext_session_lock_surface_v1_add_listener(ms->proxy, &ms_listener,
                                              ms);
+    ms->surface = surface;
+    ms->next = g_managed;
+    g_managed = ms;
     *out_native = (void *)surface;
     return FDK_OK;
 }
@@ -167,6 +247,7 @@ void fdk_wayland_session_lock_unlock(void *handle) {
     ext_session_lock_v1_unlock_and_destroy(st->lock);
     st->lock = NULL;
     fdk_free(st);
+    fdk_wayland_session_lock_managed_sweep();
 }
 
 

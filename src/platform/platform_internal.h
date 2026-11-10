@@ -364,6 +364,12 @@ typedef struct fdk_platform_ops {
     fdk_result (*session_lock_surface_managed)(fdk_platform_connection *conn,
                                                void *lock_handle, void *es,
                                                void **out_native);
+    fdk_result (*session_lock_surface_managed_on_output)(
+        fdk_platform_connection *conn, void *lock_handle, void *es,
+        fdk_i32 output_index, void **out_native);
+    /* The managed lock surface's ROLE-ORDERED teardown: the role
+     * object dies before the wl_surface (protocol error 4 otherwise). */
+    void (*session_lock_surface_managed_destroy)(void *es);
     void *(*session_lock_surface)(fdk_platform_connection *conn,
                                   void *lock, void *wl_surface,
                                   void *wl_output);

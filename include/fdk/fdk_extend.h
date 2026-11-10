@@ -1071,6 +1071,17 @@ void fdk_session_lock_unlock(void *lock);
 fdk_result fdk_session_lock_screen_create(fdk_context *ctx, void *lock,
                                           fdk_ext_surface **out_surface);
 
+/* The same, on the connection's `output_index`-th bound output — the
+ * multi-output lock screen: a lock covers the session only when EVERY
+ * output carries a lock surface, so one screen per output is the
+ * real shape (the outputs accessor fdk_ext_wl_output_count says how
+ * many). FDK_ERR_INVALID_ARGUMENT for a bad index; the same
+ * UNSUPPORTED contract otherwise. Available since extension API v3
+ * (append-only). */
+fdk_result fdk_session_lock_screen_create_on_output(
+    fdk_context *ctx, void *lock, fdk_i32 output_index,
+    fdk_ext_surface **out_surface);
+
 
 
 /* ---- P3: input-method-v2 + virtual-keyboard (the IM add-on pair) --------

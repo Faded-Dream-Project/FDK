@@ -43,6 +43,9 @@ struct fdk_ext_surface_kind {
     fdk_ext_surface_ops ops; /* the copied callback table         */
     void *user;
     size_t live_surfaces; /* how many of ours still exist        */
+    int owned; /* one-shot: dies with its last surface (the
+                * lock-screen kind; prevents the registered-but-never-
+                * reused leak)                            */
     struct fdk_ext_surface_kind *next;
 };
 
@@ -94,6 +97,13 @@ static void ext_destroy_notify(fdk_window *window, void *user) {
         }
         if (kind->live_surfaces > 0) {
             kind->live_surfaces--;
+        }
+        /* the OWNED one-shot kind (the lock-screen kind): the surface
+         * is its only reason to exist — dying with it prevents the
+         * registered-but-never-reused leak (the LeakSanitizer catch,
+         * 2026-11-11) */
+        if (kind->owned) {
+            fdk_ext_kind_destroy(kind);
         }
     }
     fdk_free(ext);
@@ -1173,6 +1183,7 @@ fdk_result fdk_ext_surface_set_idle_inhibited(fdk_ext_surface *surface,
 struct lock_screen_kind {
     fdk_context *ctx;
     void *lock_handle;
+    fdk_i32 output_index; /* -1 = the first bound output (v3 default) */
 };
 
 static fdk_result lock_screen_create(fdk_ext_surface *surface,
@@ -1184,8 +1195,16 @@ static fdk_result lock_screen_create(fdk_ext_surface *surface,
         return (fdk_result)FDK_ERR_UNSUPPORTED;
     }
     void *native = NULL;
-    fdk_result r = k->ctx->ops->session_lock_surface_managed(
-        k->ctx->conn, k->lock_handle, (void *)surface, &native);
+    fdk_result r;
+    if (k->output_index > 0 &&
+        k->ctx->ops->session_lock_surface_managed_on_output != NULL) {
+        r = k->ctx->ops->session_lock_surface_managed_on_output(
+            k->ctx->conn, k->lock_handle, (void *)surface,
+            k->output_index, &native);
+    } else {
+        r = k->ctx->ops->session_lock_surface_managed(
+            k->ctx->conn, k->lock_handle, (void *)surface, &native);
+    }
     if (!fdk_ok(r)) {
         return r;
     }
@@ -1195,15 +1214,30 @@ static fdk_result lock_screen_create(fdk_ext_surface *surface,
 }
 
 static void lock_screen_destroy(fdk_ext_surface *surface, void *user) {
-    (void)surface;
     (void)user;
-    /* the role object dies with the WAYLAND surface (FDK destroys
-     * the surface next; the protocol surface proxy is a child of
-     * the lock object which unlock destroys) */
+    if (surface == NULL || surface->window == NULL ||
+        surface->window->ctx == NULL ||
+        surface->window->ctx->ops == NULL ||
+        surface->window->ctx->ops->session_lock_surface_managed_destroy ==
+            NULL) {
+        return;
+    }
+    /* the ROLE OBJECT first, the wl_surface second (FDK destroys the
+     * surface right after this returns) — the compositor's error 4
+     * ("surface was destroyed before its role object") otherwise */
+    surface->window->ctx->ops->session_lock_surface_managed_destroy(
+        (void *)surface);
 }
 
 fdk_result fdk_session_lock_screen_create(fdk_context *ctx, void *lock,
                                           fdk_ext_surface **out_surface) {
+    return fdk_session_lock_screen_create_on_output(ctx, lock, 0,
+                                                    out_surface);
+}
+
+fdk_result fdk_session_lock_screen_create_on_output(
+    fdk_context *ctx, void *lock, fdk_i32 output_index,
+    fdk_ext_surface **out_surface) {
     if (ctx == NULL || lock == NULL || out_surface == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
@@ -1211,7 +1245,7 @@ fdk_result fdk_session_lock_screen_create(fdk_context *ctx, void *lock,
         ctx->ops->session_lock_surface_managed == NULL) {
         return FDK_ERR_UNSUPPORTED; /* not Wayland, or no lock role */
     }
-    struct lock_screen_kind k = { ctx, lock };
+    struct lock_screen_kind k = { ctx, lock, output_index };
     fdk_ext_surface_ops ops;
     memset(&ops, 0, sizeof ops);
     ops.struct_size = sizeof ops;
@@ -1226,6 +1260,9 @@ fdk_result fdk_session_lock_screen_create(fdk_context *ctx, void *lock,
     snprintf(name, sizeof name, "fdk-session-lock-%d", ++screen_seq);
     fdk_ext_surface_kind *kind = NULL;
     fdk_result r = fdk_ext_register_kind(ctx, name, &ops, &k, &kind);
+    if (fdk_ok(r)) {
+        kind->owned = 1; /* one-shot: the screen dies, the kind dies */
+    }
     if (!fdk_ok(r)) {
         return r;
     }

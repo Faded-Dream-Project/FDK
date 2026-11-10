@@ -62,6 +62,24 @@ void *fdk_wayland_virtual_keyboard_create(fdk_platform_connection *conn,
     struct zwp_virtual_keyboard_v1 *kb =
         zwp_virtual_keyboard_manager_v1_create_virtual_keyboard(
             conn->virtual_keyboard_manager, (struct wl_seat *)wl_seat);
+    /* No keymap from the caller: install the DEFAULT. The protocol
+     * refuses any key event before a keymap exists ("Cannot send a
+     * keypress before defining a keymap" — the compositor kills the
+     * connection; caught live by the P3 rig), so a keymap-less VK
+     * that only dies on its FIRST key call is a trap, not a feature.
+     * The default is the compact standard form (evdev codes, the us
+     * symbol set) — KEY_Q is <AD01>, matching the rig's emission. */
+    if (kb != NULL && (keymap == NULL || size == 0)) {
+        static const char default_keymap[] =
+            "xkb_keymap {"
+            " xkb_keycodes { include \"evdev\" };"
+            " xkb_types { include \"basic\" };"
+            " xkb_compat { include \"basic\" };"
+            " xkb_symbols { include \"pc+us\" };"
+            "};";
+        keymap = default_keymap;
+        size = (fdk_u32)(sizeof default_keymap - 1);
+    }
     if (kb != NULL && keymap != NULL && size > 0) {
         int fd = memfd_create("fdk-vkeymap", 0);
         if (fd >= 0) {

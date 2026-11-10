@@ -1274,6 +1274,10 @@ void *fdk_wayland_session_lock(fdk_platform_connection *conn,
 fdk_result fdk_wayland_session_lock_surface_managed(
     fdk_platform_connection *conn, void *handle, void *es,
     void **out_native);
+fdk_result fdk_wayland_session_lock_surface_managed_on_output(
+    fdk_platform_connection *conn, void *handle, void *es,
+    fdk_i32 output_index, void **out_native);
+void fdk_wayland_session_lock_surface_managed_destroy(void *es);
 void *fdk_wayland_session_lock_surface(fdk_platform_connection *conn,
                                        void *handle, void *wl_surface,
                                        void *wl_output);

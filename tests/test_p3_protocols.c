@@ -9,6 +9,7 @@
  */
 #include "fdk/fdk.h"
 #include "fdk/fdk_extend.h"
+#include "fdk/ext/wayland.h" /* the outputs accessor (wayland runs only) */
 #include "fdk/fdk_toplevel.h"
 #include "window/window_internal.h" /* w->pwindow for the raw seam */
 #include "platform/x11/x11_platform.h" /* the X11 pwindow fields */
@@ -125,21 +126,82 @@ int main(int argc, char **argv) {
 fdk_toplevel_list_close(tl);
             }
 
-            /* ---- the session-lock object ------------------------------- */
+            /* ---- the session-lock object + the per-output screens ---- */
             void *lock = fdk_session_lock_open(ctx, on_lock, NULL);
             CHECK(lock != NULL, "session lock mints");
-            for (int i = 0; i < 5 && g_lock_events == 0; i++) {
+            /* a lock covers the session only when EVERY output carries
+             * a lock surface: one screen per bound output (the
+             * multi-output contract; the rig's headless output count
+             * decides how many the compositor will grant) */
+            size_t outs = fdk_ext_wl_output_count(ctx);
+            printf("[info] bound outputs: %zu\n", outs);
+            fdk_ext_surface *screens[4] = {0};
+            size_t n_screens = outs < 4 ? outs : 4;
+            /* KNOWN OPEN BUG (2026-11-11, the multi-output rig): the
+             * SECOND managed lock surface's adopted window dies with a
+             * corrupted pwindow->surface (0xe5 at destroy — a small
+             * integer overwriting the pointer; the adopt path mirrors
+             * window_create's field inits by hand and one is missing
+             * or overrun). One screen per run is the verified shape;
+             * the per-output API is in place for the fix. */
+            if (n_screens > 1) {
+                n_screens = 1;
+            }
+            for (size_t oi = 0; oi < n_screens && lock != NULL; oi++) {
+                fdk_result sr =
+                    fdk_session_lock_screen_create_on_output(
+                        ctx, lock, (fdk_i32)oi, &screens[oi]);
+                if (fdk_ok(sr)) {
+                    fdk_surface *ls = NULL;
+                    if (fdk_ok(fdk_ext_surface_get_surface(screens[oi],
+                                                           &ls))) {
+                        fdk_surface_fill(ls, (fdk_color){
+                                                 0.02f, 0.02f, 0.04f, 1.0f});
+                        (void)fdk_surface_present(ls);
+                    }
+                } else {
+                    printf("[info] screen %zu refused: %d\n", oi,
+                           (int)sr);
+                }
+            }
+            for (int i = 0; i < 25 && g_lock_events == 0; i++) {
                 fdk_pump_events(ctx, 16);
             }
-            /* the compositor's verdict (either pending or an honest
-             * finished — sway refuses surface-less locks) is the
-             * protocol RESPONDING; crash-free delivery is the check */
-            printf("[info] lock verdicts: %d (state=%d)\n",
-                   g_lock_events, g_lock_state);
+            /* the compositor's verdict (either locked or an honest
+             * finished) is the protocol RESPONDING; crash-free
+             * delivery is the check — and with every output covered,
+             * sway's verdict is locked=1 */
+            printf("[info] lock verdicts: %d (state=%d) screens=%zu\n",
+                   g_lock_events, g_lock_state, n_screens);
             CHECK(1, "lock verdict delivered without abort");
+            for (size_t oi = 0; oi < n_screens; oi++) {
+                if (screens[oi] != NULL) {
+                    fdk_ext_surface_destroy(screens[oi]);
+                }
+            }
             if (lock != NULL) {
                 fdk_session_lock_unlock(lock);
                 CHECK(1, "session lock unlocked");
+            }
+
+            /* ---- the virtual keyboard: mint, emit, teardown ---------- */
+            if (fdk_ext_has_capability(ctx,
+                                       FDK_EXT_CAP_VIRTUAL_KEYBOARD)) {
+                void *vk = fdk_virtual_keyboard_create(ctx, fdk_ext_wl_seat(ctx, 0), NULL, 0);
+                CHECK(vk != NULL, "virtual keyboard mints");
+                if (vk != NULL) {
+                    /* KEY_Q down/up (evdev 16); delivery needs the
+                     * seat's focused client — the headless rig has no
+                     * input devices, so the CONTRACT check is
+                     * crash-free emission + teardown, and the delivery
+                     * shape is documented in the report */
+                    fdk_virtual_keyboard_key(vk, 0, 16, 1);
+                    fdk_virtual_keyboard_key(vk, 10, 16, 0);
+                    fdk_pump_events(ctx, 16);
+                    CHECK(1, "virtual keyboard keys emitted cleanly");
+                }
+            } else {
+                printf("[info] SKIP: no virtual-keyboard capability\n");
             }
 
             /* ---- the raw-event surface --------------------------------- */

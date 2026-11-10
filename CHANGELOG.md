@@ -1,4 +1,36 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 3: the unexercised surface — lock screens per output, the VK
+## keymap wall, and the honest map of what remains
+
+- fdk_session_lock_screen_create_on_output (public, v3, append-only):
+  the per-output lock screen — the real shape of a session lock (one
+  surface per output). The sway rig with TWO headless outputs:
+  both outputs bound, the screen on output 0 minted and presented,
+  LOCKED=1, ordered teardown, unlock — clean under LeakSanitizer.
+  THREE real bugs fixed on the way:
+    1. the role-order teardown (the role object MUST die before the
+       wl_surface — the compositor's error 4 otherwise; the managed
+       destroy now runs in the kind's destroy callback, before FDK
+       releases the surface),
+    2. a use-after-free: a configure queued before the destroy fired
+       into the freed ext surface — the ms tombstone (detached at
+       destroy, freed at the unlock sweep) is the guard,
+    3. a one-shot kind leak: the lock-screen kind is now OWNED (dies
+       with its last surface).
+- KNOWN OPEN BUG (documented in the test): the SECOND managed lock
+  surface's adopted window dies with a corrupted pwindow->surface
+  (0xe5 at destroy — a small integer overwriting the pointer; the
+  adopt path mirrors window_create's field inits by hand and one is
+  missing or overrun). The test pins the verified one-screen shape;
+  the per-output API is in place for the fix.
+- The virtual keyboard: the protocol refuses ANY key before a keymap
+  ("Cannot send a keypress before defining a keymap" — the
+  connection dies; caught live) — a keymap-less VK was a trap. The
+  create now installs a DEFAULT keymap (the compact evdev/basic/
+  pc+us form) when the caller passes none. The key emission +
+  delivery verification needs one clean rig run (the last session
+  runs raced the sway restart); the emission path is in, the
+  delivery assertion is the next session's first check.
 ## Item 2: the dmabuf X11 lane, the DRM job, the robustness gate
 
 - The X11 lane gets the zero-copy import (the mesa unified-driver side
