@@ -1,4 +1,22 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## CI: the popup step's two real findings (the run completed, the fix verified)
+
+- The failed run PROVED the item-1 gate: the DRM job shows
+  completed/skipped and the RUN reached completed (no queued job).
+  The ubuntu failure was the popup step, and it taught two things:
+    1. The sway step's clang leg runs `make clean`, which wipes the
+       whole build dir INCLUDING the fdk-install tree the earlier
+       steps made. The popup step now re-installs first —
+       release config, the same tree-local PREFIX (never /usr/local).
+    2. The popup examples must be CONFIG-MATCHED to the lib they
+       link: an ASan-instrumented main against the non-instrumented
+       release lib reports fontconfig's process-lifetime cache as
+       leaks (the exact mixed-config false positive the Makefile's
+       config-stamp comment documents from 1.0.0). They now build
+       with plain cc against the release install; leak coverage is
+       the valgrind step's job.
+- Both verified locally against a clean-then-release-install tree
+  (the exact CI sequence): 10 and 11 exit 0 on Xvfb.
 ## The audit's gap list is EMPTY: the two popup examples landed
 
 - examples/10_ext_popup.c — the ext-level popup: a kind surface
