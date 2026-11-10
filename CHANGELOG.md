@@ -9,13 +9,13 @@ changes; the round-40 release-closing work below landed under the
 same release identity before the tag.
 
 
-## 1.0.0 — the first release (tagged 2026-11-09)
+## 1.0.0 (unreleased — the tag was withdrawn by the owner on 2026-11-09; back to development)
 
-Tag `v1.0.0`; the prebuilt Linux bundle (libfdk.so.1 + headers +
-examples + docs, sha256-signed) is built by CI from the tag
-(.github/workflows/release.yml); the five distro families' native
-packages (deb/rpm/arch/apk/xbps) are built by the same push and
-ship alongside it as release assets.
+The packaging channel stays wired (.github/workflows/release.yml:
+the bundle plus the five distro families' native packages,
+deb/rpm/arch/apk/xbps, built on a v* tag), but no tag exists and
+none is planned until the owner says so — the project is a
+development version again.
 
 ### What you should know before running it
 

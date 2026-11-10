@@ -3,14 +3,15 @@
 ## The rule
 
 FDK is **in development — no stable release yet.** The public version
-is whatever `include/fdk/fdk_version.h` says — currently a `1.0.0`
-pre-release iteration (`rcN`) carrying the owner's 2026-10-25
-directive that FDK grow a public **extension API** (add-on packages
-building on `fdk/extend.h`); the owner explicitly chose `1.0.0-rc1`
-over `1.0.0` because new public API is a minor bump ("not 1.0.0,
-since this adds public API"). The `-rcN` suffix is the owner's
-brake: **no git tag exists and nothing is published** — the project
-has no releases page, no release branch, and no tags; the owner
+is whatever `include/fdk/fdk_version.h` says — currently `1.0.0`
+(the owner's 2026-11-08 decision: the first release is the clean
+`1.0.0`, superseding the 2026-10-25 `rcN` brake; the rc labels
+across the tree read `1.0.0`). On 2026-11-09 that first release
+was briefly tagged and published — the full walkthrough evidence
+is real (docs/REAL-DESKTOP-SIGNOFF.md) — and then **withdrawn by
+the owner the same day**: back to development, no tags exist and
+none are created until the owner says otherwise. The project has
+no releases page, no release branch, and no tags; the owner
 decides if and when a first stable release is ever cut, and how it
 is numbered. Every version move is made exactly the way this
 document demands: by the project owner, explicitly — not by
@@ -19,7 +20,7 @@ life before the 1.0.0 era the number was a project joke (`0.0.1` —
 *this absurdly capable toolkit is still called 0.0.1*.)
 
 ```
-Public version:       1.0.0-rcN     (development iteration; no tag, no release)
+Public version:       1.0.0         (unreleased; development iteration — no tag, no release)
 Engineering standard: extremely high (unchanged by the number)
 ```
 

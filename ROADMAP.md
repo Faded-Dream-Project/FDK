@@ -347,7 +347,7 @@ unaffected):
 | M-4 | window identity | **DONE** | = B-04 (icons/PID part); the activation half closed as S-6 | — |
 | M-6 | X11 multi-monitor | **DONE** | = B-05 (both halves; D-015) | owner's real-desktop check |
 | M-7 | D-Bus foundation + dark mode | **DONE** (foundation 4d42c8c; dark mode d2a253f) | live-bus battery green incl. cross-implementation; wire bytes pinned vs captured reference output; fuzzed; CI makes skips fatal | — [VERIFIED-CHANGED: the row's "rides on top (next)" is stale — dark mode landed] |
-| M-9 | the release gate | **IN PROGRESS** | discipline verified: no tags exist in this repository and none are created, the rc line is held as a development version, per-push CI, per-item docs | signed 2026-11-09 (docs/REAL-DESKTOP-SIGNOFF.md) for 1.0.0; the walkthrough stays the standing verification surface — re-walk before any future tag |
+| M-9 | the release gate | **IN PROGRESS** | discipline verified: no tags exist in this repository and none are created, the rc line is held as a development version, per-push CI, per-item docs | the walkthrough evidence is real and signed (docs/REAL-DESKTOP-SIGNOFF.md, 2026-11-09), but the owner withdrew the 1.0.0 tag the same day and moved the project back to development; no tags exist, none are created — re-walk before any future tag |
 | S-3 | idle inhibition | **DONE** | = B-11 (both mechanisms; the live-bus mock + the sway rig) | — |
 | S-4 | input regions | **DONE** | fdk_window_set_input_region + fdk_ext_surface_set_input_region, both backends, XTEST + sway-injector proof; D-017 | — |
 | S-5 | cursor shape set | **DONE** | = B-12 (both backends; the hermetic RENDER proof on Xvfb, the enum-table pin on sway) | — |

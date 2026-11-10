@@ -4,7 +4,7 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
-## Current state (2026-11-09, after round 58 — 1.0.0 re-released, packages attached via GH_REPO fix)
+## Current state (2026-11-09, after round 59 — 1.0.0 withdrawn by the owner, development version again)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
@@ -37,6 +37,30 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
+
+## Round 59 (2026-11-09) — the release withdrawn: back to development; bug-rate: 0 new library bugs
+
+1. **The owner's call, their words**: "a few things i saw i dont
+   like about APIs and what we limit its whatever put it on
+   development side again FDK and remove the release." Reason not
+   elaborated beyond that; recorded verbatim so the door's reason
+   is never guessed at.
+2. **Removed**: the v1.0.0 GitHub release (all eleven assets — the
+   bundle, its sha256, and the five families' packages) and the
+   v1.0.0 tag, local and remote. Zero tags remain in the
+   repository — the M-9 discipline is restored verbatim: no tags
+   exist and none are created.
+3. **Kept**: the sign-off evidence (docs/REAL-DESKTOP-SIGNOFF.md —
+   the walkthrough is real regardless of release status), the
+   release channel as dormant machinery (release.yml fires only on
+   a v* tag; with no tags it never runs), the packages pipeline
+   and its round-58 fix, the junk cleanup, and the CHANGELOG's
+   1.0.0 block — now marked unreleased with the withdrawal noted.
+4. **Docs reverted**: README badge back to "in development";
+   CHANGELOG and ROADMAP's M-9 row record the withdrawal; the
+   register keeps IN PROGRESS 1 (M-9, the standing surface).
+5. **The gate**: re-run on this tree — the development-version
+   posture must stay G1-G6 green.
 
 ## Round 58 (2026-11-09) — the attach fix: GH_REPO for a checkout-less gh job; bug-rate: 0 new library bugs
 
