@@ -1,4 +1,24 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The Vulkan recipe: a swapchain on an extension surface
+
+- examples/12_vulkan_surface.c drives the whole cycle through the
+  documented native accessors: fdk_ext_get_native_display +
+  fdk_ext_surface_native -> VkXlibSurfaceCreateInfoKHR /
+  VkWaylandSurfaceCreateInfoKHR -> instance -> device (graphics+
+  present on one queue) -> a FIFO swapchain -> acquire + present +
+  vkQueueWaitIdle -> clean teardown. The ownership rule is the
+  recipe's spine: the add-on destroys only its Vulkan objects; FDK
+  keeps owning the wl_surface / X Window.
+- docs/EXTENDING.md gains the recipe (the accessors, the ownership
+  rule, the resize story — capabilities re-query on configure,
+  VK_ERROR_OUT_OF_DATE_KHR rebuilds — and the present-gating rule:
+  never present from inside a kind callback; pump between frames).
+- Sandbox: no root and no package repo, so no lavapipe — the example
+  BUILDS against vendored Vulkan headers and prints the honest SKIP
+  (VK_ERROR_INCOMPATIBLE_DRIVER). CI installs mesa-vulkan-drivers
+  and RUNS the full cycle under Xvfb; a failure there is an FDK bug,
+  not a doc note. No FDK walls were hit: the two accessors carry
+  everything the platform surface needs.
 ## D6 applied: the export-map's removal policy is enforceable
 
 - `make test-exports-removal` (run in CI right after the export-map

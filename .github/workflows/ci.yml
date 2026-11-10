@@ -278,6 +278,22 @@ jobs:
             || { kill $SWAY_PID 2>/dev/null; exit 1; }
           kill $SWAY_PID 2>/dev/null || true
 
+      # The Vulkan recipe (EXTENDING.md; examples/12): the add-on
+      # drives its own loader over FDK's native accessors. The runner
+      # gets mesa-vulkan-drivers = the lavapipe software ICD, so the
+      # full cycle RUNS here (the sandbox could only build + SKIP —
+      # no root for the ICD). A failure is an FDK bug, not a doc note.
+      - name: The Vulkan swapchain example (Xvfb + lavapipe)
+        run: |
+          sudo apt-get install -y --no-install-recommends libvulkan-dev \
+            mesa-vulkan-drivers
+          P=$PWD/build/fdk-install
+          cc -Iinclude examples/12_vulkan_surface.c $P/lib/libfdk.a \
+            -lX11 -lXext -lXrandr -lXrender -ldl -lwayland-client \
+            -lxkbcommon -lvulkan -lm -lz -pthread -o build/vk_example \
+            || exit 1
+          xvfb-run -a -s "-screen 0 800x600x24" ./build/vk_example || exit 1
+
       # Valgrind (Item: the third detector). ASan and valgrind cannot
       # share a binary, so this runs the RELEASE config (the -O2 step
       # above already built those objects). Leak detection fully ON;

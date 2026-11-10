@@ -492,6 +492,33 @@ extension-API v3 folding is opt-in access + honest capability flags:
   `fdk_ext_surface_native()`. Per-surface present arbitration and
   dmabuf/EGLImage import are the recorded next increments — the
   current answer is FDK's present owns the buffers.
+- **Vulkan** (the recipe, tested by examples/12_vulkan_surface.c):
+  FDK has no Vulkan loader and wants none — the add-on brings its
+  own. The whole contract is the two native accessors:
+    1. `fdk_ext_get_native_display(ctx, &nd)` — `nd.display` is the
+       `Display*` (X11) or `struct wl_display*` (Wayland).
+    2. `fdk_ext_surface_native(surface, &nh)` — `nh.xid` is the X
+       `Window`, `nh.pointer` the `struct wl_surface*`.
+  Create `VkSurfaceKHR` with `VkXlibSurfaceCreateInfoKHR`
+  (`dpy`, `window`) or `VkWaylandSurfaceCreateInfoKHR`
+  (`display`, `surface`), instance extensions `VK_KHR_surface` plus
+  the platform one. OWNERSHIP: the add-on destroys only its Vulkan
+  objects — `vkDestroySurfaceKHR` destroys the VkSurfaceKHR and
+  NEVER the wl_surface/Window underneath (Vulkan's contract agrees:
+  it does not own the native surface). RESIZE: the swapchain follows
+  the surface's configure — on a size change,
+  `fdk_ext_surface_notify_configure` fired, so query
+  `vkGetPhysicalDeviceSurfaceCapabilitiesKHR` again and rebuild the
+  swapchain (VK_ERROR_OUT_OF_DATE_KHR is the signal). PRESENT
+  GATING: FDK's frame callbacks drive FDK's own present path only;
+  a Vulkan swapchain presents on the add-on's queue independently —
+  do NOT present from inside a kind callback (the callbacks run on
+  FDK's dispatch thread; present from your own loop, pumping FDK
+  between frames like every example does). The example runs the
+  full cycle — instance, surface from FDK's native handles, device,
+  a FIFO swapchain, acquire + present + idle — under lavapipe in CI
+  (Xvfb), and prints an honest SKIP when the environment has no
+  Vulkan ICD at all.
 - **The unstable tier** (include/fdk/unstable.h): deeper access
   exported under the `FDK_UNSTABLE` version node — may change or
   vanish any release; graduates move into the public headers.
