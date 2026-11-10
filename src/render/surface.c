@@ -326,7 +326,11 @@ fdk_result fdk_surface_present(fdk_surface *surface) {
      * frame cheaply, which matches the CPU path's visible behavior. */
     if (surface->gpu != NULL || surface->gpu_failed) {
         if (surface->gpu_failed ||
-            surface->window->ops->window_gpu_flush == NULL) {
+            surface->window->ops->window_gpu_flush == NULL ||
+            fdk__gpu_engine_dead(surface)) {
+            /* A context-lost engine reports UNSUPPORTED: no stale
+             * frame, no fake OK (the same honest answer as init
+             * failure — GPU mode has no CPU fallback by contract). */
             return FDK_ERR_UNSUPPORTED;
         }
         return surface->window->ops->window_gpu_flush(

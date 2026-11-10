@@ -628,6 +628,38 @@ int main(void) {
         }
     }
 
+    /* ---- context loss: dead engine -> UNSUPPORTED, no fake frame --
+     * and a fresh window on the same context works again. */
+    {
+        fdk_surface *s = NULL;
+        fdk_window_get_surface(wgpu, &s);
+        fdk__gpu_simulate_context_loss(s);
+        fdk_result pr = fdk_surface_present(s);
+        CHECK(pr == FDK_ERR_UNSUPPORTED,
+              "context loss: present reports UNSUPPORTED (no stale "
+              "frame)");
+        fdk_color c1 = { 0.9f, 0.2f, 0.2f, 1.0f };
+        fdk_surface_fill_rect(s, (fdk_rect){ 0, 0, 10, 10 }, c1);
+        fdk_window_options opts2;
+        memset(&opts2, 0, sizeof(opts2));
+        opts2.render_mode = FDK_RENDER_GPU;
+        opts2.title = "fdk-gpu-test-gpu-2";
+        opts2.width = 64;
+        opts2.height = 48;
+        fdk_window *w2 = NULL;
+        if (fdk_ok(fdk_window_create(ctx, &opts2, &w2))) {
+            fdk_window_show(w2);
+            fdk_surface *s2 = NULL;
+            fdk_window_get_surface(w2, &s2);
+            fdk_surface_fill_rect(s2, (fdk_rect){ 0, 0, 10, 10 }, c1);
+            CHECK(fdk_ok(fdk_surface_present(s2)),
+                  "context loss: a fresh window presents normally");
+            fdk_window_destroy(w2);
+        } else {
+            CHECK(0, "context loss: fresh GPU window create");
+        }
+    }
+
     /* ---- resize: the engine follows the size-only re-acquire ------ */
     fdk_window_resize(wgpu, W + 40, H + 20);
     for (int i = 0; i < 3; i++) {

@@ -82,6 +82,14 @@ void fdk__gpu_blit_transformed(struct fdk_surface *s, fdk_matrix m,
 int fdk__gpu_engine_readback(struct fdk_surface *s, fdk_u32 *out,
                              int width, int height);
 
+/* Test seam: simulate GPU context loss (engine dead; present then
+ * reports UNSUPPORTED by contract). */
+void fdk__gpu_simulate_context_loss(struct fdk_surface *s);
+
+/* The present contract's query: nonzero when the engine is dead. */
+int fdk__gpu_engine_dead(struct fdk_surface *s);
+void fdk__gpu_simulate_context_loss(struct fdk_surface *s);
+
 /* Issue the pending batch. Runs with the window's lane context CURRENT
  * (the caller owns makeCurrent); the caller swaps/presents after. */
 void fdk__gpu_flush(struct fdk_surface *s);

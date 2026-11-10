@@ -1403,3 +1403,21 @@ void fdk__gpu_flush(struct fdk_surface *s) {
         g->dead = 1;
     }
 }
+
+/* Test seam: simulate GPU context loss — the engine marks itself dead
+ * (the state a real GL context loss / device removal produces). The
+ * contract under test: present reports UNSUPPORTED, primitives no-op,
+ * and nothing crashes or fakes a frame. */
+void fdk__gpu_simulate_context_loss(struct fdk_surface *s) {
+    struct fdk_gpu_state *g = gp_state(s);
+    if (g != NULL) {
+        g->dead = 1;
+    }
+}
+
+/* Query for the present contract: a dead (context-lost) engine must
+ * make present report UNSUPPORTED — never a fake or stale frame. */
+int fdk__gpu_engine_dead(struct fdk_surface *s) {
+    struct fdk_gpu_state *g = gp_state(s);
+    return g != NULL && g->dead;
+}
