@@ -1276,3 +1276,17 @@ void *fdk_wayland_session_lock_surface(fdk_platform_connection *conn,
                                        void *handle, void *wl_surface,
                                        void *wl_output);
 void fdk_wayland_session_lock_unlock(void *handle);
+
+
+/* wayland_im_vk.c — P3: input-method-v2 + virtual-keyboard */
+void *fdk_wayland_input_method_create(fdk_platform_connection *conn,
+                                      void *wl_seat);
+void fdk_wayland_input_method_destroy(void *im);
+void *fdk_wayland_input_method_grab(void *im);
+void fdk_wayland_input_method_commit(void *im, const char *text);
+void *fdk_wayland_virtual_keyboard_create(fdk_platform_connection *conn,
+                                          void *wl_seat,
+                                          const char *keymap,
+                                          fdk_u32 size);
+void fdk_wayland_virtual_keyboard_key(void *kb, fdk_u32 time_ms,
+                                      fdk_u32 key, fdk_u32 state);

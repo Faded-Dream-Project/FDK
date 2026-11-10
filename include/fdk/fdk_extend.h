@@ -1021,4 +1021,29 @@ void *fdk_session_lock_surface(fdk_context *ctx, void *lock,
                                void *wl_surface, void *wl_output);
 void fdk_session_lock_unlock(void *lock);
 
+
+
+/* ---- P3: input-method-v2 + virtual-keyboard (the IM add-on pair) --------
+ *
+ * The on-screen-keyboard / IM add-on protocols, first-class:
+ * fdk_input_method_open mints the input method bound to a seat (raw
+ * wl_seat from the add-on raw-event surface or FDK's seat accessor) —
+ * the compositor routes text-input-v3 traffic to it; the add-on sets
+ * ITS OWN listeners (activate/deactivate/done) on the returned raw
+ * proxy, commits text with fdk_input_method_commit (commit_string +
+ * the protocol's done), and may take the keyboard grab
+ * (fdk_input_method_grab). fdk_virtual_keyboard_create mints the
+ * companion virtual keyboard (optional keymap; XKB_LAYOUT format);
+ * fdk_virtual_keyboard_key emits key/press-release events.
+ * Wayland-only: NULL/UNSUPPORTED where FDK_EXT_CAP_INPUT_METHOD_V2 /
+ * FDK_EXT_CAP_VIRTUAL_KEYBOARD are false. */
+void *fdk_input_method_open(fdk_context *ctx, void *wl_seat);
+void fdk_input_method_close(void *im);
+void *fdk_input_method_grab_keyboard(void *im);
+void fdk_input_method_commit(void *im, const char *text);
+void *fdk_virtual_keyboard_create(fdk_context *ctx, void *wl_seat,
+                                  const char *keymap, fdk_u32 keymap_size);
+void fdk_virtual_keyboard_key(void *kb, fdk_u32 time_ms, fdk_u32 key,
+                              fdk_u32 state);
+
 #endif /* FDK_EXTEND_H */

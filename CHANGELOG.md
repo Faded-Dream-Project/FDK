@@ -1,4 +1,19 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## P3(f): the input-method-v2 + virtual-keyboard create/bind APIs
+
+- New public API (fdk_extend.h): fdk_input_method_open (mints the
+  input method bound to a raw wl_seat — the compositor routes
+  text-input-v3 traffic to it), fdk_input_method_close,
+  fdk_input_method_grab_keyboard (the keyboard grab), and
+  fdk_input_method_commit (commit_string + the protocol done). The
+  add-on sets ITS OWN listeners on the returned raw proxy (activate/
+  deactivate/done) — the raw-event-surface pattern.
+- The companion: fdk_virtual_keyboard_create (optional XKB keymap
+  through a memfd) and fdk_virtual_keyboard_key. Gated by
+  FDK_EXT_CAP_INPUT_METHOD_V2 / FDK_EXT_CAP_VIRTUAL_KEYBOARD;
+  NULL/UNSUPPORTED elsewhere.
+- Item 4's remaining piece is the sway integration test exercising
+  the whole P3 surface.
 ## P3(e): the session-lock surface — first-class create/bind API
 
 - New public API (fdk_extend.h): fdk_session_lock_open (mints the

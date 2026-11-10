@@ -360,6 +360,16 @@ typedef struct fdk_platform_ops {
                                   void *lock, void *wl_surface,
                                   void *wl_output);
     void (*session_lock_unlock)(void *lock);
+    void *(*input_method_create)(fdk_platform_connection *conn,
+                                 void *wl_seat);
+    void (*input_method_destroy)(void *im);
+    void *(*input_method_grab)(void *im);
+    void (*input_method_commit)(void *im, const char *text);
+    void *(*virtual_keyboard_create)(fdk_platform_connection *conn,
+                                     void *wl_seat, const char *keymap,
+                                     fdk_u32 size);
+    void (*virtual_keyboard_key)(void *kb, fdk_u32 time_ms, fdk_u32 key,
+                                 fdk_u32 state);
     /* P3: the X11 add-on event filter (x11_dispatch.c). */
     fdk_result (*x11_set_event_filter)(fdk_platform_connection *conn,
                                        int (*filter)(void *, void *),

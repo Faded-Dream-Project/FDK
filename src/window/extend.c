@@ -1082,3 +1082,46 @@ void fdk_session_lock_unlock(void *lock) {
     extern void fdk_session_lock_unlock_impl(void *lock);
     fdk_session_lock_unlock_impl(lock);
 }
+
+
+/* ---- P3: input-method-v2 + virtual-keyboard (Wayland) ------------------ */
+void *fdk_input_method_open(fdk_context *ctx, void *wl_seat) {
+    if (ctx == NULL || ctx->ops == NULL ||
+        ctx->ops->input_method_create == NULL) {
+        return NULL;
+    }
+    return ctx->ops->input_method_create(ctx->conn, wl_seat);
+}
+
+void fdk_input_method_close(void *im) {
+    extern void fdk_wayland_input_method_destroy(void *im);
+    fdk_wayland_input_method_destroy(im);
+}
+
+void *fdk_input_method_grab_keyboard(void *im) {
+    extern void *fdk_wayland_input_method_grab(void *im);
+    return fdk_wayland_input_method_grab(im);
+}
+
+void fdk_input_method_commit(void *im, const char *text) {
+    extern void fdk_wayland_input_method_commit(void *im, const char *t);
+    fdk_wayland_input_method_commit(im, text);
+}
+
+void *fdk_virtual_keyboard_create(fdk_context *ctx, void *wl_seat,
+                                  const char *keymap,
+                                  fdk_u32 keymap_size) {
+    if (ctx == NULL || ctx->ops == NULL ||
+        ctx->ops->virtual_keyboard_create == NULL) {
+        return NULL;
+    }
+    return ctx->ops->virtual_keyboard_create(ctx->conn, wl_seat, keymap,
+                                             keymap_size);
+}
+
+void fdk_virtual_keyboard_key(void *kb, fdk_u32 time_ms, fdk_u32 key,
+                              fdk_u32 state) {
+    extern void fdk_wayland_virtual_keyboard_key(void *kb, fdk_u32 t,
+                                                 fdk_u32 k, fdk_u32 s);
+    fdk_wayland_virtual_keyboard_key(kb, time_ms, key, state);
+}
