@@ -1,4 +1,11 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The clang leg's first catch: a GCC-only nested function
+
+textview.c defined is_word_cp as a NESTED function — a GCC extension
+clang rejects (the call then failed as an implicit declaration). gcc
+had silently accepted it for the whole project's life; the new clang
+leg of the sway lane caught it on its first build. Hoisted to a
+file-scope static; battery green.
 ## CI fix: set_cursor is void by contract (the example compile)
 
 The panel example compiled against a guessed fdk_result return for

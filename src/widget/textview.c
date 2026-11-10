@@ -175,15 +175,18 @@ static void tv_paragraph_range(const char *s, size_t len, size_t i,
 
 /* The word at byte offset i (the Entry's word_range discipline:
  * runs of word characters vs runs of separators). */
+/* Codepoint classifier: letters/digits/underscore are "word",
+ * everything else (including newline) is separator. (Was a GCC-only
+ * nested function; clang rightly refused it — the CI clang leg's
+ * first catch.) */
+static bool is_word_cp(fdk_u32 cp) {
+    return (cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z') ||
+           (cp >= '0' && cp <= '9') || cp == '_' ||
+           (cp >= 0x80u && cp != 0x2026u /* treat text as word */);
+}
+
 static void tv_word_range(const char *s, size_t len, size_t i,
                           size_t *out_start, size_t *out_end) {
-    /* Codepoint classifier: letters/digits/underscore are "word",
-     * everything else (including newline) is separator. */
-    bool is_word_cp(fdk_u32 cp) {
-        return (cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z') ||
-               (cp >= '0' && cp <= '9') || cp == '_' ||
-               (cp >= 0x80u && cp != 0x2026u /* treat text as word */);
-    }
     /* Snap i to a codepoint boundary. */
     while (i < len && tv_utf8_is_cont((unsigned char)s[i])) {
         i++;
