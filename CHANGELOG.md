@@ -1,4 +1,24 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## D5 applied: the banned-declaration gate is a BUILD gate
+
+- tools/header_gate.c is the gate: it scans the CORE public headers
+  (include/fdk/*.h) with the same comment/string stripping the old
+  in-test scanner used — prose mentions stay legal, a DECLARATION
+  fails — and its failure message is #error-shaped. It runs as part
+  of `make all` (header-gate is the first prereq), so a distro build
+  that skips tests can no longer ship the violation silently.
+- Scope note: include/fdk/ext/wayland.h is the SANCTIONED native-
+  accessor door (its struct wl_display/wl_registry/wl_seat forward
+  declarations are its documented purpose); the gate's scope is the
+  core headers, exactly what the in-test gate's 5-header list
+  covered. include/fdk/unstable.h is in scope and clean.
+- The proof test (test_matrix.c) feeds a synthetic bad header (a
+  zwlr_ declaration in code) to the SAME tool and asserts the
+  failure, asserts the prose/string shapes stay legal, and asserts
+  the tool passes the real headers. The inline scanner is GONE —
+  one scanner, one banned list, used by both the build and the test.
+- Battery green; make all runs the gate first ("header gate: all
+  public headers clean").
 ## D2 applied: the event payload ceiling is a rule (128)
 
 - _Static_assert(sizeof(fdk_event_data) <= 128) now sits in

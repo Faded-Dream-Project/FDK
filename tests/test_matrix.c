@@ -13,6 +13,15 @@
 #include "fdk/fdk_extend.h"
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/wait.h>
+
+#ifndef BUILD_DIR_STR
+#define BUILD_DIR_STR "build"
+#endif
+#ifndef NL
+#define NL "\n"
+#endif
 #include <stdlib.h>
 
 static int g_fail = 0;
@@ -147,90 +156,70 @@ int main(int argc, char **argv) {
             fdk_ext_has_capability(ctx, FDK_EXT_CAP_RENDER_GPU)),
           "HYBRID and GPU are exclusive");
 
-    /* ---- the unstable-tier rule ----------------------------------------- */
-    /* No unstable-protocol TYPE name may appear in a public header:
-     * the bindings live in src/platform/wayland/generated/ and the
-     * public surface speaks void* (fdk_wl_raw_bind). */
+    /* ---- the unstable-tier rule (D5: the BUILD gate) -------------------- */
+    /* The gate is tools/header_gate.c, run by `make all` — a banned
+     * declaration fails the BUILD, not merely the suite. This test
+     * proves the gate itself: (1) the tool passes the real public
+     * headers, and (2) the SAME tool rejects a synthetic bad header
+     * (a zwlr_ declaration in code), while prose mentions in comments
+     * and strings stay legal. */
     {
-        static const char *pub_headers[] = {
-            "include/fdk/fdk_extend.h", "include/fdk/fdk_text.h",
-            "include/fdk/fdk_window.h", "include/fdk/fdk_surface.h",
-            "include/fdk/fdk_core.h",   NULL,
-        };
-        static const char *banned[] = {
-            "zwp_", "zwlr_", "ext_session_lock", "xdg_activation_v1",
-            "wl_registry", "wl_seat", NULL,
-        };
-        int clean = 1;
-        for (int i = 0; pub_headers[i] != NULL; i++) {
-            FILE *f = fopen(pub_headers[i], "r");
-            if (f == NULL) {
-                continue;
-            }
-            /* strip comments over the WHOLE file (block-comment state
-             * survives line breaks), then scan what remains */
-            char buf[256 * 1024];
-            size_t len = fread(buf, 1, sizeof buf - 1, f);
-            buf[len] = '\0';
-            fclose(f);
-            char *code = malloc(len + 1);
-            size_t o = 0;
-            int in_comment = 0, in_str = 0, in_chr = 0;
-            for (size_t k = 0; k < len; k++) {
-                char c = buf[k], n2 = k + 1 < len ? buf[k + 1] : '\0';
-                if (in_comment) {
-                    if (c == '*' && n2 == '/') {
-                        in_comment = 0;
-                        k++;
-                    }
-                    continue;
-                }
-                if (in_str) {
-                    if (c == '\\') {
-                        k++;
-                    } else if (c == '"') {
-                        in_str = 0;
-                    }
-                    code[o++] = ' ';
-                    continue;
-                }
-                if (in_chr) {
-                    if (c == '\\') {
-                        k++;
-                    } else if (c == '\'') {
-                        in_chr = 0;
-                    }
-                    code[o++] = ' ';
-                    continue;
-                }
-                if (c == '/' && n2 == '*') {
-                    in_comment = 1;
-                    k++;
-                    code[o++] = ' ';
-                    continue;
-                }
-                if (c == '/' && n2 == '/') {
-                    break; /* the rest of the line is a comment */
-                }
-                if (c == '"') {
-                    in_str = 1;
-                } else if (c == '\'') {
-                    in_chr = 1;
-                }
-                code[o++] = c;
-            }
-            code[o] = '\0';
-            for (int b = 0; banned[b] != NULL; b++) {
-                if (strstr(code, banned[b]) != NULL) {
-                    printf("[FAIL] unstable-tier leak: %s declares '%s'\n",
-                           pub_headers[i], banned[b]);
-                    clean = 0;
-                }
-            }
-            free(code);
+        const char *gate = getenv("FDK_HEADER_GATE");
+        char gbuf[512];
+        if (gate == NULL) {
+            snprintf(gbuf, sizeof gbuf, "%s/header_gate", BUILD_DIR_STR);
+            gate = gbuf;
         }
-        CHECK(clean, "no unstable-protocol declarations in public "
-                     "headers");
+        if (access(gate, X_OK) != 0) {
+            CHECK(0, "header gate tool missing (make all builds it)");
+        } else {
+            int rc = 0;
+            (void)system("mkdir -p " BUILD_DIR_STR "/tests/data");
+            /* (1) the real headers: the gate's own `make all` run is
+             * the enforcement; here assert the tool agrees. */
+            rc = system("build/header_gate include/fdk/*.h "
+                        "> /dev/null 2>&1");
+            CHECK(WIFEXITED(rc) && WEXITSTATUS(rc) == 0,
+                  "header gate: all real public headers clean");
+
+            /* (2) the synthetic violation: a DECLARATION must fail. */
+            const char *bad_path = BUILD_DIR_STR
+                "/tests/data/bad_gate_header.h";
+            FILE *bf = fopen(bad_path, "w");
+            if (bf == NULL) {
+                CHECK(0, "cannot write the bad-header fixture");
+            } else {
+                fputs("#include \"fdk/fdk.h\"" NL
+                      "struct zwlr_layer_shell_v1 *bad_idea;" NL, bf);
+                fclose(bf);
+                char cmd[1024];
+                snprintf(cmd, sizeof cmd, "%s %s > /dev/null 2>&1",
+                         gate, bad_path);
+                rc = system(cmd);
+                CHECK(WIFEXITED(rc) && WEXITSTATUS(rc) != 0,
+                      "header gate: a banned DECLARATION fails");
+            }
+
+            /* (3) the legal shapes: prose in a comment, a token inside
+             * a string — the stripping must keep them legal. */
+            const char *ok_path = BUILD_DIR_STR
+                "/tests/data/prose_gate_header.h";
+            FILE *of = fopen(ok_path, "w");
+            if (of == NULL) {
+                CHECK(0, "cannot write the prose-header fixture");
+            } else {
+                fputs("/* prose mention: zwlr_ in a comment is legal */" NL
+                      "static const char *s = "
+                      "\"zwlr_ in a string too\";" NL, of);
+                fclose(of);
+                char cmd[1024];
+                snprintf(cmd, sizeof cmd, "%s %s > /dev/null 2>&1",
+                         gate, ok_path);
+                rc = system(cmd);
+                CHECK(WIFEXITED(rc) && WEXITSTATUS(rc) == 0,
+                      "header gate: prose mentions stay legal");
+            }
+        }
     }
 
     fdk_shutdown(ctx);

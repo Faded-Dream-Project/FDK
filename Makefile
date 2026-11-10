@@ -389,7 +389,7 @@ EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
 # every other consumer of libfdk.a.
 # widget_sizes.c is NOT a shipped CLI tool: it is the D1 measurement
 # probe (private include path), built by the `sizes` target below.
-TOOL_SRCS := $(filter-out tools/widget_sizes.c,$(wildcard tools/*.c))
+TOOL_SRCS := $(filter-out tools/widget_sizes.c tools/header_gate.c,$(wildcard tools/*.c))
 TOOL_BINS := $(patsubst tools/%.c,$(BUILD_DIR)/tools/%,$(TOOL_SRCS))
 
 # test_cli_tools stat()s the three tools next to itself; the test
@@ -429,6 +429,28 @@ DEPS := $(LIB_OBJS:.o=.d) $(LIB_OBJS_PIC:.o=.d)
 
 .PHONY: all release static shared test test-x11 test-dbus test-textdemo test-wayland bench examples tools test-apps test-apps-smoke install uninstall clean verify-exports sizes
 
+# D5 (PRE-1.0-DECISIONS): the banned-declaration BUILD gate. A gate
+# that only fails the test suite ships violations from every test-
+# skipping distro build; this one runs as part of `make all`. The
+# tool scans every public header with the comment/string stripping
+# the old in-test scanner used (prose mentions are legal), and the
+# proof test feeds a synthetic bad header to the SAME tool.
+HEADER_GATE := $(BUILD_DIR)/header_gate
+# Scope: the CORE public headers. include/fdk/ext/wayland.h is the
+# SANCTIONED native-accessor door — its forward declarations
+# (struct wl_display/wl_registry/wl_seat) are its documented purpose,
+# exactly what the in-test gate's 5-header scope always excluded.
+HEADER_GATES := $(wildcard include/fdk/*.h)
+
+header-gate-tool: $(HEADER_GATE)
+
+$(HEADER_GATE): tools/header_gate.c
+	@mkdir -p $(dir $@)
+	$(CC) -O2 -Wall -Wextra tools/header_gate.c -o $@
+
+header-gate: $(HEADER_GATE) $(HEADER_GATES)
+	@$(HEADER_GATE) $(HEADER_GATES) && echo "header gate: all public headers clean"
+
 # D1 (PRE-1.0-DECISIONS): the embed-budget MEASUREMENT. The decision's
 # rule — keep 1024 iff the largest widget is under 640 bytes — is
 # decided by DATA, so the data has a target. One shared struct serves
@@ -451,7 +473,7 @@ $(BUILD_DIR)/widget_sizes: tools/widget_sizes.c src/widget/widget_internal.h \
 # build/tools/ already existed) stayed green.
 .DEFAULT_GOAL := all
 
-all: static shared tools
+all: header-gate static shared tools
 
 # `make release` re-invokes make with FDK_CONFIG=release: every
 # object then rebuilds against the release flags through the config
