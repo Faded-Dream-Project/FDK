@@ -179,6 +179,15 @@ int fdk_ext_has_capability(fdk_context *ctx, fdk_ext_capability cap) {
              * when the compositor advertises it. */
             return ops->ime_text_input_available != NULL &&
                    ops->ime_text_input_available(ctx->conn);
+        case FDK_EXT_CAP_SESSION_LOCK:
+            return ops->session_lock_available != NULL &&
+                   ops->session_lock_available(ctx->conn);
+        case FDK_EXT_CAP_INPUT_METHOD_V2:
+            return ops->input_method_available != NULL &&
+                   ops->input_method_available(ctx->conn);
+        case FDK_EXT_CAP_VIRTUAL_KEYBOARD:
+            return ops->virtual_keyboard_available != NULL &&
+                   ops->virtual_keyboard_available(ctx->conn);
         case FDK_EXT_CAP_RENDER_CPU:
             /* The software rasterizer exists in every mode; in GPU mode
              * its pixels ride the lane's texture upload. */

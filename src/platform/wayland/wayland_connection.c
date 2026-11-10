@@ -10,6 +10,9 @@
 #include "generated/text-input-unstable-v3-client-protocol.h"
 #include "generated/idle-inhibit-unstable-v1-client-protocol.h"
 #include "generated/xdg-activation-v1-client-protocol.h"
+#include "generated/ext-session-lock-v1-client-protocol.h"
+#include "generated/input-method-unstable-v2-client-protocol.h"
+#include "generated/virtual-keyboard-unstable-v1-client-protocol.h"
 #include "generated/tablet-unstable-v2-client-protocol.h"
 #include "generated/wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 #include "generated/wlr-layer-shell-unstable-v1-client-protocol.h"
@@ -238,6 +241,28 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->activation =
             wl_registry_bind(registry, name,
                              &xdg_activation_v1_interface, 1);
+    } else if (strcmp(interface,
+                      ext_session_lock_manager_v1_interface.name) == 0) {
+        /* OPTIONAL (P3): ext-session-lock-v1 — the session-lock
+         * screen protocol. Version 1 is the whole protocol. */
+        conn->session_lock_manager =
+            wl_registry_bind(registry, name,
+                             &ext_session_lock_manager_v1_interface, 1);
+    } else if (strcmp(interface,
+                      zwp_input_method_manager_v2_interface.name) == 0) {
+        /* OPTIONAL (P3): input-method-unstable-v2 — the IM add-on
+         * protocol (the compositor-side counterpart of text-input). */
+        conn->input_method_manager =
+            wl_registry_bind(registry, name,
+                             &zwp_input_method_manager_v2_interface, 1);
+    } else if (strcmp(interface,
+                      zwp_virtual_keyboard_manager_v1_interface.name) ==
+               0) {
+        /* OPTIONAL (P3): virtual-keyboard — the software-keyboard
+         * companion of input-method. */
+        conn->virtual_keyboard_manager = wl_registry_bind(
+            registry, name, &zwp_virtual_keyboard_manager_v1_interface,
+            1);
     } else if (strcmp(interface, "wp_linux_drm_syncobj_manager_v1") == 0) {
         /* §20 diagnostic (the rc2-line re-land), deliberately NOT a
          * bind: string-matched only, so it needs no protocol XML, no
@@ -641,4 +666,17 @@ int fdk_wayland_toplevels_available(fdk_platform_connection *conn) {
 
 int fdk_wayland_ime_text_input_available(fdk_platform_connection *conn) {
     return conn != NULL && conn->text_input_manager != NULL;
+}
+
+int fdk_wayland_session_lock_available(fdk_platform_connection *conn) {
+    return conn != NULL && conn->session_lock_manager != NULL;
+}
+
+int fdk_wayland_input_method_available(fdk_platform_connection *conn) {
+    return conn != NULL && conn->input_method_manager != NULL;
+}
+
+int fdk_wayland_virtual_keyboard_available(
+    fdk_platform_connection *conn) {
+    return conn != NULL && conn->virtual_keyboard_manager != NULL;
 }

@@ -345,6 +345,9 @@ typedef struct fdk_platform_ops {
     int (*window_idle_inhibit_available)(fdk_platform_connection *conn);
     int (*toplevels_available)(fdk_platform_connection *conn);
     int (*ime_text_input_available)(fdk_platform_connection *conn);
+    int (*session_lock_available)(fdk_platform_connection *conn);
+    int (*input_method_available)(fdk_platform_connection *conn);
+    int (*virtual_keyboard_available)(fdk_platform_connection *conn);
     int (*window_activation_available)(fdk_platform_connection *conn);
     fdk_result (*window_set_idle_inhibit)(fdk_platform_window *pwindow,
                                           int inhibit);

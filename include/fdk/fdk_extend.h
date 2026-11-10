@@ -180,6 +180,9 @@ typedef enum fdk_ext_capability {
                                         * fdk_toplevel.h list)       */
     FDK_EXT_CAP_TEXT_INPUT_V3 = 13, /* zwp_text_input_manager_v3 (the
                                      * IME path)                    */
+    FDK_EXT_CAP_SESSION_LOCK = 14,  /* ext_session_lock_manager_v1   */
+    FDK_EXT_CAP_INPUT_METHOD_V2 = 15, /* zwp_input_method_manager_v2 */
+    FDK_EXT_CAP_VIRTUAL_KEYBOARD = 16, /* zwp_virtual_keyboard_mgr_v1 */
 } fdk_ext_capability;
 
 /* Returns nonzero when `ctx`'s connected backend has `cap`.

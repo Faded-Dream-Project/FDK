@@ -1,4 +1,18 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## P3(b): session-lock, input-method-v2, virtual-keyboard bound
+
+- Fetched the protocol XMLs (ext-session-lock-v1 from
+  wayland-protocols staging; virtual-keyboard-unstable-v1 from the
+  wlroots tree — it never lived in wayland-protocols; input-method-v2
+  was already vendored, and v3 does not exist upstream: v2 is
+  current), generated with the repo's scanner, and added the
+  private-code objects to the build.
+- The registry binds ext_session_lock_manager_v1,
+  zwp_input_method_manager_v2 and zwp_virtual_keyboard_manager_v1 as
+  optional globals; new capability flags FDK_EXT_CAP_SESSION_LOCK
+  (14), FDK_EXT_CAP_INPUT_METHOD_V2 (15), FDK_EXT_CAP_VIRTUAL_KEYBOARD
+  (16) backed by availability probe ops. The create/bind APIs land
+  with the examples that exercise them.
 ## P3(a): the four binds first-class — caps + the public inhibit setter
 
 - New capability flags (fdk_extend.h): FDK_EXT_CAP_IDLE_INHIBIT (10),

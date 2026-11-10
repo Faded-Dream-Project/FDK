@@ -109,6 +109,11 @@ struct fdk_platform_connection {
      * after the read so a spawned grandchild cannot inherit a stale
      * token (the protocol's own hygiene rule). */
     struct xdg_activation_v1 *activation;
+    /* P3 first-class protocol managers (optional globals; NULL = the
+     * compositor lacks the protocol = the honest UNSUPPORTED path). */
+    struct ext_session_lock_manager_v1 *session_lock_manager;
+    struct zwp_input_method_manager_v2 *input_method_manager;
+    struct zwp_virtual_keyboard_manager_v1 *virtual_keyboard_manager;
     char *launch_token;
 
     /* text-input-v3 (1.0.0, M-1): the OPTIONAL IME manager + the
@@ -1113,6 +1118,10 @@ int fdk_wayland_idle_inhibit_available(fdk_platform_connection *conn);
 int fdk_wayland_activation_available(fdk_platform_connection *conn);
 int fdk_wayland_toplevels_available(fdk_platform_connection *conn);
 int fdk_wayland_ime_text_input_available(fdk_platform_connection *conn);
+int fdk_wayland_session_lock_available(fdk_platform_connection *conn);
+int fdk_wayland_input_method_available(fdk_platform_connection *conn);
+int fdk_wayland_virtual_keyboard_available(
+    fdk_platform_connection *conn);
 fdk_result fdk_wayland_window_set_idle_inhibit(
     fdk_platform_window *pwindow, int inhibit);
 
