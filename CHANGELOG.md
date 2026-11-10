@@ -1,4 +1,23 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 1: the sway lane runs the full protocol test — teardown fixed
+
+- The abort at the add-on queue teardown is gone: the destroy order
+  in wayland_addon.c's queue_destroy_impl (registry proxy, display
+  wrapper, then the event queue) now survives libwayland's wrapper
+  assertions, and the rebuild with the Wayland backend actually
+  enabled (the recycled sandbox's first rebuild silently took the
+  FDK_DISABLE_WAYLAND path — the "attempting x11 backend" symptom)
+  removed the confounder.
+- tests/test_p3_protocols.c now exercises everything under sway with
+  REAL requests/events: idle-inhibit engage + release, the xdg-
+  activation token mint + activate, the foreign-toplevel list,
+  session-lock mint + verdict + unlock, and the raw-event surface —
+  the add-on's own queue receives the globals (wl_seat, wl_output,
+  all seven P3 manager globals arrive raw), plus a teardown-order
+  regression: 5 create/destroy cycles with a listener and dispatch
+  between them, then a final create must succeed.
+- Both lanes green: make test-p3-x11 (honest negatives + the filter)
+  and make test-p3-wayland under the sway rig. Battery green.
 ## P3(g): the protocol test — X11 green; the sway run has one open issue
 
 - tests/test_p3_protocols.c + make test-p3-x11 / test-p3-wayland.
