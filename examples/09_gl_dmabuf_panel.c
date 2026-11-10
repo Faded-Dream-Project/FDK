@@ -371,8 +371,10 @@ int main(void) {
     /* The cursor over the panel: the add-on-facing set_cursor (the
      * audit's §5 gap) — a labeled pointer shape, the documented
      * UNSUPPORTED contract on a lane without the cursor machinery. */
-    fdk_result cr_ = fdk_ext_surface_set_cursor(g_panel, "default");
-    printf("[panel] set_cursor: %s\n", fdk_result_to_string(cr_));
+    /* void by contract: the cursor set is best-effort per lane (the
+     * documented UNSUPPORTED surfaces at the capability, not here). */
+    fdk_ext_surface_set_cursor(g_panel, "default");
+    printf("[panel] set_cursor issued\n");
 
     /* The loop: ~3 seconds, three worker frames. The frame callback
      * path (fdk_ext_gl_set_frame_callback) is the add-on's alternative

@@ -1,4 +1,13 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## CI fix: set_cursor is void by contract (the example compile)
+
+The panel example compiled against a guessed fdk_result return for
+fdk_ext_surface_set_cursor — the header's contract is void (the
+cursor set is best-effort per lane; UNSUPPORTED surfaces at the
+capability). Fixed, rebuilt against the installed tree, run under
+Xvfb: exit 0 with the honest labels. CI's ubuntu job failed on
+exactly this (the first CI run of the example step caught it — the
+gate works).
 ## The audit's gap list: four of five closed, the count-only bug found
 
 - fdk_texture_dmabuf_query's count-only shape (max_modifiers=0, NULL
