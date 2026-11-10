@@ -1,0 +1,45 @@
+# lsan-wayland.supp - the DOCUMENTED suppressions for the Wayland
+# lane's two libwayland-client-internal allocations (CI catch,
+# 2026-11-10; refined 2026-11-11).
+#
+# ROLE: documentation + a clang-LSan option file. CI consumes NEITHER:
+# the shutdown-leak fixes (the five registry manager proxies, the
+# test's discarded queue) made both sway targets leak-clean under
+# plain detection, and gcc-14's libasan parser cannot consume
+# suppression files reliably (the same valid file flips between
+# parse-ok and a fatal parse-error). Leak detection stays fully ON in
+# CI; this file names the two allocations so the pattern is on record
+# for any run using clang's sanitizer runtime:
+#   ASAN_OPTIONS=detect_leaks=1:suppressions=tests/lsan-wayland.supp
+#
+# WHY THESE TWO
+#
+# The Wayland client library's own allocations that survive
+# wl_display_disconnect on libwayland-client 1.22 (ubuntu-24.04,
+# debian stable): two 96-byte callocs whose stacks the unwinder
+# cannot attribute past the ffi trampoline (the registry-global
+# dispatcher). On the pinned 1.23 the same teardown is clean - the
+# allocations do not exist.
+#
+# NARROWNESS
+#
+# LSan suppression entries match a symbol or a module name in the
+# allocation's stack. Because the 1.22 stacks truncate INSIDE
+# libwayland-client, the only honest frames are the library's own
+# entry points named in the report:
+#   - wl_proxy_marshal_array_flags (the wl_registry_bind path)
+#   - wl_proxy_create_wrapper     (the queue wrapper path)
+# A module-wide `leak:libwayland-client.so.0` would hide every future
+# libwayland leak, so it is deliberately NOT used: these two entries
+# name the two allocations' innermost FDK-independent frames and
+# nothing else. Any NEW leak (FDK's or libwayland's) with a different
+# shape still fails the suite.
+#
+# FDK's own proxy discipline is proven with detection ON:
+#   - the X11 lane runs the same suite leak-clean,
+#   - the five P3 create/destroy cycles run leak-clean on Wayland,
+#   - the 2026-11-11 audit fixed the last real leaks (five registry
+#     manager proxies in the connection shutdown, one discarded test
+#     queue in test_matrix.c).
+leak:wl_proxy_marshal_array_flags
+leak:wl_proxy_create_wrapper

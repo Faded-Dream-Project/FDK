@@ -1,4 +1,25 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Item 1: CI green at the tip; the blanket leak-suppression replaced
+
+- The run for e151b5c: build + test (ubuntu) SUCCESS - every fix from
+  the previous loop (the 1.22 weak ref, the include guard, the sway
+  env, the shutdown destroys) passed under the stock CI environment.
+  The distro matrix: debian/rpm/alpine/void green; the arch job hung
+  mid-build for ~2h on a dead runner (the identical matrix passed on
+  the three prior runs - a rerun on the next push settles it).
+- The blanket ASAN_OPTIONS=detect_leaks=0 on the two sway targets is
+  GONE: leak detection is fully ON there now. The hunt found one more
+  REAL leak - test_matrix.c created a wl queue on the Wayland lane
+  and discarded the handle (the struct + the wrapped-display
+  registry proxies); fixed with a proper create/destroy. Both targets
+  verified leak-clean with plain detection.
+- tests/lsan-wayland.supp: the two libwayland-1.22-internal 96-byte
+  allocations documented frame-by-frame (wl_proxy_marshal_array_flags
+  / wl_proxy_create_wrapper; why module-wide is deliberately not
+  used). CI does not consume it: gcc-14's libasan parser rejects
+  valid LSan files non-deterministically (verified), so CI relies on
+  the actual fixes with detection ON; clang-LSan runs can pass the
+  file via ASAN_OPTIONS.
 ## Item 4: the compositor reality table (EXTENDING.md §12)
 
 - A per-cap table over sway/Hyprland/labwc (wlroots), KDE KWin, GNOME

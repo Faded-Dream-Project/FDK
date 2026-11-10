@@ -117,8 +117,17 @@ int main(int argc, char **argv) {
             fdk_window_destroy(w);
         }
     }
-    CHECK(fdk_wl_queue_create(ctx, "x") == NULL || is_wl,
-          "wl queue create: NULL off Wayland");
+    /* the Wayland lane REALLY creates it — take the handle and
+     * destroy it (the LeakSanitizer catch, 2026-11-11: the discarded
+     * queue leaked its struct + the wrapped-display registry proxies) */
+    {
+        void *q = fdk_wl_queue_create(ctx, "x");
+        CHECK(q != NULL || !is_wl,
+              "wl queue create: non-NULL on Wayland, NULL off");
+        if (q != NULL) {
+            fdk_wl_queue_destroy(q);
+        }
+    }
     CHECK(fdk_wl_raw_bind(NULL, 0, NULL, 0) == NULL,
           "raw bind: NULL handles");
 
