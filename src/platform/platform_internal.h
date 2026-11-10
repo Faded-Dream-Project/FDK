@@ -340,6 +340,12 @@ typedef struct fdk_platform_ops {
      * FDK_ERR_UNSUPPORTED when the backend/compositor has no
      * native mechanism — the idle module then rides the
      * org.freedesktop.ScreenSaver D-Bus path instead. Idempotent. */
+    /* P3 first-class availability probes (the manager global's
+     * truth; NULL where the platform has no such protocol). */
+    int (*window_idle_inhibit_available)(fdk_platform_connection *conn);
+    int (*toplevels_available)(fdk_platform_connection *conn);
+    int (*ime_text_input_available)(fdk_platform_connection *conn);
+    int (*window_activation_available)(fdk_platform_connection *conn);
     fdk_result (*window_set_idle_inhibit)(fdk_platform_window *pwindow,
                                           int inhibit);
 

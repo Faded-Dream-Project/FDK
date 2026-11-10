@@ -1,4 +1,22 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## P3(a): the four binds first-class — caps + the public inhibit setter
+
+- New capability flags (fdk_extend.h): FDK_EXT_CAP_IDLE_INHIBIT (10),
+  FDK_EXT_CAP_XDG_ACTIVATION (11), FDK_EXT_CAP_FOREIGN_TOPLEVEL (12),
+  FDK_EXT_CAP_TEXT_INPUT_V3 (13). Each mirrors the platform truth via
+  an availability probe op (the manager global the registry bound) —
+  false on X11 and wayland-less builds; every API keeps its honest
+  FDK_ERR_UNSUPPORTED path.
+- Idle-inhibit: the platform op existed (engage/release, idempotent);
+  the missing first-class piece was the public setter — new
+  fdk_window_set_idle_inhibited (fdk_window.h), next to
+  fdk_window_activate / fdk_window_activation_token (xdg-activation,
+  already public with the private-queue token mint).
+- wlr-foreign-toplevel: the public list API (fdk_toplevel.h) and the
+  event bridge existed; FDK_EXT_CAP_FOREIGN_TOPLEVEL now lets add-ons
+  gate on it.
+- text-input-v3: bridged through the IME path (preedit/commit into
+  FDK's event flow); FDK_EXT_CAP_TEXT_INPUT_V3 exposes its truth.
 ## Item 3b: the per-surface present arbitration test
 
 - tests/test_arbitration.c + make test-arbitration: one context, three

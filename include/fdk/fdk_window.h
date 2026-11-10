@@ -705,3 +705,17 @@ size_t fdk_window_shortcut_count(const fdk_window *window);
 #endif
 
 #endif /* FDK_WINDOW_H */
+
+
+/* ---- P3: idle-inhibit (zwp_idle_inhibit_manager_v1) -----------------------
+ *
+ * Engages (or releases) a Wayland idle inhibitor on this window's
+ * surface: the compositor will not idle-suspend/lock while the window
+ * is visible and the inhibitor lives. Idempotent; answers
+ * FDK_ERR_UNSUPPORTED when the compositor lacks the protocol (check
+ * FDK_EXT_CAP_IDLE_INHIBIT) — on X11 there is no such protocol and
+ * the screensaver conversation belongs to the app (the
+ * org.freedesktop.ScreenSaver D-Bus interface), same as every X11
+ * toolkit. */
+fdk_result fdk_window_set_idle_inhibited(fdk_window *window,
+                                         int inhibited);

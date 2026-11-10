@@ -1109,6 +1109,10 @@ void fdk_wayland_ime_update_surrounding(fdk_platform_window *pwindow,
 
 /* Idle inhibition (1.0.0, S-3; wayland_window.c): the platform op —
  * create/destroy the per-surface zwp_idle_inhibitor_v1. */
+int fdk_wayland_idle_inhibit_available(fdk_platform_connection *conn);
+int fdk_wayland_activation_available(fdk_platform_connection *conn);
+int fdk_wayland_toplevels_available(fdk_platform_connection *conn);
+int fdk_wayland_ime_text_input_available(fdk_platform_connection *conn);
 fdk_result fdk_wayland_window_set_idle_inhibit(
     fdk_platform_window *pwindow, int inhibit);
 

@@ -3103,3 +3103,16 @@ fdk_render_mode fdk_window_render_mode(const fdk_window *window) {
     }
     return (fdk_render_mode)window->render_mode;
 }
+
+
+fdk_result fdk_window_set_idle_inhibited(fdk_window *window,
+                                         int inhibited) {
+    if (window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ops->window_set_idle_inhibit == NULL) {
+        return FDK_ERR_UNSUPPORTED; /* X11: no such protocol */
+    }
+    return window->ops->window_set_idle_inhibit(window->pwindow,
+                                                inhibited ? 1 : 0);
+}

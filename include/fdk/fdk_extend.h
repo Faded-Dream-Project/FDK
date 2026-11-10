@@ -170,6 +170,16 @@ typedef enum fdk_ext_capability {
      * present path per surface) is the next increment; until then
      * FDK's present owns the surface's buffers. */
     FDK_EXT_CAP_GL            = 9,
+    /* P3 first-class protocols: the cap says the platform + compositor
+     * actually negotiated the protocol (the ops exist and the manager
+     * global was bound); every API below answers FDK_ERR_UNSUPPORTED
+     * when the matching cap is false. */
+    FDK_EXT_CAP_IDLE_INHIBIT  = 10, /* zwp_idle_inhibit_manager_v1    */
+    FDK_EXT_CAP_XDG_ACTIVATION = 11, /* xdg_activation_v1             */
+    FDK_EXT_CAP_FOREIGN_TOPLEVEL = 12, /* zwlr_foreign_toplevel_v1 (the
+                                        * fdk_toplevel.h list)       */
+    FDK_EXT_CAP_TEXT_INPUT_V3 = 13, /* zwp_text_input_manager_v3 (the
+                                     * IME path)                    */
 } fdk_ext_capability;
 
 /* Returns nonzero when `ctx`'s connected backend has `cap`.

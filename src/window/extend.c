@@ -157,6 +157,28 @@ int fdk_ext_has_capability(fdk_context *ctx, fdk_ext_capability cap) {
             return ops->ext_layer_shell_available != NULL &&
                    ops->ext_layer_surface_create != NULL &&
                    ops->ext_layer_shell_available(ctx->conn);
+        case FDK_EXT_CAP_IDLE_INHIBIT:
+            /* The optional op exists exactly where the platform
+             * binds zwp_idle_inhibit_manager_v1 (Wayland); the
+             * manager global's presence decides at connect. */
+            return ops->window_set_idle_inhibit != NULL &&
+                   ops->window_idle_inhibit_available != NULL &&
+                   ops->window_idle_inhibit_available(ctx->conn);
+        case FDK_EXT_CAP_XDG_ACTIVATION:
+            return ops->window_activation_token != NULL &&
+                   ops->window_activation_available != NULL &&
+                   ops->window_activation_available(ctx->conn);
+        case FDK_EXT_CAP_FOREIGN_TOPLEVEL:
+            /* The fdk_toplevel.h list: NULL from list_open IS the
+             * taskbar-absent branch; the cap mirrors the ops truth. */
+            return ops->toplevels_open != NULL &&
+                   ops->toplevels_available != NULL &&
+                   ops->toplevels_available(ctx->conn);
+        case FDK_EXT_CAP_TEXT_INPUT_V3:
+            /* The IME path binds zwp_text_input_manager_v3 at connect
+             * when the compositor advertises it. */
+            return ops->ime_text_input_available != NULL &&
+                   ops->ime_text_input_available(ctx->conn);
         case FDK_EXT_CAP_RENDER_CPU:
             /* The software rasterizer exists in every mode; in GPU mode
              * its pixels ride the lane's texture upload. */

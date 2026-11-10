@@ -622,3 +622,23 @@ int fdk_platform_wayland_display_present(void) {
     const char *wd = getenv("WAYLAND_DISPLAY");
     return wd != NULL && wd[0] != '\0';
 }
+
+
+/* P3 availability probes: the manager globals the registry bound. */
+int fdk_wayland_idle_inhibit_available(fdk_platform_connection *conn) {
+    return conn != NULL && conn->idle_inhibit_manager != NULL;
+}
+
+int fdk_wayland_activation_available(fdk_platform_connection *conn) {
+    return conn != NULL && conn->activation != NULL;
+}
+
+int fdk_wayland_toplevels_available(fdk_platform_connection *conn) {
+    /* the manager binds lazily at list_open; the GLOBAL name seen at
+     * connect is the availability truth */
+    return conn != NULL && conn->foreign_toplevel_name != 0;
+}
+
+int fdk_wayland_ime_text_input_available(fdk_platform_connection *conn) {
+    return conn != NULL && conn->text_input_manager != NULL;
+}
