@@ -1,4 +1,34 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The GPU paint lane's atlas is GLES-legal (GL_R8/GL_RED)
+
+The 2026-11-11 17:01Z report (NVIDIA GTX 1050 Ti, driver 580.196.07,
+Wayland/EGL session) decoded: full=1 minimal=0 empty=0 pointed at the
+dynamic texture/atlas path, and the log said why outright —
+'GL error 0x502 at texture drain' followed by three atlas present
+FAILs. The glyph atlas and every single-channel mask texture were
+created and uploaded with GL_LUMINANCE, a desktop-GL format that does
+not exist in GLES 3.x core. NVIDIA's ES 3.2 context rejected the
+creation, leaving the texture with NO storage; every glyph draw then
+sampled an incomplete texture (GL_INVALID_OPERATION), which the
+drain's error check turned into g->dead — and the lane died into the
+atlas FAILs. llvmpipe's desktop-GL compat profile accepts LUMINANCE,
+which is why every local run was green. Fixed to GL_R8 internalformat
++ GL_RED format (core in ES 3.0+ and desktop GL 3.0+; the mask shader
+samples .r, and RED's sample value equals LUMINANCE's, so semantics
+are unchanged). A creation-time GL error check now diagnoses a driver
+rejection at the creation line instead of three lines later at the
+drain. Local proof: battery green, test-gpu-paint all green (the
+RED path exercised), harness end-to-end.
+
+The harness also gained honesty for seam-less sessions: when the
+readback seam is unavailable (the Wayland session here), each gpu_run
+marks 'comparison unverified' and the isolation verdict notes that
+minimal=0/empty=0 verify present-level only — per-region stats need
+an X11 session or an EGL seam. The 17:01Z run's minimal=0/empty=0
+were exactly that: present-level only. The 14:10Z run's minimal=1
+(X11, seam up) remains the open core-raster question pending a
+matching paste; the 1-LSB allowance stays as-is (nothing in this
+report bears on it).
 ## Hardware kit: sanitizers off by default; the Xvfb display race fixed everywhere
 
 - tests/run-hardware.sh builds with FDK_SANITIZE=0 by default (--asan

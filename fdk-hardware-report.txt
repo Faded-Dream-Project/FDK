@@ -1,4 +1,4 @@
-==== FDK hardware report — 2026-11-11 16:14:05Z ====
+==== FDK hardware report — 2026-11-11 17:25:53Z ====
 host: Linux 5.10.134-013.15.kangaroo.al8.x86_64 x86_64
 
 ---- 1. build ----
@@ -35,12 +35,12 @@ test_gpu_paint (full scene): rc=0
   overflow probe px=ffffffff (expect white)
   [ok] atlas overflow: post-eviction glyph renders correctly
   [ok] context loss: present reports UNSUPPORTED (no stale frame)
-  16:14:06 [INFO] (x11) GPU present lane active (renderer "llvmpipe (LLVM 19.1.7, 256 bits)")
+  17:26:04 [INFO] (x11) GPU present lane active (renderer "llvmpipe (LLVM 19.1.7, 256 bits)")
   [ok] context loss: a fresh window presents normally
   [info] swrast never signals fences — the wait is honestly UNSUPPORTED here
   [ok] GPU resize repaint survived
-  16:14:06 [INFO] (core) shutting down
-  16:14:06 [INFO] (x11) disconnecting
+  17:26:04 [INFO] (core) shutting down
+  17:26:04 [INFO] (x11) disconnecting
   GPU PAINT SMOKE: all green
 
 ---- 4. the GL canvas example ----

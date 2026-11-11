@@ -78,7 +78,8 @@ fdk_result fdk__dmabuf_fallback_realize(fdk_texture *t,
 #define GL_TEXTURE_2D 0x0DE1
 #define GL_RGBA 0x1908
 #define GL_UNSIGNED_BYTE 0x1401
-#define GL_LUMINANCE 0x1909
+#define GL_RED 0x1903
+#define GL_R8 0x8229
 #define GL_LINEAR 0x2601
 #define GL_NEAREST 0x2600
 #define GL_CLAMP_TO_EDGE 0x812F
@@ -496,9 +497,28 @@ static int gp_ensure_gl(struct fdk_surface *s) {
     g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     unsigned char *zeros = calloc(GP_ATLAS * GP_ATLAS, 1);
     if (zeros != NULL) {
-        g_gp.TexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, GP_ATLAS, GP_ATLAS,
-                        0, GL_LUMINANCE, GL_UNSIGNED_BYTE, zeros);
+        /* GL_R8/GL_RED: GLES 3.x core (the old LUMINANCE kind does
+         * not exist there — NVIDIA's ES 3.2 context rejected the old
+         * creation, leaving the atlas texture with NO storage; every
+         * glyph draw then sampled an incomplete texture and queued
+         * GL_INVALID_OPERATION, which the drain's error check turned
+         * into g->dead — the 2026-11-11 17:01Z report's 0x502 + the
+         * three atlas present FAILs). Desktop GL 3.0+ compat is
+         * equally fine with R8. The mask shader samples .r, and the
+         * RED sample value equals the old kind's, so semantics are
+         * unchanged. */
+        g_gp.TexImage2D(GL_TEXTURE_2D, 0, GL_R8, GP_ATLAS, GP_ATLAS,
+                        0, GL_RED, GL_UNSIGNED_BYTE, zeros);
         free(zeros);
+        /* A creation-time GL error used to sit queued until the first
+         * drain check — a world away in the log. Diagnose it here. */
+        unsigned aerr = g_gp.GetError();
+        if (aerr != GL_NO_ERROR) {
+            fprintf(stderr,
+                    "fdk-gpaint: atlas texture creation failed 0x%x "
+                    "(driver rejected GL_R8/GL_RED? GLES 3.0+ or "
+                    "desktop GL 3.0+ required)\n", aerr);
+        }
     }
     g->gl_ready = 1;
     {
@@ -890,7 +910,7 @@ static int gp_atlas_put(struct fdk_surface *s, int w, int h,
     g_gp.ActiveTexture(GL_TEXTURE0);
     g_gp.BindTexture(GL_TEXTURE_2D, g->atlas_tex);
     for (int row = 0; row < h; row++) {
-        g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, ax, ay + row, w, 1, GL_LUMINANCE,
+        g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, ax, ay + row, w, 1, GL_RED,
                            GL_UNSIGNED_BYTE, cov + (size_t)row * stride);
     }
     *u0 = (float)ax;
@@ -977,18 +997,20 @@ static unsigned gp_tex_realize(struct fdk_gpu_state *g,
     g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     g_gp.PixelStorei(0x0CF5 /* UNPACK_ALIGNMENT */, 1);
-    /* format: 0=luminance, 1=rgba (fdk_texture), 2=bgra (offscreen
+    /* format: 0=red (GL_R8 single-channel mask — the old LUMINANCE
+     * kind is not a GLES 3.x format and left these textures
+     * storage-less on NVIDIA), 1=rgba (fdk_texture), 2=bgra (offscreen
      * surface pixels are BGRX in memory with X unused — uploading them
      * as RGBA made every texel alpha 0, i.e. invisible). */
-    gl_uint ifmt = slot->rgba == 0 ? GL_LUMINANCE
+    gl_uint ifmt = slot->rgba == 0 ? GL_R8
                                    : GL_RGBA; /* placeholder, replaced below */
     (void)ifmt;
     g_gp.TexImage2D(GL_TEXTURE_2D, 0,
-                    (gl_int)(slot->rgba == 0 ? GL_LUMINANCE
+                    (gl_int)(slot->rgba == 0 ? GL_R8
                              : slot->rgba == 2 ? 0x80E1 /* GL_BGRA */
                                                : GL_RGBA),
                     slot->w, slot->h, 0,
-                    slot->rgba == 0 ? GL_LUMINANCE
+                    slot->rgba == 0 ? GL_RED
                     : slot->rgba == 2 ? 0x80E1
                                       : GL_RGBA,
                     GL_UNSIGNED_BYTE, NULL);
@@ -1138,7 +1160,7 @@ unsigned fdk__gpu_texture_name(struct fdk_surface *s, void *key, int width,
         if (g->gl_ready) {
             gp_tex_realize(g, slot);
             g_gp.PixelStorei(0x0CF5, 1);
-            gl_uint fmt = format_rgba == 0 ? GL_LUMINANCE
+            gl_uint fmt = format_rgba == 0 ? GL_RED
                           : format_rgba == 2 ? 0x80E1 /* GL_BGRA */
                                              : GL_RGBA;
             if (stride == width * (format_rgba ? 4 : 1)) {
@@ -1268,7 +1290,7 @@ static void gp_pend_drain(struct fdk_gpu_state *g) {
         unsigned name = gp_tex_realize(g, slot);
         if (slot->needs_upload && slot->pend_px != NULL) {
             g_gp.PixelStorei(0x0CF5, 1);
-            gl_uint dfmt = slot->rgba == 0 ? GL_LUMINANCE
+            gl_uint dfmt = slot->rgba == 0 ? GL_RED
                            : slot->rgba == 2 ? 0x80E1 /* GL_BGRA */
                                              : GL_RGBA;
             for (int row = 0; row < slot->h; row++) {

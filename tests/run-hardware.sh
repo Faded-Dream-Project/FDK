@@ -99,6 +99,7 @@ r "---- 3. GPU paint smoke (the CPU-vs-GPU interior/edge split) ----"
 # blits/rotation/texture/atlas) and GPU_EMPTY (untouched surface)
 # isolation runs separate core-raster problems from the dynamic
 # paths and from present/readback alone.
+SEAM_DOWN=0
 gpu_run() { # $1 = env prefix, $2 = label
     env $1 ASAN_OPTIONS=detect_leaks=0 build/tests/test_gpu_paint \
         > /tmp/fdk-hw-gpu.log 2>&1
@@ -112,6 +113,11 @@ gpu_run() { # $1 = env prefix, $2 = label
     fi
     grep -E 'fdk-gpaint: GL up|fdk-gl: fbconfig' /tmp/fdk-hw-gpu.log \
         | sed 's/^/  /' | ra
+    if grep -q 'GPU readback seam unavailable' /tmp/fdk-hw-gpu.log; then
+        SEAM_DOWN=1
+        r "  comparison unverified: the readback seam is unavailable on"
+        r "  this session (rc verifies present-level only, not pixels)"
+    fi
     if [ "$RC" -eq 0 ]; then
         sed -n '/CPU-vs-GPU interior\/edge split/,$p' /tmp/fdk-hw-gpu.log \
             | sed 's/^/  /' | ra
@@ -136,6 +142,11 @@ if [ -x build/tests/test_gpu_paint ]; then
         r "  => a dynamic path (blit/rotation/texture/atlas); minimal!=0"
         r "  => the core raster (config/rounding/sRGB); empty!=0 => the"
         r "  present/readback seam itself)"
+        if [ "$SEAM_DOWN" -eq 1 ]; then
+            r "  (the seam is DOWN on this session: the pixel comparison"
+            r "  never ran, so minimal=0/empty=0 are present-level only —"
+            r "  per-region stats need an X11 session or an EGL seam)"
+        fi
     elif [ "$FULL" -ne 0 ]; then
         r "(crash — no isolation runs; fix the crash first)"
     fi
