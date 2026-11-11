@@ -1,4 +1,13 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The Vulkan example's real CI catch: the missing device extension
+
+- CI's lavapipe run aborted in vkCreateSwapchainKHR: the loader's
+  "Driver's function pointer was NULL ... Was the VK_KHR_swapchain
+  extension enabled?" — the example created its VkDevice WITHOUT
+  device extensions. VK_KHR_swapchain is now enabled in the
+  VkDeviceCreateInfo (the one device extension a swapchain needs).
+  This was an example bug, not an FDK wall: the native accessors
+  carried everything.
 ## Fix-forward x2: the Vulkan example out of the generic set; 09's cursor call
 
 - examples/12_vulkan_surface.c left the generic `make examples` set:

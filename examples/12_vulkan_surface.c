@@ -274,6 +274,12 @@ int main(void) {
     dci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
+    /* THE one device extension a swapchain needs (the CI catch:
+     * without VK_KHR_swapchain the loader hands back a NULL
+     * vkCreateSwapchainKHR pointer and aborts). */
+    const char *dev_exts[1] = {"VK_KHR_swapchain"};
+    dci.enabledExtensionCount = 1;
+    dci.ppEnabledExtensionNames = dev_exts;
     vr = vkCreateDevice(pdev, &dci, NULL, &dev);
     printf("[vk] device (queue family %u, graphics+present): %s\n",
            qfam, vk_result_str(vr));
