@@ -91,6 +91,25 @@ static void alarm_handler(int sig) {
  * root cause (a display-number collision in the old `make test-x11`
  * driver script, now fixed) and why this small retry remains as a
  * defensive margin regardless. */
+/* The documented Xvfb XOpenDisplay race (docs/testing.md, "Known
+ * Xvfb flakiness"; the 2026-11-11 debian CI abort in
+ * test_xsettings_detection_gui): a fresh connection made right after
+ * the server starts — or mid-run, the same quirk the fake-WM rig's
+ * inline retry absorbs — can intermittently return NULL even though
+ * the server is reachable. Poll with a bounded budget: on a healthy
+ * server the first attempt wins (zero added latency); the race is
+ * absorbed; a persistent failure exhausts the budget and returns
+ * NULL so the caller's assert/_exit still reports accurately. */
+static Display *x11_open_display_timeout(void) {
+    Display *d = XOpenDisplay(NULL);
+    for (int attempt = 0; d == NULL && attempt < 99; attempt++) {
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 100 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+        d = XOpenDisplay(NULL);
+    }
+    return d;
+}
+
 static fdk_result init_with_retry(fdk_context **out_ctx, const fdk_init_options *opts) {
     for (int attempt = 0; attempt < 5; attempt++) {
         fdk_result r = fdk_init(out_ctx, opts);
@@ -305,7 +324,7 @@ static void test_close_request_delivered(void) {
     close_request_events = 0;
     fdk_window_set_event_callback(win, close_request_callback, NULL);
 
-    Display *probe = XOpenDisplay(NULL);
+    Display *probe = x11_open_display_timeout();
     assert(probe != NULL);
     XEvent ev;
     memset(&ev, 0, sizeof(ev));
@@ -369,7 +388,7 @@ static unsigned long theme_window_bg_pixel(void) {
 static unsigned long x11_readback_pixel(Display **out_dpy, unsigned long xid,
                                          int x, int y) {
     if (*out_dpy == NULL) {
-        *out_dpy = XOpenDisplay(NULL);
+        *out_dpy = x11_open_display_timeout();
         assert(*out_dpy != NULL);
     }
     XImage *img = XGetImage(*out_dpy, (Drawable)xid, x, y, 1, 1,
@@ -450,7 +469,7 @@ static void test_window_identity(void) {
     fdk_window_options wopts = { .title = "identity test", .width = 200, .height = 150 };
     assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
 
-    Display *dpy = XOpenDisplay(NULL);
+    Display *dpy = x11_open_display_timeout();
     assert(dpy != NULL);
     unsigned long xid = fdk_window_xid(win);
 
@@ -808,7 +827,7 @@ static void test_resize_storm_backlog_drains(void) {
     (void)fdk_pump_events(ctx, 200);
 
     /* The storm: 300 resizes, all queued before one pump. */
-    Display *storm_dpy = XOpenDisplay(NULL);
+    Display *storm_dpy = x11_open_display_timeout();
     assert(storm_dpy != NULL);
     unsigned long xid = fdk_window_xid(win);
     int expect_w = 0, expect_h = 0;
@@ -1518,7 +1537,7 @@ static void test_widget_real_input_via_xsendevent(void) {
     memset(&wc, 0, sizeof(wc));
     fdk_window_set_event_callback(win, window_count_callback, &wc);
 
-    Display *send_dpy = XOpenDisplay(NULL);
+    Display *send_dpy = x11_open_display_timeout();
     assert(send_dpy != NULL);
     unsigned long xid = fdk_window_xid(win);
 
@@ -2171,7 +2190,7 @@ static void test_widget_catalog_gui(void) {
 
     /* REAL click on the button: motion + press + release through the
      * X server, exactly as a user would. */
-    Display *send_dpy = XOpenDisplay(NULL);
+    Display *send_dpy = x11_open_display_timeout();
     assert(send_dpy != NULL);
     fdk_rect bb = fdk_widget_get_bounds(btn);
     int cx = bb.x + bb.width / 2;
@@ -2282,7 +2301,7 @@ static void test_widget_catalog_gui(void) {
 
 static Display *rb_open(Display **rb) {
     if (*rb == NULL) {
-        *rb = XOpenDisplay(NULL);
+        *rb = x11_open_display_timeout();
         assert(*rb != NULL);
     }
     return *rb;
@@ -2349,7 +2368,7 @@ static void test_scroll_storm_identity_gui(void) {
     assert(fdk_ok(fdk_scrollview_set_content(sv, content)));
 
     unsigned long xid = fdk_window_xid(win);
-    Display *dpy = XOpenDisplay(NULL);
+    Display *dpy = x11_open_display_timeout();
     assert(dpy != NULL);
     Display *rb = NULL; /* readback connection */
 
@@ -2457,7 +2476,7 @@ static int x11_count_ink_in_region(Display **out_dpy, unsigned long xid,
         return 0;
     }
     if (*out_dpy == NULL) {
-        *out_dpy = XOpenDisplay(NULL);
+        *out_dpy = x11_open_display_timeout();
         assert(*out_dpy != NULL);
     }
     XImage *img = XGetImage(*out_dpy, (Drawable)xid, x, y,
@@ -2604,7 +2623,7 @@ static void test_label_radio_arrow_gui(void) {
     assert(!is_accent_px(x11_readback_pixel(&rb_dpy, xid, dot_x,
                                             dot_y)));
 
-    Display *send_dpy = XOpenDisplay(NULL);
+    Display *send_dpy = x11_open_display_timeout();
     assert(send_dpy != NULL);
     x11_send_key_event(send_dpy, xid, KeyPress, 116); /* Down */
     (void)fdk_pump_events(ctx, 200);
@@ -3188,7 +3207,7 @@ static void test_window_state_gui(void) {
     assert(state_gui_events == ev0 + 1);
     assert(state_gui_last_max == 1 && state_gui_last_min == 0);
     (void)fdk_pump_events(ctx, 200);
-    rb_dpy = XOpenDisplay(NULL);
+    rb_dpy = x11_open_display_timeout();
     assert(rb_dpy != NULL);
     {
         Window root_ret = 0;
@@ -3345,7 +3364,7 @@ static void test_resize_edges_gui(void) {
      * reaches the content widget and resizes nothing. */
     assert(!fdk_window_get_resizable(win));
     resize_gui_button_presses = 0;
-    rb_dpy = XOpenDisplay(NULL);
+    rb_dpy = x11_open_display_timeout();
     assert(rb_dpy != NULL);
     x11_send_pointer_event(rb_dpy, xid, ButtonPress,
                            ButtonPressMask, 2, 50, 1);
@@ -3496,7 +3515,7 @@ static void test_resize_retains_pixels(void) {
     assert(fdk_ok(fdk_surface_present(surface)));
     (void)fdk_pump_events(ctx, 100);
 
-    Display *rb_dpy = XOpenDisplay(NULL);
+    Display *rb_dpy = x11_open_display_timeout();
     assert(rb_dpy != NULL);
     unsigned long xid = fdk_window_xid(win);
 
@@ -3553,7 +3572,7 @@ static void test_hover_revalidation_on_geometry_change(void) {
     (void)fdk_pump_events(ctx, 300);
     (void)fdk_pump_events(ctx, 300);
 
-    Display *rb_dpy = XOpenDisplay(NULL);
+    Display *rb_dpy = x11_open_display_timeout();
     assert(rb_dpy != NULL);
     unsigned long xid = fdk_window_xid(win);
 
@@ -3627,7 +3646,7 @@ static void test_resize_cursor_affordance(void) {
     fdk_window_show(win);
     (void)fdk_pump_events(ctx, 200);
 
-    Display *rb_dpy = XOpenDisplay(NULL);
+    Display *rb_dpy = x11_open_display_timeout();
     assert(rb_dpy != NULL);
     unsigned long xid = fdk_window_xid(win);
 
@@ -3843,7 +3862,7 @@ static void test_named_cursor_set(void) {
     fdk_window_show(win2);
     (void)fdk_pump_events(ctx, 200);
 
-    Display *dpy = XOpenDisplay(NULL);
+    Display *dpy = x11_open_display_timeout();
     assert(dpy != NULL);
     unsigned long xid = fdk_window_xid(win2);
 
@@ -3938,7 +3957,7 @@ static void test_input_region(void) {
     fdk_window_show(top);
     (void)fdk_pump_events(ctx, 200);
 
-    Display *dpy = XOpenDisplay(NULL);
+    Display *dpy = x11_open_display_timeout();
     assert(dpy != NULL);
     unsigned long top_xid = fdk_window_xid(top);
 
@@ -4166,7 +4185,7 @@ static void test_activation_startup(void) {
     /* The listener connection: SubstructureNotifyMask on root is
      * shareable with anyone (unlike SubstructureRedirectMask) and
      * receives the XSendEvent'd root client messages. */
-    Display *dpy = XOpenDisplay(NULL);
+    Display *dpy = x11_open_display_timeout();
     assert(dpy != NULL);
     XSelectInput(dpy, DefaultRootWindow(dpy), SubstructureNotifyMask);
     XSync(dpy, False);
@@ -4320,17 +4339,10 @@ typedef struct {
 
 static void fake_wm_install(fake_wm *wm) {
     memset(wm, 0, sizeof *wm);
-    /* Bounded retry for the documented Xvfb XOpenDisplay race (same
-     * reason as init_with_retry / the clipboard children — the raw
-     * Xlib connections churn more as the suite grows). */
-    for (int attempt = 0; attempt < 10; attempt++) {
-        wm->dpy = XOpenDisplay(NULL);
-        if (wm->dpy != NULL) {
-            break;
-        }
-        struct timespec ts = { .tv_sec = 0, .tv_nsec = 50 * 1000 * 1000 };
-        nanosleep(&ts, NULL);
-    }
+    /* The documented Xvfb XOpenDisplay race — x11_open_display_timeout
+     * (same reason as init_with_retry / the clipboard children — the
+     * raw Xlib connections churn more as the suite grows). */
+    wm->dpy = x11_open_display_timeout();
     assert(wm->dpy != NULL);
     wm->root = DefaultRootWindow(wm->dpy);
     wm->net_supported = XInternAtom(wm->dpy, "_NET_SUPPORTED", False);
@@ -4577,7 +4589,7 @@ static void test_ewmh_atom_spelling(void) {
                                  .width = 100, .height = 80 };
     assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
 
-    Display *d = XOpenDisplay(NULL);
+    Display *d = x11_open_display_timeout();
     assert(d != NULL);
     Atom spec_vert =
         XInternAtom(d, "_NET_WM_STATE_MAXIMIZED_VERT", True);
@@ -4641,7 +4653,7 @@ static void test_ewmh_fake_wm(void) {
         Window root_ret = 0;
         int px = 0, py = 0;
         unsigned int bw = 0, depth = 0, w = 0, h = 0;
-        Display *d = XOpenDisplay(NULL);
+        Display *d = x11_open_display_timeout();
         assert(d != NULL);
         assert(XGetGeometry(d, (Window)xid, &root_ret, &px, &py, &w,
                             &h, &bw, &depth));
@@ -4663,7 +4675,7 @@ static void test_ewmh_fake_wm(void) {
         Window root_ret = 0;
         int px = 0, py = 0;
         unsigned int bw = 0, depth = 0, w = 0, h = 0;
-        Display *d = XOpenDisplay(NULL);
+        Display *d = x11_open_display_timeout();
         assert(d != NULL);
         assert(XGetGeometry(d, (Window)xid, &root_ret, &px, &py, &w,
                             &h, &bw, &depth));
@@ -4995,7 +5007,7 @@ static void clip_child_serve_requests(Display *dpy, Window w, Atom clip,
  * forked children's raw XOpenDisplay too — same bounded retry. */
 static Display *clip_child_open_display(void) {
     for (int attempt = 0; attempt < 10; attempt++) {
-        Display *dpy = XOpenDisplay(NULL);
+        Display *dpy = x11_open_display_timeout();
         if (dpy != NULL) {
             return dpy;
         }
@@ -6416,7 +6428,7 @@ static void test_entry_primary(void) {
     fdk_widget_set_bounds(entry, r);
     assert(fdk_widget_focus(entry));
 
-    Display *send_dpy = XOpenDisplay(NULL);
+    Display *send_dpy = x11_open_display_timeout();
     assert(send_dpy != NULL);
     unsigned long xid = fdk_window_xid(win);
 
@@ -6576,7 +6588,7 @@ static void test_entry_gui(void) {
     fdk_widget_set_bounds(entry, r);
     assert(fdk_widget_focus(entry));
 
-    Display *send_dpy = XOpenDisplay(NULL);
+    Display *send_dpy = x11_open_display_timeout();
     assert(send_dpy != NULL);
     unsigned long xid = fdk_window_xid(win);
 
@@ -6677,7 +6689,7 @@ static void test_popup_window(void) {
     Window child_ret = None;
     int px = 0, py = 0;
     unsigned long parent_xid = fdk_window_xid(win);
-    rb_dpy = XOpenDisplay(NULL);
+    rb_dpy = x11_open_display_timeout();
     assert(rb_dpy != NULL);
     assert(XTranslateCoordinates(rb_dpy, (Window)parent_xid,
                                  DefaultRootWindow(rb_dpy), 0, 0, &px,
@@ -6878,7 +6890,7 @@ static void test_menu_gui(void) {
     fdk_window_paint(win);
     (void)fdk_pump_events(ctx, 100);
 
-    Display *send = XOpenDisplay(NULL);
+    Display *send = x11_open_display_timeout();
     assert(send != NULL);
     Window xid = (Window)fdk_window_xid(win);
     /* X11 popups are override-redirect children OF THE ROOT (placed
@@ -7093,7 +7105,7 @@ static void test_combo_gui(void) {
     fdk_window_paint(win);
     (void)fdk_pump_events(ctx, 100);
 
-    Display *send = XOpenDisplay(NULL);
+    Display *send = x11_open_display_timeout();
     assert(send != NULL);
     Window xid = (Window)fdk_window_xid(win);
     Window root_scr = DefaultRootWindow(send);
@@ -7216,7 +7228,7 @@ static void test_scale_button_gui(void) {
     fdk_window_paint(win);
     (void)fdk_pump_events(ctx, 100);
 
-    Display *send = XOpenDisplay(NULL);
+    Display *send = x11_open_display_timeout();
     assert(send != NULL);
     Window xid = (Window)fdk_window_xid(win);
     Window root_scr = DefaultRootWindow(send);
@@ -7412,7 +7424,7 @@ static void test_a11y_gui(void) {
     fdk_widget_set_bounds(entry, r);
     assert(fdk_widget_focus(entry));
 
-    Display *send_dpy = XOpenDisplay(NULL);
+    Display *send_dpy = x11_open_display_timeout();
     assert(send_dpy != NULL);
     unsigned long xid = fdk_window_xid(win);
     /* Type "hi" (Xvfb default map: h=43, i=31). */
@@ -7493,7 +7505,7 @@ static void test_date_picker_gui(void) {
     fdk_window_paint(win);
     (void)fdk_pump_events(ctx, 100);
 
-    Display *send = XOpenDisplay(NULL);
+    Display *send = x11_open_display_timeout();
     assert(send != NULL);
     Window xid = (Window)fdk_window_xid(win);
     Window root_scr = DefaultRootWindow(send);
@@ -7705,7 +7717,7 @@ static void test_dialog_gui(void) {
     fdk_window_show(parent);
     (void)fdk_pump_events(ctx, 150);
 
-    Display *send = XOpenDisplay(NULL);
+    Display *send = x11_open_display_timeout();
     assert(send != NULL);
     Window root_win = DefaultRootWindow(send);
 
@@ -7870,7 +7882,7 @@ static void test_dialog_close_damages_parent(void) {
     fdk_widget *root = NULL;
     assert(fdk_ok(fdk_window_get_root(parent, &root)));
 
-    Display *send = XOpenDisplay(NULL);
+    Display *send = x11_open_display_timeout();
     assert(send != NULL);
     Window root_win = DefaultRootWindow(send);
     Window before[16], now[16];
@@ -8036,7 +8048,7 @@ static void test_list_activation_gui(void) {
     assert(row1 != NULL);
     fdk_rect r1 = fdk_widget_get_bounds(row1);
 
-    Display *send_dpy = XOpenDisplay(NULL);
+    Display *send_dpy = x11_open_display_timeout();
     assert(send_dpy != NULL);
     unsigned long xid = fdk_window_xid(win);
 
@@ -8188,7 +8200,7 @@ static void test_file_dialog_gui(void) {
     fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
     assert(fdk_ok(init_with_retry(&ctx, &opts)));
 
-    Display *send_dpy = XOpenDisplay(NULL);
+    Display *send_dpy = x11_open_display_timeout();
     assert(send_dpy != NULL);
 
     /* --- 1. OPEN_FILE, driven by keyboard: Down Down Enter picks
@@ -8931,7 +8943,7 @@ static void test_file_dialog_icons_gui(void) {
     fdk_context *ctx = NULL;
     fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
     assert(fdk_ok(init_with_retry(&ctx, &opts)));
-    Display *send_dpy = XOpenDisplay(NULL);
+    Display *send_dpy = x11_open_display_timeout();
     assert(send_dpy != NULL);
 
     /* --- 1. LIST view: each row's icon band carries ITS type's
@@ -9311,7 +9323,7 @@ static void test_color_scheme_xsettings_gui(void) {
     /* The fake daemon: manager window + selection + the property,
      * all BEFORE the context connects (the arm looks the owner up
      * at connect). */
-    Display *d = XOpenDisplay(NULL);
+    Display *d = x11_open_display_timeout();
     assert(d != NULL);
     char sel_name[32];
     snprintf(sel_name, sizeof sel_name, "_XSETTINGS_S%d",
@@ -9427,7 +9439,7 @@ static void test_xsettings_detection_gui(void) {
     setenv("XDG_DATA_DIRS", "/nonexistent-fdk-xs", 1);
     unsetenv("FDK_ICON_THEME");
 
-    Display *d = XOpenDisplay(NULL);
+    Display *d = x11_open_display_timeout();
     assert(d != NULL);
     char sel_name[32];
     snprintf(sel_name, sizeof(sel_name), "_XSETTINGS_S%d",
@@ -9630,7 +9642,7 @@ static void test_dnd_receiver_gui(void) {
     fdk_window_show(win);
     (void)fdk_pump_events(ctx, 250);
 
-    Display *probe = XOpenDisplay(NULL);
+    Display *probe = x11_open_display_timeout();
     assert(probe != NULL);
     unsigned long xid = fdk_window_xid(win);
     /* Root coords of a point inside our window (the window may be at
@@ -9714,7 +9726,7 @@ static void test_dnd_receiver_incr_gui(void) {
     fdk_window_show(win);
     (void)fdk_pump_events(ctx, 250);
 
-    Display *probe = XOpenDisplay(NULL);
+    Display *probe = x11_open_display_timeout();
     assert(probe != NULL);
     unsigned long xid = fdk_window_xid(win);
     int lx = 0, ly = 0;
@@ -9800,7 +9812,7 @@ static void test_dnd_receiver_gtk_gui(void) {
     fdk_window_show(win);
     (void)fdk_pump_events(ctx, 250);
 
-    Display *probe = XOpenDisplay(NULL);
+    Display *probe = x11_open_display_timeout();
     assert(probe != NULL);
     unsigned long xid = fdk_window_xid(win);
     int lx = 0, ly = 0;
@@ -10174,7 +10186,7 @@ static void test_dnd_drag_icon_gui(void) {
     assert(sink_xid != 0);
 
     unsigned long xid = fdk_window_xid(win);
-    Display *probe = XOpenDisplay(NULL);
+    Display *probe = x11_open_display_timeout();
     assert(probe != NULL);
     int wx = 0, wy = 0;
     Window junk = None;
@@ -10375,7 +10387,7 @@ static void test_dnd_widget_targets_gui(void) {
     (void)fdk_pump_events(ctx, 250);
 
     unsigned long xid = fdk_window_xid(win);
-    Display *probe = XOpenDisplay(NULL);
+    Display *probe = x11_open_display_timeout();
     assert(probe != NULL);
 
     /* Root coordinates of the zone's center and of the fallback
@@ -10607,7 +10619,7 @@ static void test_dnd_release_drain_gui(void) {
     unsigned long xid = fdk_window_xid(win);
 
     /* the target: a second connection the test owns */
-    Display *td = XOpenDisplay(NULL);
+    Display *td = x11_open_display_timeout();
     assert(td != NULL);
     /* far corner: earlier tests leave mapped windows around the
      * middle of the screen; this test must own the top of the
@@ -10835,7 +10847,7 @@ static void test_dnd_source_gui(void) {
     assert(sink_xid != 0);
 
     unsigned long xid = fdk_window_xid(win);
-    Display *probe = XOpenDisplay(NULL);
+    Display *probe = x11_open_display_timeout();
     assert(probe != NULL);
     int wx = 0, wy = 0, sx = 0, sy = 0;
     Window junk = None;
@@ -11226,7 +11238,7 @@ static void test_animation_gui(void) {
     assert(fdk_ok(fdk_scrollview_set_content(sv, content)));
 
     unsigned long xid = fdk_window_xid(swin);
-    Display *dpy = XOpenDisplay(NULL);
+    Display *dpy = x11_open_display_timeout();
     assert(dpy != NULL);
 
     fdk_i32 off = -1;
@@ -11317,7 +11329,7 @@ static void test_tooltip_gui(void) {
     fdk_widget_set_background(btn, wcol(200, 60, 60));
     assert(fdk_ok(fdk_widget_set_tooltip(btn, "The hint text")));
 
-    Display *send_dpy = XOpenDisplay(NULL);
+    Display *send_dpy = x11_open_display_timeout();
     assert(send_dpy != NULL);
     unsigned long xid = fdk_window_xid(win);
 
@@ -11486,7 +11498,7 @@ static void test_modern_batch_gui(void) {
             assert(cond);                                             \
         } while (0)
 
-    Display *send = XOpenDisplay(NULL);
+    Display *send = x11_open_display_timeout();
     assert(send != NULL);
     Display *read_dpy = NULL;
     Window root_scr = DefaultRootWindow(send);
@@ -12144,7 +12156,7 @@ static void test_iconview_gui(void) {
     fdk_font *font = fdk_font_load(font_candidates[0], 16);
     assert(font != NULL);
 
-    Display *send = XOpenDisplay(NULL);
+    Display *send = x11_open_display_timeout();
     assert(send != NULL);
 
     fdk_window_options wopts = { .title = "iconview",
@@ -12312,7 +12324,7 @@ static void test_textview_gui(void) {
     fdk_font *font = fdk_font_load(font_candidates[0], 16);
     assert(font != NULL);
 
-    Display *send = XOpenDisplay(NULL);
+    Display *send = x11_open_display_timeout();
     assert(send != NULL);
 
     fdk_window_options wopts = { .title = "textview",
@@ -12578,7 +12590,7 @@ static void test_gl_lane_pixel_equivalence_gui(void) {
         (void)fdk_pump_events(ctx, 150);
 
         /* Full-window server-side capture. */
-        Display *rb = XOpenDisplay(NULL);
+        Display *rb = x11_open_display_timeout();
         assert(rb != NULL);
         XImage *im = XGetImage(rb, (Drawable)win->pwindow->xwindow, 0, 0,
                                (unsigned)W, (unsigned)H, ~0UL, ZPixmap);
@@ -13128,7 +13140,7 @@ static void test_ext_api_basics(void) {
                     XA_INTEGER, 8, PropModeReplace, payload, 4);
     XFlush(fdk_dpy);
 
-    Display *own_dpy = XOpenDisplay(NULL);
+    Display *own_dpy = x11_open_display_timeout();
     assert(own_dpy != NULL);
     Atom marker_own = XInternAtom(own_dpy, "FDK_EXT_TEST_MARKER", False);
     Atom actual_type = None;
@@ -13187,7 +13199,7 @@ static void test_ext_surface_lifecycle(void) {
     unsigned long xid = (unsigned long)nh.xid;
     assert(xid != 0);
 
-    Display *own_dpy = XOpenDisplay(NULL);
+    Display *own_dpy = x11_open_display_timeout();
     assert(own_dpy != NULL);
 
     XWindowAttributes attrs;
@@ -13341,7 +13353,7 @@ static void test_ext_notify_configure(void) {
 
     fdk_ext_native_handle nh;
     assert(fdk_ok(fdk_ext_surface_native(surf, &nh)));
-    Display *own_dpy = XOpenDisplay(NULL);
+    Display *own_dpy = x11_open_display_timeout();
     assert(own_dpy != NULL);
     /* The X window itself is still 200x60 (the add-on never resized
      * it server-side in this synthetic scenario) — but FDK's buffer
@@ -13452,7 +13464,7 @@ static void test_ext_widget_hosting_x11(void) {
 
     /* A real X configure re-arranges the root and the auto-paint
      * tail presents the frame (200x100 -> 240x120, a real event). */
-    Display *own_dpy = XOpenDisplay(NULL);
+    Display *own_dpy = x11_open_display_timeout();
     assert(own_dpy != NULL);
     fdk_ext_native_handle nh;
     assert(fdk_ok(fdk_ext_surface_native(surf, &nh)));
@@ -13584,7 +13596,7 @@ static void test_ext_popup_x11(void) {
     assert(fdk_ok(fdk_ext_surface_native(pop, &pop_nh)));
     unsigned long pop_xid = (unsigned long)pop_nh.xid;
 
-    Display *own_dpy = XOpenDisplay(NULL);
+    Display *own_dpy = x11_open_display_timeout();
     assert(own_dpy != NULL);
 
     /* Server-side: the popup is an override-redirect ROOT child
@@ -13964,7 +13976,7 @@ static void test_ext_subsurface_x11(void) {
         assert(sz.width == 120 && sz.height == 90);
     }
 
-    Display *own_dpy = XOpenDisplay(NULL);
+    Display *own_dpy = x11_open_display_timeout();
     assert(own_dpy != NULL);
 
     /* 1. THE TREE FACT: the child's parent IS the parent window
@@ -14967,7 +14979,7 @@ static void test_xi2_tablet_xtest_e2e(void) {
     /* Capture BOTH streams: tablet events and core pointer events. */
     fdk_window_set_event_callback(win, tablet_event_cb, NULL);
 
-    Display *dpy = XOpenDisplay(NULL);
+    Display *dpy = x11_open_display_timeout();
     assert(dpy != NULL);
     int evb, erb, mjr, mnr;
     assert(XTestQueryExtension(dpy, &evb, &erb, &mjr, &mnr) != 0);
@@ -15125,7 +15137,7 @@ static void test_foreign_toplevels(void) {
 
     /* 3. THE FAKE WM: mint two client windows with the properties
      * a taskbar reads, publish the roster. */
-    Display *wm = XOpenDisplay(NULL);
+    Display *wm = x11_open_display_timeout();
     assert(wm != NULL);
     Window root = DefaultRootWindow(wm);
     Window c1 = XCreateSimpleWindow(wm, root, 10, 10, 100, 80, 0, 0, 0);
@@ -15411,7 +15423,7 @@ static void test_session_save_yourself_gui(void) {
         fdk_window_leave_session(win); /* no-op, must not crash */
     }
 
-    Display *probe = XOpenDisplay(NULL);
+    Display *probe = x11_open_display_timeout();
     assert(probe != NULL);
     Atom wm_save_yourself = XInternAtom(probe, "WM_SAVE_YOURSELF", False);
 
@@ -15746,7 +15758,7 @@ static void test_menu_mnemonics_gui(void) {
     fdk_menu_set_on_activate(fm, on_mn_menu, NULL);
     fdk_menu_set_on_activate(em, on_mn_menu, NULL);
 
-    Display *send = XOpenDisplay(NULL);
+    Display *send = x11_open_display_timeout();
     assert(send != NULL);
     Window xid = (Window)fdk_window_xid(win);
     Window root_scr = DefaultRootWindow(send);
@@ -16060,7 +16072,7 @@ static void test_window_shortcuts_and_accelerators_gui(void) {
     fdk_window_remove_shortcut(win, 999);
     assert(fdk_window_shortcut_count(win) == 1);
 
-    Display *send_dpy = XOpenDisplay(NULL);
+    Display *send_dpy = x11_open_display_timeout();
     assert(send_dpy != NULL);
     unsigned long xid = fdk_window_xid(win);
 
@@ -16245,7 +16257,7 @@ static void test_modern_widgets_gui(void) {
         }
 
         unsigned long xid = fdk_window_xid(win);
-        Display *dpy = XOpenDisplay(NULL);
+        Display *dpy = x11_open_display_timeout();
         assert(dpy != NULL);
 
         /* Auto split at the first pane's natural: red fill left,
@@ -16325,7 +16337,7 @@ static void test_modern_widgets_gui(void) {
         }
 
         unsigned long xid = fdk_window_xid(win);
-        Display *dpy = XOpenDisplay(NULL);
+        Display *dpy = x11_open_display_timeout();
         assert(dpy != NULL);
 
         /* Collapsed: the content zone is the root's background. */
@@ -16397,7 +16409,7 @@ static void test_modern_widgets_gui(void) {
         }
 
         unsigned long xid = fdk_window_xid(win);
-        Display *dpy = XOpenDisplay(NULL);
+        Display *dpy = x11_open_display_timeout();
         assert(dpy != NULL);
 
         /* The underline's geometry, computed the way the painter
@@ -16464,7 +16476,7 @@ static void test_modern_widgets_gui(void) {
         assert(fdk_spinner_is_spinning(sp));
 
         unsigned long xid = fdk_window_xid(win);
-        Display *dpy = XOpenDisplay(NULL);
+        Display *dpy = x11_open_display_timeout();
         assert(dpy != NULL);
 
         /* The comet rotates: two snapshots of the spinner's box,
@@ -16614,7 +16626,7 @@ static void test_app_furniture_gui(void) {
         }
 
         unsigned long xid = fdk_window_xid(win);
-        Display *dpy = XOpenDisplay(NULL);
+        Display *dpy = x11_open_display_timeout();
         assert(dpy != NULL);
 
         /* Page 1 (red) is current. */
@@ -16671,7 +16683,7 @@ static void test_app_furniture_gui(void) {
         }
 
         unsigned long xid = fdk_window_xid(win);
-        Display *dpy = XOpenDisplay(NULL);
+        Display *dpy = x11_open_display_timeout();
         assert(dpy != NULL);
 
         /* Hidden: the drawer's room shows the window background. */
@@ -16745,7 +16757,7 @@ static void test_app_furniture_gui(void) {
         }
 
         unsigned long xid = fdk_window_xid(win);
-        Display *dpy = XOpenDisplay(NULL);
+        Display *dpy = x11_open_display_timeout();
         assert(dpy != NULL);
 
         /* The a11y name is the TOP message. */
@@ -16804,7 +16816,7 @@ static void test_app_furniture_gui(void) {
         }
 
         unsigned long xid = fdk_window_xid(win);
-        Display *dpy = XOpenDisplay(NULL);
+        Display *dpy = x11_open_display_timeout();
         assert(dpy != NULL);
 
         /* Click into the field (focus), then type 'a' 'b' (US
@@ -16886,7 +16898,7 @@ static void test_app_furniture_gui(void) {
         }
 
         unsigned long xid = fdk_window_xid(win);
-        Display *dpy = XOpenDisplay(NULL);
+        Display *dpy = x11_open_display_timeout();
         assert(dpy != NULL);
 
         /* Press at (150, 210) — empty space below the six 30-px
@@ -17042,7 +17054,7 @@ static void test_choosers_gui(void) {
             assert(cond);                                            \
         } while (0)
 
-    Display *send = XOpenDisplay(NULL);
+    Display *send = x11_open_display_timeout();
     assert(send != NULL);
     Window root_scr = DefaultRootWindow(send);
 

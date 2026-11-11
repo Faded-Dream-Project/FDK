@@ -1,4 +1,35 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Hardware kit: sanitizers off by default; the Xvfb display race fixed everywhere
+
+- tests/run-hardware.sh builds with FDK_SANITIZE=0 by default (--asan
+  opts in): ASan adds its own failure modes and timing distortions on
+  foreign hardware — for hardware diagnosis the plain debug build is
+  the controlled variable. The report records which mode was built,
+  and a failed build now dumps its log tail instead of a bare FAILED.
+  CI keeps the sanitizer default; the CONFIG_STAMP keys on the knob,
+  so the two builds never mix objects.
+- The 2026-11-11 debian CI abort (test_xsettings_detection_gui:
+  assert 'd != NULL') was the documented Xvfb XOpenDisplay race — a
+  fresh connection can return NULL right after the server starts, and
+  mid-run, even when the server is reachable. All 75 bare
+  XOpenDisplay(NULL) sites across test_x11_integration (71),
+  test_clip_uris, test_gpu_paint and test_tray_item now go through a
+  bounded poll (x11_open_display_timeout: 100ms steps, 10s budget).
+  On a healthy server the first attempt wins (zero added latency); a
+  persistent failure exhausts the budget and reports NULL so the
+  caller's assert still fires with an accurate diagnosis. The
+  fake-WM rig's inline retry (10x50ms) folds into the same helper.
+- Local proof: the sanitized battery green, test-x11 green (231 [ok]),
+  test-gpu-paint all green, the harness end-to-end with the new
+  default (the full split inline: every flat-fill interior 0.000/0.0
+  on llvmpipe — the 1-LSB allowance of 2ab5361 changes no verdict
+  locally; it stays, covering the spec-permitted unorm rounding on
+  hardware, pending the box's numbers).
+- The srgb=1 prediction table (scripts/srgb_prediction.py): with an
+  sRGB-capable config, flat-fill interiors shift by 28-73 LSBs per
+  channel (means 27.7-60.3) — a gamma curve no tolerance can absorb,
+  which is why the FBConfig picker preference (2ab5361) is the fix
+  and the gates stay tight.
 ## NVIDIA read from the 14:10Z hardware paste + three fixes
 
 The paste's ladder (full=1 minimal=1 empty=0, NVIDIA GTX 1050 Ti,

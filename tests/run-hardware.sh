@@ -28,6 +28,14 @@ REPORT="fdk-hardware-report.txt"
 : > "$REPORT"
 r() { printf '%s\n' "$*" >> "$REPORT"; printf '%s\n' "$*"; }
 
+# ra — report-append with echo: appends a line to the report FILE
+# AND prints it. The first hardware paste proved why this matters:
+# r() dual-prints but a plain >> append went to the file only, so the
+# terminal (and the owner's paste) showed bare rc codes while the
+# evidence sat in fdk-hardware-report.txt. Everything appended in
+# section 3 must go through ra, never a bare >>.
+ra() { while IFS= read -r _line; do printf '%s\n' "$_line" >> "$REPORT"; printf '%s\n' "$_line"; done; }
+
 r "==== FDK hardware report — $(date -u '+%Y-%m-%d %H:%M:%SZ') ===="
 r "host: $(uname -srm)"
 r ""
@@ -35,10 +43,27 @@ r ""
 r "---- 1. build ----"
 WL_CFLAGS=$(pkg-config --cflags wayland-client xkbcommon 2>/dev/null || true)
 WL_LIBS=$(pkg-config --libs wayland-client xkbcommon 2>/dev/null || true)
-if make build/tests/test_gpu_paint build/tests/test_dmabuf > /dev/null 2>&1; then
+# Sanitizers are OFF by default in the hardware kit: ASan adds its own
+# failure modes and timing distortions on foreign hardware (the LSan
+# bracket, the interceptors) — for hardware diagnosis the plain debug
+# build is the controlled variable. --asan opts back in (CI keeps the
+# sanitizer default; the CONFIG_STAMP keys on the knob, so the two
+# builds never mix objects).
+HW_ASAN=0
+case " $* " in *--asan*) HW_ASAN=1 ;; esac
+if [ "$HW_ASAN" -eq 1 ]; then
+    SAN_KNOB=""
+    r "sanitizers: ASan+UBSan (--asan)"
+else
+    SAN_KNOB="FDK_SANITIZE=0"
+    r "sanitizers: off (default; --asan opts in)"
+fi
+if make $SAN_KNOB build/tests/test_gpu_paint build/tests/test_dmabuf \
+        > /tmp/fdk-hw-build.log 2>&1; then
     r "make (lib + test_gpu_paint + test_dmabuf): OK"
 else
     r "make: FAILED — the report below is not trustworthy; fix the build first"
+    tail -20 /tmp/fdk-hw-build.log | sed 's/^/  | /' | ra
     r "==== end ===="
     exit 1
 fi
@@ -74,14 +99,6 @@ r "---- 3. GPU paint smoke (the CPU-vs-GPU interior/edge split) ----"
 # blits/rotation/texture/atlas) and GPU_EMPTY (untouched surface)
 # isolation runs separate core-raster problems from the dynamic
 # paths and from present/readback alone.
-# ra — report-append with echo: appends a line to the report FILE
-# AND prints it. The first hardware paste proved why this matters:
-# r() dual-prints but a plain >> append went to the file only, so the
-# terminal (and the owner's paste) showed bare rc codes while the
-# evidence sat in fdk-hardware-report.txt. Everything appended in
-# section 3 must go through ra, never a bare >>.
-ra() { while IFS= read -r _line; do printf '%s\n' "$_line" >> "$REPORT"; printf '%s\n' "$_line"; done; }
-
 gpu_run() { # $1 = env prefix, $2 = label
     env $1 ASAN_OPTIONS=detect_leaks=0 build/tests/test_gpu_paint \
         > /tmp/fdk-hw-gpu.log 2>&1

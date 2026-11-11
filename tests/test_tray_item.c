@@ -794,10 +794,29 @@ typedef struct {
  * suppression entry needed for the rig. */
 static Display *g_rig_dpy = NULL;
 
+/* The documented Xvfb XOpenDisplay race (docs/testing.md, "Known
+ * Xvfb flakiness"; the 2026-11-11 debian CI abort in
+ * test_xsettings_detection_gui): a fresh connection made right after
+ * the server starts — or mid-run, the same quirk the fake-WM rig's
+ * inline retry absorbs — can intermittently return NULL even though
+ * the server is reachable. Poll with a bounded budget: on a healthy
+ * server the first attempt wins (zero added latency); the race is
+ * absorbed; a persistent failure exhausts the budget and returns
+ * NULL so the caller's assert/_exit still reports accurately. */
+static Display *x11_open_display_timeout(void) {
+    Display *d = XOpenDisplay(NULL);
+    for (int attempt = 0; d == NULL && attempt < 99; attempt++) {
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 100 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+        d = XOpenDisplay(NULL);
+    }
+    return d;
+}
+
 static int xembed_rig_start(xembed_rig *rig) {
     memset(rig, 0, sizeof(*rig));
     if (g_rig_dpy == NULL) {
-        g_rig_dpy = XOpenDisplay(NULL);
+        g_rig_dpy = x11_open_display_timeout();
         if (g_rig_dpy == NULL) {
             return 0;
         }
@@ -1022,7 +1041,7 @@ static int xembed_fallback_phase(fdk_context *ctx) {
      * more coin flip in LSan's exit audit). */
     {
         if (g_rig_dpy == NULL) {
-            g_rig_dpy = XOpenDisplay(NULL);
+            g_rig_dpy = x11_open_display_timeout();
         }
         if (g_rig_dpy == NULL) {
             return live_skip("the XEmbed phase needs an X display "

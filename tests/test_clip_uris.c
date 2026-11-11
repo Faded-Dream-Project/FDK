@@ -87,9 +87,28 @@ static void child_serve_requests(Display *dpy, Window w, Atom clip,
 /* The child process: owns the selection, serves until the parent
  * speaks; then phase 2: reads the PARENT's selection (set through
  * FDK) and prints what it saw. */
+/* The documented Xvfb XOpenDisplay race (docs/testing.md, "Known
+ * Xvfb flakiness"; the 2026-11-11 debian CI abort in
+ * test_xsettings_detection_gui): a fresh connection made right after
+ * the server starts — or mid-run, the same quirk the fake-WM rig's
+ * inline retry absorbs — can intermittently return NULL even though
+ * the server is reachable. Poll with a bounded budget: on a healthy
+ * server the first attempt wins (zero added latency); the race is
+ * absorbed; a persistent failure exhausts the budget and returns
+ * NULL so the caller's assert/_exit still reports accurately. */
+static Display *x11_open_display_timeout(void) {
+    Display *d = XOpenDisplay(NULL);
+    for (int attempt = 0; d == NULL && attempt < 99; attempt++) {
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 100 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+        d = XOpenDisplay(NULL);
+    }
+    return d;
+}
+
 static int child_main(int sock) {
     alarm(0);
-    Display *dpy = XOpenDisplay(NULL);
+    Display *dpy = x11_open_display_timeout();
     if (dpy == NULL) {
         _exit(10);
     }
