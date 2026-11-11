@@ -1,4 +1,33 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Hardware-report forensics: the verdict lines survive, the ladder isolates
+
+- The DRM box's paste showed test_gpu_paint rc=1 with NO verdict
+  output — the old harness only printed output from the interior/
+  edge-split marker onward, and the test's stdout is block-buffered
+  under redirection, so any abnormal death (an ASAN error report
+  _exit()s before the stdio flush) loses every [ok]/[FAIL] line with
+  the process.
+- The test now runs stdout unbuffered (verdicts survive everything
+  but SIGKILL), and the harness's section 3 on any nonzero rc prints
+  the log's last 40 lines verbatim, the engine's GL identity (the
+  renderer string + the new fbconfig sRGB fact), and [FAIL]/[skip]
+  lines; rc>=128 is reported as a signal.
+- Isolation ladder on failure: GPU_MINIMAL (bg + solid rect + rounded
+  fill — core raster only) and GPU_EMPTY (untouched surface —
+  present/readback only) runs, with the legend mapping the three
+  outcomes to dynamic-path vs core-raster vs seam problems.
+- The GLX lane logs the chosen FBConfig's
+  GLX_FRAMEBUFFER_SRGB_CAPABLE + doublebuffer state once per lane
+  (sentinel -1 = the query genuinely aborted): srgb=1 would
+  gamma-shift every write on real hardware and legitimately fail the
+  near-exact interior gates; llvmpipe's default is linear (verified:
+  srgb=0 doublebuf=1 locally).
+- Local full-scene verdict on llvmpipe: ALL GREEN (the earlier local
+  rc=1s were Mesa-internal GLX allocations tripping LSan — the
+  make target's lsan-gl.supp suppression is the sanctioned run mode;
+  the harness sets detect_leaks=0). The DRM box's rc=1 with
+  detect_leaks=0 remains unexplained until the next paste — the new
+  tail will carry the answer.
 ## The header gate enforces the door DIRECTION (no ext includes in core)
 
 - Confirmed first: NO core public header (36 files under

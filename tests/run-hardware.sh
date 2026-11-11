@@ -65,12 +65,52 @@ fi
 r ""
 
 r "---- 3. GPU paint smoke (the CPU-vs-GPU interior/edge split) ----"
-if [ -x build/tests/test_gpu_paint ]; then
-    ASAN_OPTIONS=detect_leaks=0 build/tests/test_gpu_paint > /tmp/fdk-hw-gpu.log 2>&1
+# Failure reporting: the full-scene run's own output pinpoints WHICH
+# gate died (per-region interior/edge stats, forensics pixels, the
+# GL-up renderer string, the fbconfig sRGB fact). An early death has
+# no summary line at all, so on any nonzero rc the log TAIL is
+# printed verbatim; rc>=128 means a signal (crash). When the full
+# scene fails, GPU_MINIMAL (bg + solid rect + rounded fill only — no
+# blits/rotation/texture/atlas) and GPU_EMPTY (untouched surface)
+# isolation runs separate core-raster problems from the dynamic
+# paths and from present/readback alone.
+gpu_run() { # $1 = env prefix, $2 = label
+    env $1 ASAN_OPTIONS=detect_leaks=0 build/tests/test_gpu_paint \
+        > /tmp/fdk-hw-gpu.log 2>&1
     RC=$?
-    r "test_gpu_paint: rc=$RC"
-    sed -n '/CPU-vs-GPU interior\/edge split/,$p' /tmp/fdk-hw-gpu.log >> "$REPORT" 2>/dev/null
-    grep -E 'interior mean|GPU PAINT SMOKE|\[skip\]' /tmp/fdk-hw-gpu.log | sed 's/^/  /' >> "$REPORT"
+    r "$2: rc=$RC"
+    if [ "$RC" -ge 128 ]; then
+        r "  (died by signal $((RC - 128)) — a crash, not a verdict)"
+    fi
+    grep -E 'fdk-gpaint: GL up|fdk-gl: fbconfig' /tmp/fdk-hw-gpu.log \
+        | sed 's/^/  /' >> "$REPORT" 2>/dev/null
+    if [ "$RC" -eq 0 ]; then
+        sed -n '/CPU-vs-GPU interior\/edge split/,$p' /tmp/fdk-hw-gpu.log \
+            | sed 's/^/  /' >> "$REPORT" 2>/dev/null
+    else
+        tail -40 /tmp/fdk-hw-gpu.log | sed 's/^/  | /' >> "$REPORT" 2>/dev/null
+        # the crash tail ends at death; also surface the GL identity
+        grep -E 'fdk-gpaint: GL up|fdk-gl: fbconfig' /tmp/fdk-hw-gpu.log \
+            | sed 's/^/  /' >> "$REPORT" 2>/dev/null
+        grep -E '\[FAIL\]|\[skip\]|GPU PAINT SMOKE' /tmp/fdk-hw-gpu.log \
+            | sed 's/^/  /' >> "$REPORT" 2>/dev/null
+    fi
+    return $RC
+}
+if [ -x build/tests/test_gpu_paint ]; then
+    gpu_run "" "test_gpu_paint (full scene)"
+    FULL=$?
+    if [ "$FULL" -ne 0 ] && [ "$FULL" -lt 128 ]; then
+        gpu_run "GPU_MINIMAL=1" "test_gpu_paint MINIMAL (core raster only)"
+        MIN=$?
+        gpu_run "GPU_EMPTY=1" "test_gpu_paint EMPTY (present+readback only)"
+        r "isolation: full=$FULL minimal=$MIN empty=$RC (full!=0 + minimal=0"
+        r "  => a dynamic path (blit/rotation/texture/atlas); minimal!=0"
+        r "  => the core raster (config/rounding/sRGB); empty!=0 => the"
+        r "  present/readback seam itself)"
+    elif [ "$FULL" -ne 0 ]; then
+        r "(crash — no isolation runs; fix the crash first)"
+    fi
 else
     r "build/tests/test_gpu_paint: MISSING (the build step should have made it)"
 fi

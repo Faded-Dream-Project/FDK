@@ -299,6 +299,13 @@ static void fill_card(fdk_surface *card) {
 }
 
 int main(void) {
+    /* Unbuffered verdicts: the harness reads this test's output from a
+     * redirected file, where stdout is block-buffered. Any abnormal
+     * death (an ASAN error report, a crash) _exit()s before glibc's
+     * stdio flush — with a full buffer the [ok]/[FAIL] evidence dies
+     * with the process and a hardware report shows bare rc=1. Line-
+     * at-a-time output survives everything but SIGKILL. */
+    setvbuf(stdout, NULL, _IONBF, 0);
     fdk_test_hermetic_pin();
     setenv("FDK_GL_FORCE", "1", 1);
     unsetenv("FDK_NO_GL");

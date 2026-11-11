@@ -116,7 +116,15 @@ enum {
     GLXC_RENDER_TYPE = 0x8011,
     GLXC_RGBA_BIT = 0x00000001,
     GLXC_VISUAL_ID = 0x800B,
-    GLXC_RGBA_TYPE = 0x8014
+    GLXC_RGBA_TYPE = 0x8014,
+    /* GLX_ARB_framebuffer_sRGB / GLX 3.0: 1 = the config converts
+     * writes through the sRGB curve. The gpu-paint smoke's interior
+     * gates demand near-exact CPU/GPU agreement; an sRGB config would
+     * gamma-shift every flat fill on real hardware (llvmpipe's
+     * default config is linear, so the box difference is invisible
+     * locally). Logged once per lane so a hardware report carries the
+     * answer, not a guess. */
+    GLXC_FRAMEBUFFER_SRGB_CAPABLE = 0x20B0
 };
 
 struct fdk_gl_fns {
@@ -633,6 +641,28 @@ struct fdk_x11_gl_window *fdk_x11_gl_window_try_init(
         ctx = gl->fn.glXCreateNewContext(gl->conn->display, cfg,
                                          GLXC_RGBA_TYPE, gl->root_ctx,
                                          False);
+    }
+    if (ctx != NULL) {
+        /* One-shot hardware identity: the renderer string comes from
+         * the engine's GL-up log; this adds the FBConfig facts the
+         * paint comparison's tolerances depend on. Sentinel -1 means
+         * the attribute query was genuinely aborted (the GLVND note
+         * above: the return value lies, the written value doesn't). */
+        static int srgb_logged = 0;
+        if (!srgb_logged) {
+            srgb_logged = 1;
+            int srgb = -1, dbl = -1;
+            (void)gl->fn.glXGetFBConfigAttrib(gl->conn->display, cfg,
+                                              GLXC_FRAMEBUFFER_SRGB_CAPABLE,
+                                              &srgb);
+            (void)gl->fn.glXGetFBConfigAttrib(gl->conn->display, cfg,
+                                              GLXC_DOUBLEBUFFER, &dbl);
+            fprintf(stderr,
+                    "fdk-gl: fbconfig srgb=%d doublebuf=%d (srgb=1 means "
+                    "the hardware gamma-shifts every write — interior "
+                    "gates would legitimately fail)\n",
+                    srgb, dbl);
+        }
     }
     if (ctx == NULL) {
         FDK_DEBUG("glXCreateNewContext failed — CPU present path for this "

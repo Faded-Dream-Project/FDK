@@ -1,0 +1,30 @@
+==== FDK hardware report — 2026-11-11 13:14:16Z ====
+host: Linux 5.10.134-013.15.kangaroo.al8.x86_64 x86_64
+
+---- 1. build ----
+make (lib + test_gpu_paint + test_dmabuf): OK
+
+---- 2. GL facts ----
+glxinfo: ABSENT (install mesa-utils for the renderer/driver strings)
+eglinfo: ABSENT (install mesa-utils-extra for the EGL extension list)
+DRM nodes: NONE (/dev/dri missing — the dmabuf round-trip will SKIP)
+
+---- 3. GPU paint smoke (the CPU-vs-GPU interior/edge split) ----
+test_gpu_paint (full scene): rc=77
+  | SKIP: no X display (run under Xvfb)
+test_gpu_paint MINIMAL (core raster only): rc=77
+  | SKIP: no X display (run under Xvfb)
+test_gpu_paint EMPTY (present+readback only): rc=77
+  | SKIP: no X display (run under Xvfb)
+isolation: full=77 minimal=77 empty=77 (full!=0 + minimal=0
+  => a dynamic path (blit/rotation/texture/atlas); minimal!=0
+  => the core raster (config/rounding/sRGB); empty!=0 => the
+  present/readback seam itself)
+
+---- 4. the GL canvas example ----
+gl-canvas: SKIPPED — no DISPLAY (set one, or run under Xvfb)
+
+---- 5. the dmabuf round-trip (the DRM-box step) ----
+test_dmabuf: SKIP — no readable /dev/dri/renderD128 (record the SKIP in the release notes; never fake a PASS)
+
+==== end — paste everything above back to the session ====
