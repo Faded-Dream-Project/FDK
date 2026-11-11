@@ -413,7 +413,14 @@ the ADD-ON includes the native headers it needs and casts to the
 documented type. Xlib and wayland-client are then the add-on's own
 dependencies, exactly as they would be for any native client — the
 same license FDK itself grants its backends, handed outward through
-documented accessors instead of private structs.
+documented accessors instead of private structs. The rule is
+BUILD-enforced by the D5 header gate (tools/header_gate.c, run by
+`make all`): no banned unstable-tier declaration in a core public
+header, AND no core public header #including an ext door (fdk/ext/
+wayland.h or fdk/ext/x11.h — the doors are add-on-side; a core
+header reaching for one would drag native types into the core
+surface). The gate's proof test feeds it a synthetic bad header and
+a synthetic bad include; commented-out mentions stay legal.
 
 On Wayland, bind your own globals through your OWN
 `wl_display_get_registry()` (see the create recipe above) — one

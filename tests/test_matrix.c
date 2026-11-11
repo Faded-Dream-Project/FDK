@@ -225,6 +225,27 @@ int main(int argc, char **argv) {
                 CHECK(WIFEXITED(rc) && WEXITSTATUS(rc) == 0,
                       "header gate: prose mentions stay legal");
             }
+
+            /* (4) the include structure: a CORE public header may not
+             * reach the ext doors (fdk/ext/wayland.h, fdk/ext/x11.h
+             * are add-on-side). The same tool rejects the include. */
+            const char *inc_path = BUILD_DIR_STR
+                "/tests/data/bad_gate_include.h";
+            FILE *inf = fopen(inc_path, "w");
+            if (inf == NULL) {
+                CHECK(0, "cannot write the bad-include fixture");
+            } else {
+                fputs("#include \"fdk/fdk.h\"" NL
+                      "#include <fdk/ext/wayland.h>" NL, inf);
+                fclose(inf);
+                char cmd[1024];
+                snprintf(cmd, sizeof cmd, "%s %s > /dev/null 2>&1",
+                         gate, inc_path);
+                rc = system(cmd);
+                CHECK(WIFEXITED(rc) && WEXITSTATUS(rc) != 0,
+                      "header gate: an ext-door include in a core "
+                      "header fails");
+            }
         }
     }
 

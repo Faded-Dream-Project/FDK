@@ -1,4 +1,16 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The header gate enforces the door DIRECTION (no ext includes in core)
+
+- Confirmed first: NO core public header (36 files under
+  include/fdk) includes fdk/ext/wayland.h or fdk/ext/x11.h — the
+  ext doors are add-on-side by construction. The gate now ENFORCES
+  it: a second pass strips comments while keeping string contents
+  (a commented-out include cannot false-positive; a real one cannot
+  hide) and fails on any #include of fdk/ext/ in a core public
+  header, naming the line.
+- The proof test gains the fixture (a synthetic bad include fails);
+  the tool's own real-header scan stays green. EXTENDING.md's
+  no-backend-leakage paragraph now records both enforced rules.
 ## D6 hardened: the removal check uses a STABLE base, not HEAD~
 
 - The default HEAD~ only sees the LAST commit of a pushed batch: a
