@@ -363,7 +363,7 @@ int main(void) {
      * UNSUPPORTED contract on a lane without the cursor machinery. */
     /* void by contract: the cursor set is best-effort per lane (the
      * documented UNSUPPORTED surfaces at the capability, not here). */
-    fdk_ext_surface_set_cursor(g_panel, "default");
+    fdk_ext_surface_set_cursor(g_panel, FDK_CURSOR_DEFAULT);
     printf("[panel] set_cursor issued\n");
 
     /* The loop: ~3 seconds, three worker frames. The frame callback

@@ -380,7 +380,11 @@ test-threads-tsan: $(BUILD_DIR)/tests/test_threads-tsan
 	    exit $$TEST_RESULT; \
 	fi
 
-EXAMPLE_SRCS := $(wildcard examples/*.c)
+# 12_vulkan_surface.c builds in its own CI step (it needs the Vulkan
+# dev headers, which only that step installs).
+# 12_vulkan_surface.c builds in its own CI step (it needs the Vulkan
+# dev headers, which only that step installs).
+EXAMPLE_SRCS := $(filter-out examples/12_vulkan_surface.c,$(wildcard examples/*.c))
 EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
 
 # Command-line tools (1.0.0). Built like tests and examples — against

@@ -1,4 +1,16 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## Fix-forward x2: the Vulkan example out of the generic set; 09's cursor call
+
+- examples/12_vulkan_surface.c left the generic `make examples` set:
+  it needs the Vulkan dev headers, which only its own CI step
+  installs — the -O2 step (which runs before it) failed on the
+  missing vulkan.h. The example still builds and RUNS in its own
+  step.
+- examples/09's set_cursor call passed a string to the int-shape
+  signature (FDK_CURSOR_DEFAULT) — a latent bug gcc 13 warns on but
+  gcc 14 (this sandbox) errors. Fixed to FDK_CURSOR_DEFAULT.
+- Battery green; the protocol examples green; `make examples` green
+  (all 11 generic examples build; 12 builds in its own step).
 ## Fix-forward: the matrix self-builds the header-gate tool
 
 - CI's sway lane failed on the D5 proof test: the step builds only
