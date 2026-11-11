@@ -1,6 +1,7 @@
 #define FDK_LOG_TAG "x11"
 
 #include "platform/x11/x11_platform.h"
+#include "render/vk_present.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -550,6 +551,15 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
      * stays pinned for process lifetime (x11_gl.c header comment). */
     fdk_x11_gl_shutdown(conn->gl);
     conn->gl = NULL;
+
+    /* The Vulkan lane (2026-11-11): the instance/device die HERE,
+     * before XCloseDisplay (the VkSurfaceKHR objects died with their
+     * windows; the instance's Xlib references must not outlive the
+     * Display). The lane's dlclose rides inside. */
+    if (conn->vk_lane != NULL) {
+        fdk_vk_lane_destroy(conn->vk_lane);
+        conn->vk_lane = NULL;
+    }
 
     /* XI2 touch (M-3): same pinned-library discipline — the record
      * dies, libXi stays loaded for the process lifetime. */

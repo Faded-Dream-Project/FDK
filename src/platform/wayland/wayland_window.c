@@ -4,6 +4,8 @@
 
 #include "platform/wayland/wayland_platform.h"
 #include "render/gpaint.h"
+#include "render/vk_present.h"
+#include "render/render_backend.h"
 
 #include "generated/viewporter-client-protocol.h"
 #include "generated/fractional-scale-v1-client-protocol.h"
@@ -183,6 +185,9 @@ static fdk_result commit_render_pending(fdk_platform_window *pwindow,
 fdk_result fdk__wayland_surface_downgrade_from_lane(
     fdk_platform_window *pwindow);
 
+/* The Vulkan lane's sibling (defined beside the EGL one). */
+fdk_result fdk__wayland_vk_downgrade(fdk_platform_window *pwindow);
+
 /* THE deferred-first-frame commit, shared by xdg_surface_configure()
  * and the extension path (wayland_ext.c's resized op — the add-on's
  * role configure). Mirrors the 1.0.0 fix: an application that painted
@@ -211,6 +216,27 @@ int fdk__wayland_commit_deferred_first_frame(
          * single-present application still maps with its first
          * frame — the exact contract the CPU branch below gives a
          * deferred render_pending. */
+        if (pwindow != NULL && pwindow->vk_win != NULL &&
+            pwindow->lane_frame_deferred && !pwindow->rendered_ever) {
+            /* The Vulkan lane's deferred first frame: the configure
+             * gate lifted — present the staging frame through the
+             * swapchain NOW (full damage), exactly the contract the
+             * EGL branch below gives its windows. */
+            pwindow->lane_frame_deferred = 0;
+            fdk_platform_damage full;
+            memset(&full, 0, sizeof(full));
+            full.full = 1;
+            if (fdk_vk_window_present(pwindow->vk_win, &full,
+                                      pwindow->render_size.width,
+                                      pwindow->render_size.height) ==
+                0) {
+                pwindow->rendered_ever = 1;
+                FDK_DEBUG("deferred Vulkan first frame committed at "
+                          "configure");
+                return 1;
+            }
+            return fdk__wayland_vk_downgrade(pwindow) == FDK_OK;
+        }
         if (pwindow != NULL && pwindow->egl_win != NULL &&
             pwindow->lane_frame_deferred && !pwindow->rendered_ever) {
             pwindow->lane_frame_deferred = 0;
@@ -1107,6 +1133,64 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
              * the decision is sticky for this window's life. */
             pwindow->egl_downgraded = 1;
         } else {
+            /* The Vulkan lane goes FIRST (the owner's priority order:
+             * Vulkan, then OpenGL, then CPU) — the X11 backend's exact
+             * shape: one-shot per connection, the same size gate, and
+             * the forced-vulkan case keeps the GL lane off the window
+             * (a forced backend is a requirement, never silently
+             * substituted). */
+            if (pwindow->vk_win == NULL && !pwindow->vk_downgraded &&
+                fdk__rb_vulkan_allowed()) {
+                if (pwindow->conn->vk_lane == NULL &&
+                    !pwindow->conn->vk_tried) {
+                    pwindow->conn->vk_lane = fdk_vk_lane_try_load(
+                        (fdk_platform_connection *)pwindow->conn,
+                        "wayland");
+                    pwindow->conn->vk_tried = 1;
+                }
+                int vk_eligible =
+                    ((fdk_i64)size.width * (fdk_i64)size.height >
+                         FDK_WL_GL_MIN_PIXELS ||
+                     getenv("FDK_GL_FORCE") != NULL ||
+                     pwindow->render_mode == FDK_RENDER_GPU);
+                if (pwindow->conn->vk_lane != NULL && vk_eligible) {
+                    pwindow->render_size = size;
+                    pwindow->vk_win = fdk_vk_window_try_init(
+                        pwindow->conn->vk_lane,
+                        (void *)pwindow->conn->display,
+                        (void *)pwindow->surface, size.width,
+                        size.height);
+                }
+                if (pwindow->vk_win == NULL) {
+                    pwindow->vk_downgraded = 1;
+                }
+            }
+            if (pwindow->vk_win != NULL) {
+                fdk_u32 *staging = fdk_vk_window_staging(
+                    pwindow->vk_win, size.width, size.height);
+                if (staging != NULL) {
+                    pwindow->render_size = size;
+                    out_fb->pixels = staging;
+                    out_fb->width = size.width;
+                    out_fb->height = size.height;
+                    out_fb->stride = size.width;
+                    return FDK_OK;
+                }
+                /* Staging failure: permanent for this window (the
+                 * GL lanes' OOM verdict). */
+                fdk_vk_window_destroy(pwindow->conn->vk_lane,
+                                      pwindow->vk_win);
+                pwindow->vk_win = NULL;
+                pwindow->vk_downgraded = 1;
+            }
+            if (fdk__rb_choice() == FDK__RB_VULKAN) {
+                /* FORCED Vulkan: the EGL lane must not pick this
+                 * window up — fdk_window_render_backend() must be
+                 * able to report the honest CPU answer a strict app
+                 * refuses. */
+                pwindow->egl_downgraded = 1;
+            }
+            if (!pwindow->egl_downgraded) {
             /* GPU mode skips the small-surface policy: the lane is the
              * ONLY presentation path this window has. */
             int lane_eligible =
@@ -1154,6 +1238,7 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                                                   * failing until destroy */
                     return FDK_ERR_UNSUPPORTED;
                 }
+            }
             }
         }
     }
@@ -1706,6 +1791,39 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
         }
     }
 
+    /* --- Vulkan present lane (2026-11-11) -------------------------
+     * Priority over EGL (AUTO's order). The xdg-shell first-commit
+     * gate applies exactly as below: a commit is a commit, whether
+     * the buffer came from wl_shm, EGL, or the swapchain's present.
+     * A nonzero return falls through to the salvage + classic
+     * re-present (the downgrade contract). */
+    if (pwindow->vk_win != NULL) {
+        if (!damage->full && damage->count == 0) {
+            return FDK_OK; /* the no-damage no-op, same as EGL */
+        }
+        if (!pwindow->configured) {
+            FDK_DEBUG("Vulkan present deferred until first configure");
+            pwindow->lane_frame_deferred = 1;
+            return FDK_OK;
+        }
+        fdk_i32 gw = pwindow->render_size.width;
+        fdk_i32 gh = pwindow->render_size.height;
+        if (fdk_vk_window_present(pwindow->vk_win, damage, gw, gh) == 0) {
+            pwindow->rendered_ever = 1;
+            pwindow->buffer_attached = 1;
+            return FDK_OK;
+        }
+        /* Salvage: the staging buffer holds the frame; give it to a
+         * fresh wl_shm slot and present NOW (the EGL downgrade's
+         * contract, the same words). Permanent for this window. */
+        fdk_result salv =
+            fdk__wayland_vk_downgrade(pwindow);
+        if (fdk_ok(salv)) {
+            return FDK_OK;
+        }
+        return salv;
+    }
+
     if (pwindow == NULL || damage == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
@@ -1840,7 +1958,41 @@ int fdk_wayland_window_ever_presented(fdk_platform_window *pwindow) {
  * answer, read live off the backend's own state). The exact mirror
  * of fdk_x11_window_render_path. */
 int fdk_wayland_window_render_path(fdk_platform_window *pwindow) {
-    return (pwindow != NULL && pwindow->egl_win != NULL) ? 1 : 0;
+    /* 1 while this window presents through a GPU lane (Vulkan or
+     * EGL), 0 on the CPU path — the honest, live answer. */
+    return (pwindow != NULL && (pwindow->egl_win != NULL ||
+                                pwindow->vk_win != NULL)) ? 1 : 0;
+}
+
+/* The finer-grained query (2026-11-11): 0 CPU / 1 Vulkan / 2 OpenGL,
+ * plus the lane's device string when asked for. */
+fdk_result fdk_wayland_window_render_backend(fdk_platform_window *pwindow,
+                                             int *out_backend,
+                                             char *out_device, size_t cap) {
+    if (pwindow == NULL || out_backend == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (pwindow->vk_win != NULL) {
+        *out_backend = 1;
+        if (out_device != NULL && cap > 0) {
+            (void)snprintf(out_device, cap, "%s",
+                           fdk_vk_lane_device(pwindow->conn->vk_lane));
+        }
+    } else if (pwindow->egl_win != NULL) {
+        *out_backend = 2;
+        if (out_device != NULL && cap > 0) {
+            const char *r =
+                fdk_wayland_egl_renderer(pwindow->conn->egl);
+            (void)snprintf(out_device, cap, "%s",
+                           r != NULL ? r : "<unknown>");
+        }
+    } else {
+        *out_backend = 0;
+        if (out_device != NULL && cap > 0) {
+            (void)snprintf(out_device, cap, "<none>");
+        }
+    }
+    return FDK_OK;
 }
 
 /* The GPU-lane downgrade path (1.0.0 / D-1) — the mirror of
@@ -1969,6 +2121,98 @@ fdk_result fdk__wayland_surface_downgrade_from_lane(
      * damage — by recursing into the (egl_win == NULL) present,
      * which owns the configure gate, damage conversion, the frame
      * callback, and live-buffer bookkeeping. */
+    static const fdk_platform_damage fallback_full = {
+        {{0, 0, 0, 0}}, 0, 1
+    };
+    return fdk_wayland_window_present(pwindow, &fallback_full);
+}
+
+/* The Vulkan lane's downgrade (2026-11-11) — the EGL function's
+ * shape, the same words: salvage the staging frame into a fresh
+ * wl_shm slot, destroy the lane state, mark the window downgraded
+ * (sticky), and re-present through the classic path with full
+ * damage so the salvaged frame goes out NOW. The staging buffer
+ * holds exactly (last-presented + the drawing since), so the window
+ * never shows a broken or stale frame because of the downgrade. */
+fdk_result fdk__wayland_vk_downgrade(fdk_platform_window *pwindow) {
+    if (pwindow == NULL || pwindow->vk_win == NULL) {
+        return FDK_OK;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+    fdk_i32 gw = pwindow->render_size.width;
+    fdk_i32 gh = pwindow->render_size.height;
+
+    FDK_WARN("Vulkan present lane failed — reverting this window to "
+             "the CPU present path (permanent)");
+
+    const fdk_u32 *src = fdk_vk_window_staging(pwindow->vk_win, gw, gh);
+    if (src == NULL || gw < 1 || gh < 1) {
+        /* No staging to salvage (degenerate sizes): plain teardown,
+         * full-damage classic present, done. */
+        fdk_vk_window_destroy(conn->vk_lane, pwindow->vk_win);
+        pwindow->vk_win = NULL;
+        pwindow->vk_downgraded = 1;
+        static const fdk_platform_damage fallback_full = {
+            {{0, 0, 0, 0}}, 0, 1
+        };
+        return fdk_wayland_window_present(pwindow, &fallback_full);
+    }
+
+    int slot = -1;
+    for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+        if (pwindow->render_slots[i].buffer == NULL) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+            if (pwindow->render_slots[i].buffer != NULL &&
+                pwindow->render_slots[i].buffer != pwindow->buffer) {
+                wl_buffer_destroy(pwindow->render_slots[i].buffer);
+                munmap(pwindow->render_slots[i].pixels,
+                       pwindow->render_slots[i].length);
+                pwindow->render_slots[i].buffer = NULL;
+                pwindow->render_slots[i].pixels = NULL;
+                pwindow->render_slots[i].length = 0;
+                pwindow->render_slots[i].size.width = 0;
+                pwindow->render_slots[i].size.height = 0;
+                pwindow->render_slots[i].released = 0;
+                slot = i;
+                break;
+            }
+        }
+    }
+    fdk_result rc = FDK_OK;
+    if (slot >= 0) {
+        struct wl_buffer *buffer = NULL;
+        uint32_t *pixels = NULL;
+        size_t length = 0;
+        fdk_size size = { .width = gw, .height = gh };
+        fdk_result r = create_shm_buffer(conn, size, &buffer, &pixels,
+                                         &length);
+        if (fdk_ok(r)) {
+            wl_buffer_add_listener(buffer, &g_render_buffer_listener,
+                                   pwindow);
+            pwindow->render_slots[slot].buffer = buffer;
+            pwindow->render_slots[slot].pixels = pixels;
+            pwindow->render_slots[slot].length = length;
+            pwindow->render_slots[slot].size = size;
+            pwindow->render_slots[slot].released = 0;
+            memcpy(pixels, src, sizeof(fdk_u32) * (size_t)gw * (size_t)gh);
+            pwindow->render_pending = buffer;
+        } else {
+            rc = r;
+        }
+    }
+
+    fdk_vk_window_destroy(conn->vk_lane, pwindow->vk_win);
+    pwindow->vk_win = NULL;
+    pwindow->vk_downgraded = 1;
+
+    if (!fdk_ok(rc)) {
+        return rc;
+    }
     static const fdk_platform_damage fallback_full = {
         {{0, 0, 0, 0}}, 0, 1
     };
@@ -2369,10 +2613,15 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
     /* GPU lane first (1.0.0 / D-1): the EGL surface wraps this
      * wl_surface, so it must die BEFORE wl_surface_destroy below —
      * the lane's own destroy path (context, surface, wl_egl_window,
-     * staging) runs against a still-live surface. */
+     * staging) runs against a still-live surface. The Vulkan
+     * swapchain wraps it the same way. */
     if (pwindow->egl_win != NULL) {
         fdk_wayland_egl_window_destroy(pwindow->conn->egl, pwindow->egl_win);
         pwindow->egl_win = NULL;
+    }
+    if (pwindow->vk_win != NULL) {
+        fdk_vk_window_destroy(pwindow->conn->vk_lane, pwindow->vk_win);
+        pwindow->vk_win = NULL;
     }
     /* Render buffers first: this may destroy the live buffer if it is
      * a render one (clearing pwindow->buffer), so the background

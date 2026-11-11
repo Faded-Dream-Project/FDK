@@ -702,6 +702,17 @@ typedef struct fdk_platform_ops {
      * model and the policy/env knobs (FDK_NO_GL, FDK_GL_FORCE). */
     int (*window_render_path)(fdk_platform_window *pwindow);
 
+    /* OPTIONAL (2026-11-11): the finer-grained lane query behind
+     * fdk_window_get_render_backend(). Writes 0 (CPU), 1 (Vulkan),
+     * or 2 (OpenGL) to *out_backend and, when out_device is
+     * non-NULL, up to cap-1 bytes of the lane's device string
+     * ("<none>"/"<unknown>" per the public header's contract).
+     * Returns FDK_OK or FDK_ERR_INVALID_ARGUMENT. NULL = the backend
+     * predates the query (CPU is the honest answer). */
+    fdk_result (*window_render_backend)(fdk_platform_window *pwindow,
+                                        int *out_backend,
+                                        char *out_device, size_t cap);
+
     /* OPTIONAL HiDPI scale query behind fdk_window_get_scale()
      * (Phase 3 completion): writes the window's current scale factor
      * (1.0 = one buffer pixel per logical unit) to *out_scale.

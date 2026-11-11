@@ -532,6 +532,61 @@ typedef enum fdk_render_path {
 fdk_result fdk_window_get_render_path(const fdk_window *window,
                                       fdk_render_path *out_path);
 
+/* fdk_window_get_render_backend() (2026-11-11): WHICH GPU present
+ * lane carries this window's frames — the finer-grained companion
+ * of fdk_window_get_render_path(). The lane order under AUTO is
+ * fixed by policy: Vulkan first, then OpenGL, then the CPU path.
+ *
+ * The answer is read live off the backend's own state (a mid-session
+ * downgrade reports CPU honestly, the same contract render_path
+ * lives under). Applications that REQUIRE a hardware backend
+ * (the gpu_strict shape) check this after showing a window and
+ * refuse to run on CPU.
+ *
+ * Forcing (environment):
+ *   FDK_GPU_BACKEND=vulkan  only the Vulkan lane may present
+ *   FDK_GPU_BACKEND=opengl  only the GL lanes (GLX/EGL) may present
+ *   FDK_GPU_BACKEND=auto    the priority order (the default)
+ *   FDK_GL_VULKAN=1         alias of =vulkan
+ *   FDK_GL_OPENGL=1         alias of =opengl
+ * A FORCED backend is a requirement, not a preference: when it
+ * cannot engage, the window presents on the CPU and this query
+ * reports FDK_RENDER_BACKEND_CPU — a strict application sees the
+ * honest answer and exits; FDK never silently substitutes the
+ * other GPU backend.
+ *
+ * FDK_NO_GL=1 keeps its master opt-out meaning (nothing GPU loads).
+ * The renderer-policy gates still apply per lane: software
+ * rasterizers (llvmpipe, lavapipe, SwiftShader) stay refused
+ * without FDK_GL_FORCE=1.
+ *
+ * Can fail with:
+ *   FDK_ERR_INVALID_ARGUMENT - window or out_backend is NULL
+ *   FDK_ERR_NOT_INITIALIZED  - window has no live backend connection
+ */
+typedef enum fdk_render_backend {
+    /* The classic CPU present path (SHM on Wayland, XImage/MIT-SHM
+     * on X11) — including every downgraded window. */
+    FDK_RENDER_BACKEND_CPU = 0,
+    /* The Vulkan present lane: the staging frame rides a
+     * host-visible buffer into the swapchain image (queue transfer
+     * + present through VK_KHR_xlib_surface /
+     * VK_KHR_wayland_surface). */
+    FDK_RENDER_BACKEND_VULKAN = 1,
+    /* The OpenGL present lanes: GLX on X11, EGL on Wayland. */
+    FDK_RENDER_BACKEND_OPENGL = 2
+} fdk_render_backend;
+
+fdk_result fdk_window_get_render_backend(const fdk_window *window,
+                                         fdk_render_backend *out_backend);
+
+/* The device string behind the active GPU lane (e.g. "llvmpipe
+ * (LLVM 19.1.7, 256 bits)", "NVIDIA GA10x", "AMD RADV NAVI10") —
+ * "<none>" on the CPU path, "<unknown>" when the lane engaged but
+ * never read its device string. A diagnostic label for logs and
+ * strict-app error messages, never an identity. */
+const char *fdk_window_render_device(const fdk_window *window);
+
 /* Sets minimum/maximum size hints. Pass 0 for either dimension of
  * either struct to mean "no constraint" in that dimension. These are
  * hints handed to the platform (WM_NORMAL_HINTS on X11, xdg_toplevel

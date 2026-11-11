@@ -2,6 +2,10 @@
 
 #include "platform/x11/x11_platform.h"
 #include "render/gpaint.h"
+#include "render/vk_present.h"
+#include "render/render_backend.h"
+
+#define FDK_LOG_TAG "x11"
 
 #include "core/log_internal.h"
 
@@ -367,6 +371,61 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
              * for this window's life. */
             pwindow->gl_downgraded = 1;
         } else {
+            /* The Vulkan lane goes FIRST (the owner's priority:
+             * Vulkan, then OpenGL, then CPU). The same size gate and
+             * one-shot discipline as GLX; a refusal is final for this
+             * process (no re-attempt per window). */
+            if (pwindow->vk_win == NULL && !pwindow->vk_downgraded &&
+                fdk__rb_vulkan_allowed()) {
+                if (conn->vk_lane == NULL && !conn->vk_tried) {
+                    conn->vk_lane = fdk_vk_lane_try_load(
+                        (fdk_platform_connection *)conn, "x11");
+                    conn->vk_tried = 1;
+                }
+                if (conn->vk_lane != NULL) {
+                    int lane_eligible =
+                        ((fdk_i64)w * (fdk_i64)h > FDK_GL_MIN_PIXELS ||
+                         getenv("FDK_GL_FORCE") != NULL ||
+                         pwindow->render_mode == FDK_RENDER_GPU);
+                    if (lane_eligible) {
+                        pwindow->vk_win = fdk_vk_window_try_init(
+                            conn->vk_lane, (void *)conn->display,
+                            (void *)(uintptr_t)pwindow->xwindow, w, h);
+                    }
+                }
+                if (pwindow->vk_win == NULL) {
+                    pwindow->vk_downgraded = 1;
+                }
+            }
+            if (pwindow->vk_win != NULL) {
+                fdk_u32 *staging =
+                    fdk_vk_window_staging(pwindow->vk_win, w, h);
+                if (staging != NULL) {
+                    pwindow->render_size.width = w;
+                    pwindow->render_size.height = h;
+                    out_fb->pixels = staging;
+                    out_fb->width = w;
+                    out_fb->height = h;
+                    out_fb->stride = w;
+                    return FDK_OK;
+                }
+                /* Staging failure: this window falls off the Vulkan
+                 * lane permanently (the same verdict the GL lanes
+                 * give an OOM). */
+                fdk_vk_window_destroy(conn->vk_lane, pwindow->vk_win);
+                pwindow->vk_win = NULL;
+                pwindow->vk_downgraded = 1;
+            }
+            if (fdk__rb_choice() == FDK__RB_VULKAN) {
+                /* FORCED Vulkan: the GL lane must NOT pick the window
+                 * up (a forced backend is a requirement, not a
+                 * preference — a silent OpenGL substitution would
+                 * lie to fdk_window_render_backend()). The CPU path
+                 * below presents; the strict apps read the honest
+                 * CPU answer and refuse. */
+                pwindow->gl_downgraded = 1;
+            }
+            if (!pwindow->gl_downgraded) {
             /* The size gate runs BEFORE the dlopen: a process whose
              * windows are all small (the panel/popup class) never loads
              * the GL stack at all — the X1 spirit applied to memory and
@@ -411,6 +470,7 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
                                                  * failing until destroy */
                     return FDK_ERR_UNSUPPORTED;
                 }
+            }
             }
         }
     }
@@ -628,11 +688,11 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
         return FDK_ERR_INVALID_ARGUMENT;
     }
     /* Documented no-op when nothing was ever acquired/drawn (the
-     * window simply keeps its background pixel contents). With the
-     * GPU lane active the XImage slots are NULL by design — the lane's
-     * staging buffer is this window's framebuffer. */
+     * window simply keeps its background pixel contents). With a
+     * GPU lane active the XImage slots are NULL by design — the
+     * lane's staging buffer is this window's framebuffer. */
     if (pwindow->render_slots[0].image == NULL &&
-        pwindow->gl_win == NULL) {
+        pwindow->gl_win == NULL && pwindow->vk_win == NULL) {
         return FDK_OK;
     }
 
@@ -653,6 +713,37 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
             presented_once = 1;
             fdk__startup_trace("x11:first present");
         }
+    }
+
+    /* --- Vulkan present lane (2026-11-11) ------------------------
+     * Priority over the GL lane (AUTO's order): the staging upload
+     * + queue present IS the frame's commit. A nonzero return
+     * falls through to the classic path (this window's Vulkan
+     * verdict goes permanent below — no broken frame). */
+    if (pwindow->vk_win != NULL) {
+        fdk_i32 gw = pwindow->render_size.width;
+        fdk_i32 gh = pwindow->render_size.height;
+        if (fdk_vk_window_present(pwindow->vk_win, damage, gw, gh) == 0) {
+            if (!pwindow->presented_ever && pwindow->popup) {
+                fdk__x11_popup_trace("first-present 0x%lx lane=vk %dx%d",
+                                     (unsigned long)pwindow->xwindow,
+                                     gw, gh);
+            }
+            pwindow->presented_ever = 1;
+            pwindow->last_present_ms = (long long)fdk__x11_now_ms();
+            return FDK_OK;
+        }
+        /* Salvage the frame onto the classic path (the GL lane's
+         * downgrade contract — the CPU pixels are in the staging
+         * buffer, so the classic re-present below shows the same
+         * frame). Permanent for this window. */
+        fdk_vk_window_destroy(pwindow->conn->vk_lane, pwindow->vk_win);
+        pwindow->vk_win = NULL;
+        pwindow->vk_downgraded = 1;
+        fdk_platform_damage full;
+        memset(&full, 0, sizeof(full));
+        full.full = 1;
+        damage = &full;
     }
 
     /* --- GPU present lane (1.0.0) -------------------------------
@@ -839,10 +930,16 @@ void fdk_x11_surface_cleanup(fdk_platform_window *pwindow) {
     }
     /* GPU lane teardown (1.0.0): destroys the GLX context while the
      * display is still alive; libGL itself stays pinned (loader state
-     * belongs to the connection and dies at disconnect). */
+     * belongs to the connection and dies at disconnect). The Vulkan
+     * lane's window objects die here too; the lane itself (instance,
+     * device) is the connection's and dies at disconnect. */
     if (pwindow->gl_win != NULL) {
         fdk_x11_gl_window_destroy(pwindow->conn->gl, pwindow->gl_win);
         pwindow->gl_win = NULL;
+    }
+    if (pwindow->vk_win != NULL) {
+        fdk_vk_window_destroy(pwindow->conn->vk_lane, pwindow->vk_win);
+        pwindow->vk_win = NULL;
     }
     /* If a put is still in flight, let the server finish reading
      * before tearing the segment away (XSync guarantees completion). */
@@ -905,10 +1002,41 @@ int fdk_x11_window_frame_ready(fdk_platform_window *pwindow) {
 
 int fdk_x11_window_render_path(fdk_platform_window *pwindow) {
     /* The window_render_path op (1.0.0): 1 while this window presents
-     * through the GPU lane, 0 on the classic CPU path (including
-     * never-engaged and downgraded windows — the honest, current
-     * answer, read live off the backend's own state). */
-    return (pwindow != NULL && pwindow->gl_win != NULL) ? 1 : 0;
+     * through a GPU lane (Vulkan or GLX), 0 on the classic CPU path
+     * (including never-engaged and downgraded windows — the honest,
+     * current answer, read live off the backend's own state). */
+    return (pwindow != NULL && (pwindow->gl_win != NULL ||
+                                pwindow->vk_win != NULL)) ? 1 : 0;
+}
+
+/* The finer-grained query (2026-11-11): 0 CPU / 1 Vulkan / 2 OpenGL,
+ * plus the lane's device string when asked for. */
+fdk_result fdk_x11_window_render_backend(fdk_platform_window *pwindow,
+                                         int *out_backend, char *out_device,
+                                         size_t cap) {
+    if (pwindow == NULL || out_backend == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (pwindow->vk_win != NULL) {
+        *out_backend = 1;
+        if (out_device != NULL && cap > 0) {
+            (void)snprintf(out_device, cap, "%s",
+                           fdk_vk_lane_device(pwindow->conn->vk_lane));
+        }
+    } else if (pwindow->gl_win != NULL) {
+        *out_backend = 2;
+        if (out_device != NULL && cap > 0) {
+            const char *r = fdk_x11_gl_renderer(pwindow->conn->gl);
+            (void)snprintf(out_device, cap, "%s",
+                           r != NULL ? r : "<unknown>");
+        }
+    } else {
+        *out_backend = 0;
+        if (out_device != NULL && cap > 0) {
+            (void)snprintf(out_device, cap, "<none>");
+        }
+    }
+    return FDK_OK;
 }
 
 /* Test seam shim: resolve the GPU-mode surface from the pwindow

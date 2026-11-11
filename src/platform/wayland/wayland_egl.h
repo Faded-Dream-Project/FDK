@@ -183,3 +183,8 @@ int fdk_wayland_egl_dmabuf_available(fdk_platform_connection *conn);
 /* The lane's EGLDisplay (the cap-19 query's entry); NULL when the
  * lane never loaded. */
 void *fdk_wayland_egl_lane_display(fdk_platform_connection *conn);
+
+/* The lane's renderer string (the once-per-connection policy read);
+ * NULL when the lane never engaged or never read one. The
+ * fdk_window_render_device() diagnostic behind it. */
+const char *fdk_wayland_egl_renderer(struct fdk_wayland_egl *egl);

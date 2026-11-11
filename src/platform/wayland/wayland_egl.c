@@ -631,6 +631,11 @@ void *fdk_wayland_egl_lane_display(fdk_platform_connection *conn) {
     return conn->egl->egl_display;
 }
 
+const char *fdk_wayland_egl_renderer(struct fdk_wayland_egl *egl) {
+    return (egl != NULL && egl->renderer[0] != '\0') ? egl->renderer
+                                                     : NULL;
+}
+
 void fdk__wayland_egl_test_reset(void) {
     /* TEST SEAM (mirrors fdk__x11_gl_test_reset): clear the
      * process-wide verdicts so a later test group — or a real run

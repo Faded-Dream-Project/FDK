@@ -124,6 +124,21 @@ $(BUILD)/fdk-keys: $(filter-out %/gen_app_icon.c %/perf_50k.c,$(wildcard fdk-key
 $(FDK_LIB):
 	$(MAKE) -C $(ROOT) static
 
+# The GPU-backend smoke apps (2026-11-11): no common/ framework, no
+# PO dir — one .c each, the public API only. gpu_smoke prints the
+# backend that carried its one frame; gpu_strict refuses CPU and
+# software renderers (exit 1 with the reason).
+$(BUILD)/gpu_smoke: gpu_smoke/main.c $(FDK_LIB)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(STD) $(WARN) $(FEATURE) -Werror -o $@ gpu_smoke/main.c $(FDK_LIB) $(LIBS)
+
+$(BUILD)/gpu_strict: gpu_strict/main.c $(FDK_LIB)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(STD) $(WARN) $(FEATURE) -Werror -o $@ gpu_strict/main.c $(FDK_LIB) $(LIBS)
+
+GPU_BINS := $(BUILD)/gpu_smoke $(BUILD)/gpu_strict
+all: $(GPU_BINS)
+
 # Smoke: each app under a throwaway Xvfb (the repo Makefile's own
 # test-x11 pattern — xvfb-run needs xauth, which headless containers
 # lack), frame-budgeted exit. A smoke PASS is "opened a window,

@@ -1420,6 +1420,58 @@ fdk_result fdk_window_get_render_path(const fdk_window *window,
     return FDK_OK;
 }
 
+fdk_result fdk_window_get_render_backend(const fdk_window *window,
+                                         fdk_render_backend *out_backend) {
+    if (window == NULL || out_backend == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ctx == NULL || window->ctx->conn == NULL) {
+        return FDK_ERR_NOT_INITIALIZED;
+    }
+    /* NULL op = a backend that predates the query: CPU is the
+     * honest answer. Otherwise the backend's LIVE state decides —
+     * a mid-session downgrade reports CPU, exactly the contract
+     * render_path lives under. */
+    int b = 0;
+    if (window->ops->window_render_backend == NULL) {
+        b = (int)FDK_RENDER_BACKEND_CPU;
+    } else if (!fdk_ok(window->ops->window_render_backend(
+                   window->pwindow, &b, NULL, 0))) {
+        b = (int)FDK_RENDER_BACKEND_CPU;
+    }
+    switch (b) {
+    case 1:
+        *out_backend = FDK_RENDER_BACKEND_VULKAN;
+        break;
+    case 2:
+        *out_backend = FDK_RENDER_BACKEND_OPENGL;
+        break;
+    default:
+        *out_backend = FDK_RENDER_BACKEND_CPU;
+        break;
+    }
+    return FDK_OK;
+}
+
+const char *fdk_window_render_device(const fdk_window *window) {
+    if (window == NULL || window->ctx == NULL ||
+        window->ctx->conn == NULL) {
+        return "<none>";
+    }
+    static char device[256];
+    if (window->ops->window_render_backend == NULL) {
+        return "<none>";
+    }
+    int b = 0;
+    device[0] = '\0';
+    if (!fdk_ok(window->ops->window_render_backend(window->pwindow, &b,
+                                                   device, sizeof(device))) ||
+        device[0] == '\0') {
+        return "<none>";
+    }
+    return device;
+}
+
 void fdk_window_set_size_limits(fdk_window *window, fdk_size min_size, fdk_size max_size) {
     if (window == NULL) {
         return;

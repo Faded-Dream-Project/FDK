@@ -152,6 +152,11 @@ struct fdk_platform_connection {
      * wholesale. */
     struct fdk_wayland_egl *egl;
     int egl_tried;
+    /* The Vulkan present lane (2026-11-11): the third sibling,
+     * tried FIRST in AUTO (Vulkan, then OpenGL, then CPU). One
+     * one-shot attempt per connection, like egl_tried. */
+    struct fdk_vk_lane *vk_lane;
+    int vk_tried;
 
     /* Globals discovered during the initial registry roundtrip
      * (see wayland_registry.c). All required for Phase 2's
@@ -696,6 +701,11 @@ struct fdk_platform_window {
      * gl_downgraded). */
     struct fdk_wayland_egl_window *egl_win;
 
+    /* The Vulkan lane's per-window swapchain (2026-11-11): non-NULL
+     * while this window presents through Vulkan; takes priority
+     * over egl_win when both exist. */
+    struct fdk_vk_window *vk_win;
+
     /* P2: the add-on GL frame callback (fdk_ext_gl_set_frame_callback).
      * Non-NULL = this window's buffer is presented by the add-on's GL
      * drawing (present arbitration); the engine flush is skipped. */
@@ -703,6 +713,9 @@ struct fdk_platform_window {
     void *gl_frame_user;
     void *gl_frame_surface;
     int egl_downgraded;
+    /* The Vulkan lane's per-window permanence verdict (the
+     * egl_downgraded discipline). */
+    int vk_downgraded;
     fdk_size render_size;  /* the lane's current staging size (the SHM
                             * path derives sizes from the slots)     */
     int lane_frame_deferred; /* a lane present returned before the
@@ -1193,6 +1206,12 @@ void fdk_wayland_window_update_state(fdk_platform_window *pwindow,
 /* GPU lane (1.0.0 / D-1) — see wayland_egl.h; the render_path op
  * and the shared downgrade helper live in wayland_window.c. */
 int fdk_wayland_window_render_path(fdk_platform_window *pwindow);
+
+/* The finer-grained query (2026-11-11): 0 CPU / 1 Vulkan /
+ * 2 OpenGL + the device string. */
+fdk_result fdk_wayland_window_render_backend(
+    fdk_platform_window *pwindow, int *out_backend, char *out_device,
+    size_t cap);
 fdk_result fdk__wayland_surface_downgrade_from_lane(
     fdk_platform_window *pwindow);
 

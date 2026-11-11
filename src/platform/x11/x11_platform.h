@@ -96,6 +96,17 @@ fdk_result fdk_x11_window_get_scale(fdk_platform_window *pwindow,
  * through the GPU lane, 0 on the CPU path. */
 int fdk_x11_window_render_path(fdk_platform_window *pwindow);
 
+/* The finer-grained query (2026-11-11): 0 CPU / 1 Vulkan /
+ * 2 OpenGL + the device string. */
+fdk_result fdk_x11_window_render_backend(
+    fdk_platform_window *pwindow, int *out_backend, char *out_device,
+    size_t cap);
+
+/* The Vulkan present lane (src/render/vk_present.h, 2026-11-11):
+ * opaque here, defined there. */
+struct fdk_vk_lane;
+struct fdk_vk_window;
+
 /* The XEmbed system-tray fallback handle (x11_systray.c, 1.0.0-rc1
  * round 48) — one per tray item that docked into a classic bar. */
 typedef struct fdk_x11_systray fdk_x11_systray;
@@ -299,6 +310,12 @@ struct fdk_platform_connection {
     int (*event_filter)(void *user, void *event);
     void *event_filter_user;
     int gl_tried;
+    /* The Vulkan present lane (2026-11-11): the third sibling,
+     * loaded lazily like the GL lane and tried FIRST in AUTO (the
+     * priority order the owner pinned: Vulkan, then OpenGL, then
+     * CPU). vk_tried makes the attempt one-shot per connection. */
+    struct fdk_vk_lane *vk_lane;
+    int vk_tried;
 
     /* XI2 touch (1.0.0, M-3): dlopen'd libXi + the X Input
      * extension's opcode and 2.2-touch verdict. Loaded EAGERLY at
@@ -644,11 +661,20 @@ struct fdk_platform_window {
      * the re-engagement attempt in get_framebuffer checks it. */
     struct fdk_x11_gl_window *gl_win;
 
+    /* The Vulkan lane's per-window swapchain (2026-11-11): non-NULL
+     * while this window presents through Vulkan. Takes priority over
+     * gl_win when both exist (AUTO's Vulkan-first order). */
+    struct fdk_vk_window *vk_win;
+
     /* P2: the add-on GL frame callback (see wayland_platform.h). */
     void (*gl_frame_fn)(void *, void *);
     void *gl_frame_user;
     void *gl_frame_surface;
     int gl_downgraded;
+    /* The Vulkan lane's per-window permanence verdict (the
+     * gl_downgraded discipline): set when the lane refuses or a
+     * staging allocation fails; never re-attempted. */
+    int vk_downgraded;
 
     /* WM_COMMAND (1.0.0, D-5): the ICCCM restart command, argv form,
      * fdk_alloc'd (one flat block: the string bytes + the pointer

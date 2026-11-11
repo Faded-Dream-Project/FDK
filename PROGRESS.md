@@ -4,6 +4,77 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
+## Round 66 (2026-11-11) — the Vulkan present lane + the backend priority; bug-rate: 2 lane bugs caught by the pixel rigs
+
+The owner's work order: FDK must offer GPU-only rendering with a
+FIXED priority — Vulkan first, OpenGL second, CPU last — with a
+way to force either GPU backend, a smoke app that opens/closes
+immediately, and a strict app that refuses CPU and software
+renderers with a clear error. Both backends (X11 and Wayland).
+
+- **The lane** (src/render/vk_present.{h,c}, ~1050 lines): the GL
+  lanes' hybrid contract carried to Vulkan verbatim — CPU
+  rasterization unchanged, the staging buffer rides a HOST_VISIBLE|
+  HOST_COHERENT buffer into the swapchain image (barrier ->
+  VkCmdCopyBufferToImage of the damage rects -> barrier ->
+  vkQueuePresentKHR, FIFO). Zero new build deps: dlopen
+  libvulkan.so.1, every entry dlsym'd, every struct/constant
+  hand-declared from the spec's ABI — with each size and offset
+  pinned by compiling scripts/vk-probe.c against the REAL Khronos
+  headers (the first draft had three ABI bugs the probe caught
+  before any driver ran: VkMemoryType's field order, the missing
+  baseMipLevel in the subresource range, the queue-family
+  stride).
+- **The priority + forcing** (src/render/render_backend.h): AUTO =
+  Vulkan -> OpenGL -> CPU at every window's first framebuffer
+  acquisition, both backends. FDK_GPU_BACKEND=vulkan|opengl|auto
+  (canonical) + FDK_GL_VULKAN=1 / FDK_GL_OPENGL=1 (aliases). A
+  FORCED backend is a requirement: when it cannot engage, the
+  window presents on CPU and the query says so — no silent
+  substitution (the forced-vulkan case keeps the GL lane OFF the
+  window so the honest CPU answer is reachable).
+- **The public API**: FDK_RENDER_BACKEND_{CPU,VULKAN,OPENGL} +
+  fdk_window_get_render_backend() + fdk_window_render_device()
+  (fdk_window.h) — the finer-grained companion of get_render_path,
+  live off the backend's state, behind a new optional ops entry
+  wired in both vtables. 1113 exports (+2, both auto-promised by
+  the header-grep map; verify-exports green).
+- **The two apps** (test-apps/): gpu_smoke (create -> one frame ->
+  print backend + device -> exit 0; HOLD_MS= for the screen rigs)
+  and gpu_strict (refuses the CPU path AND software renderers —
+  llvmpipe/lavapipe/SwiftShader — with a named error, exit 1).
+- **Two real bugs caught by the rigs, both fixed**: (1) the X11
+  present's "no slots + no GL lane" early-return treated a
+  Vulkan-lane window as a no-op present — the frame NEVER uploaded
+  (the screen showed the X background pixel; the staging dump
+  proved the content was right and the present never ran); (2)
+  Wayland's deferred first frame at configure had no Vulkan branch
+  — the configure-gated present returned before the swapchain ever
+  presented (the first frame never committed; the window mapped
+  with compositor-fill pixels).
+- **Pixel fidelity, pinned both backends**: the smoke rig's screen
+  captures read back bg (26,31,41), red (230,64,51), blue
+  (51,140,242) — byte-identical to the CPU path's captures —
+  through XGetImage on Xvfb+lavapipe and through grim on headless
+  sway. The forcing matrix verified: AUTO->vulkan,
+  =opengl->opengl (EGL), =vulkan->vulkan, forced-vulkan-without-ICD
+  -> honest CPU. gpu_strict refuses both the CPU path and the
+  forced software renderer, exit 1 with the reason.
+- **Regressions green**: unit suite, the X11 integration suite,
+  the Wayland integration suite (39 groups), both GPU paint smokes
+  (X11 + Wayland lanes), both GLES audits, test-exports +
+  verify-exports. The Vulkan lane is leak-clean on both backends
+  (LSan rc 0); a PRE-EXISTING one-allocation (2696 B, stack inside
+  the dlopen'd Mesa driver, `<unknown module>`) reproduces on the
+  baseline commit under forced software EGL on Wayland — recorded
+  honestly, not introduced here.
+- Residual, honest: the Vulkan lane is verified on lavapipe only
+  (this box has no DRM node); real hardware GPUs should work (the
+  lane is spec-minimal — no extensions beyond the platform surface
+  + swapchain) but carry the same "implemented — should work
+  (untested on real hardware)" posture the GL lanes documented
+  pre-1.0.0.
+
 ## Round 65 (2026-11-11) — the wayland GPU paint lane: the OPEN item closed; bug-rate: 2 real bugs fixed
 
 The GLES audit round left one honest OPEN: "the wayland-lane

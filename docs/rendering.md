@@ -438,6 +438,65 @@ the staging buffer still holds exactly (last-presented + this frame's
 drawing), so it is copied into freshly created classic slots and the
 whole image goes out through the SHM path immediately — the window
 never shows a stale or torn frame because of the downgrade itself.
+
+## The Vulkan present lane + the backend priority (2026-11-11)
+
+The GL lanes have a third sibling: **the Vulkan present lane**
+(`src/render/vk_present.c`), the same hybrid contract stated in the
+same words — CPU rasterization unchanged (the staging buffer IS the
+frame), the lane replaces only present()'s "pixels → compositor"
+half. Per frame: `vkAcquireNextImageKHR`, an image barrier into
+TRANSFER_DST, `vkCmdCopyBufferToImage` of the damage rects (one
+whole-image copy on full damage), a barrier into PRESENT_SRC,
+`vkQueueSubmit` + fence wait (the staging buffer is rewritten by the
+NEXT paint; the copy must complete first), `vkQueuePresentKHR`. The
+staging buffer is HOST_VISIBLE|HOST_COHERENT with a persistent
+mapping; the swapchain is FIFO (the spec's always-supported mode —
+no mailbox tearing), `VK_FORMAT_B8G8R8A8_UNORM` +
+`VK_COLOR_SPACE_SRGB_NONLINEAR_KHR` with compositeAlpha OPAQUE —
+the same "bytes are already display-ready" stance as the GL lanes.
+Zero new build dependencies, the lane posture: `dlopen
+("libvulkan.so.1")`, every entry point resolved by name, every
+structure and constant hand-declared from the spec's ABI (each size
+and offset pinned against Khronos' `vulkan_core.h`).
+
+**The backend priority** (the owner's contract): under AUTO the
+order is **Vulkan first, then OpenGL, then CPU** — a window's
+first framebuffer acquisition tries the Vulkan lane before GLX/EGL,
+on both backends. Forcing:
+
+- `FDK_GPU_BACKEND=vulkan` (alias `FDK_GL_VULKAN=1`): only the
+  Vulkan lane may present. When it cannot engage, the window takes
+  the CPU path and `fdk_window_get_render_backend()` reports CPU
+  honestly — a forced backend is a REQUIREMENT, never silently
+  substituted by the other GPU backend.
+- `FDK_GPU_BACKEND=opengl` (alias `FDK_GL_OPENGL=1`): only the GL
+  lanes; the Vulkan lane never loads.
+- unset / `auto`: the priority order above.
+
+The renderer-policy gates apply per lane exactly as before:
+software ICDs (lavapipe, SwiftShader) are refused without
+`FDK_GL_FORCE=1`, `FDK_NO_GL=1` opts out of everything GPU, small
+surfaces stay on the CPU path. `fdk_window_get_render_backend()`
+(`fdk_window.h`) answers CPU / VULKAN / OPENGL live off the
+backend's own state, and `fdk_window_render_device()` returns the
+lane's device string ("llvmpipe…", "NVIDIA GA10x", …) — the pair a
+strict application uses to refuse running without hardware. Two
+reference apps live in `test-apps/`: **gpu_smoke** (create → paint
+one frame → print the backend → exit 0; `HOLD_MS=` keeps it alive
+for screen probes) and **gpu_strict** (refuses the CPU path AND
+software renderers with a clear error, exit 1 — the "no llvmpipe,
+no lavapipe, hardware Vulkan or OpenGL only" contract).
+
+**Vulkan lane failure is downgrade, the same salvage**: a failed
+present falls to the CPU path with the staging frame copied into a
+fresh slot (wl_shm on Wayland; the classic XImage path on X11),
+permanent per window, no broken frame ever shown. The lane's
+pixel fidelity is pinned end-to-end: the gpu_smoke rig's
+screen-capture probes verify the presented frame is byte-identical
+to the CPU path's (bg 26,31,41 / red 230,64,51 / blue 51,140,242)
+on BOTH backends — Xvfb+lavapipe (XGetImage) and headless
+sway+grim (Wayland).
 `fdk_window_get_render_path()` reads the live answer (including a
 mid-session downgrade) so applications and tests can observe it.
 

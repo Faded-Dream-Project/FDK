@@ -1,6 +1,7 @@
 #define FDK_LOG_TAG "wayland"
 
 #include "platform/wayland/wayland_platform.h"
+#include "render/vk_present.h"
 
 #include "generated/viewporter-client-protocol.h"
 #include "generated/fractional-scale-v1-client-protocol.h"
@@ -410,6 +411,9 @@ fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
      * acquisition, never here (no-window apps never touch EGL). */
     conn->egl = NULL;
     conn->egl_tried = 0;
+    /* The Vulkan lane: the same lazy discipline. */
+    conn->vk_lane = NULL;
+    conn->vk_tried = 0;
     /* §20 diagnostic flag: filled by the registry pass below (a
      * string match, not a bind). */
     conn->syncobj_manager_advertised = 0;
@@ -548,10 +552,16 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
 
     /* GPU lane (1.0.0 / D-1): windows were force-destroyed above, so
      * their per-window lane state is gone; the shared state dies
-     * here (libraries stay pinned — wayland_egl.h's note). */
+     * here (libraries stay pinned — wayland_egl.h's note). The
+     * Vulkan lane's instance dies here too, before the wl_display
+     * (its surface objects died with the windows). */
     if (conn->egl != NULL) {
         fdk_wayland_egl_shutdown(conn->egl);
         conn->egl = NULL;
+    }
+    if (conn->vk_lane != NULL) {
+        fdk_vk_lane_destroy(conn->vk_lane);
+        conn->vk_lane = NULL;
     }
 
     fdk_wayland_teardown_seat(conn);
