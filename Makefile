@@ -1106,14 +1106,47 @@ test-exports: build/libfdk.so
 # a prose comment as a phantom symbol), then take every fdk_* name
 # followed by '(' — function declarations; types never carry one.
 
+# The BASE the removal check compares against (D6 hardening): the
+# default HEAD~ only sees the LAST commit of a pushed batch, so a
+# removal in an early commit of a multi-commit push (not re-added)
+# was invisible — the comparison tree lacked the symbol too. The
+# resolution order, first resolvable wins:
+#   1. FDK_REMOVAL_BASE (CI passes github.event.before — the remote
+#      tip BEFORE this push; all-zeros on a fresh branch = unusable)
+#   2. the merge base with origin/main (local runs where origin/main
+#      differs from HEAD)
+#   3. the last tag reachable from HEAD
+#   4. HEAD~ (single-commit window; LOUD about the limitation)
+# The chosen base is then merged with HEAD (merge-base), so a
+# rewritten history cannot point the check at an unrelated tree.
 test-exports-removal: build/libfdk.so
 	@set -e; \
-	if ! git rev-parse --verify -q HEAD~ >/dev/null 2>&1; then \
-	    echo "export-removal gate: SKIPPED — no HEAD~ (shallow checkout; set fetch-depth: 0)"; \
-	    exit 0; \
+	BASE=""; \
+	if [ -n "$$FDK_REMOVAL_BASE" ] && [ "$$FDK_REMOVAL_BASE" != "0000000000000000000000000000000000000000" ] \
+	   && git rev-parse --verify -q "$$FDK_REMOVAL_BASE" >/dev/null 2>&1; then \
+	    BASE="$$FDK_REMOVAL_BASE"; \
+	elif git rev-parse --verify -q origin/main >/dev/null 2>&1 \
+	   && [ "$$(git rev-parse origin/main)" != "$$(git rev-parse HEAD)" ]; then \
+	    BASE="origin/main"; \
+	else \
+	    BASE="$$(git describe --tags --abbrev=0 2>/dev/null || true)"; \
+	    if [ -z "$$BASE" ] || ! git rev-parse --verify -q "$$BASE" >/dev/null 2>&1; then \
+	        BASE=""; \
+	    fi; \
 	fi; \
+	if [ -z "$$BASE" ]; then \
+	    if git rev-parse --verify -q HEAD~ >/dev/null 2>&1; then \
+	        BASE="HEAD~"; \
+	        echo "export-removal gate: WARNING — single-commit window (HEAD~); a removal in an earlier commit of a batch is not visible"; \
+	    else \
+	        echo "export-removal gate: SKIPPED — no base (no FDK_REMOVAL_BASE, no origin/main diff, no tag, no HEAD~)"; \
+	        exit 0; \
+	    fi; \
+	fi; \
+	BASE="$$(git merge-base "$$BASE" HEAD)"; \
+	echo "export-removal gate: base = $$(git log --format='%h %s' -1 $$BASE)"; \
 	rm -rf $(BUILD_DIR)/prev-include; mkdir -p $(BUILD_DIR)/prev-include; \
-	git archive HEAD~ include | tar -x -C $(BUILD_DIR)/prev-include; \
+	git archive "$$BASE" include | tar -x -C $(BUILD_DIR)/prev-include; \
 	tools/strip_public_decls.sh $(BUILD_DIR)/prev-include/include/fdk/*.h \
 	    $(BUILD_DIR)/prev-include/include/fdk/ext/*.h \
 	    | grep -v '^fdk_unstable_' > $(BUILD_DIR)/exports.prev || true; \

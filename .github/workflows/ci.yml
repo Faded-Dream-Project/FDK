@@ -234,6 +234,12 @@ jobs:
       # unless tests/data/export-removals.allowlist names it. The
       # fetch-depth above provides HEAD~.
       - name: Export-removal gate
+        env:
+          # The remote tip BEFORE this push: the stable base, so a
+          # removal hidden in an early commit of a multi-commit push
+          # still fails (HEAD~ only sees the last commit). All-zeros
+          # on a fresh branch = unusable; the gate falls back loudly.
+          FDK_REMOVAL_BASE: ${{ github.event.before }}
         run: make test-exports-removal
 
       # The ext-level popup examples (the audit's two remaining

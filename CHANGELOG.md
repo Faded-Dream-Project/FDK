@@ -1,4 +1,20 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## D6 hardened: the removal check uses a STABLE base, not HEAD~
+
+- The default HEAD~ only sees the LAST commit of a pushed batch: a
+  symbol removed in an early commit of a multi-commit push (and not
+  re-added) was invisible — the comparison tree lacked the symbol
+  too, so the diff found nothing.
+- The base now resolves in order: FDK_REMOVAL_BASE (CI passes
+  github.event.before — the remote tip BEFORE the push), the merge
+  base with origin/main when it differs from HEAD, the last tag
+  reachable from HEAD, and finally HEAD~ with a LOUD single-commit
+  warning. The chosen base is merged with HEAD (merge-base), so a
+  rewritten history cannot point the check at an unrelated tree.
+- PROVEN with a two-commit range on a throwaway branch: commit A
+  removes a real declared symbol, commit B touches something else —
+  the old HEAD~ window PASSES (the hole), the stable base FAILS
+  naming the symbol.
 ## The Vulkan example's real CI catch: the missing device extension
 
 - CI's lavapipe run aborted in vkCreateSwapchainKHR: the loader's
