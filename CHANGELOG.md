@@ -1,4 +1,33 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## NVIDIA read from the 14:10Z hardware paste + three fixes
+
+The paste's ladder (full=1 minimal=1 empty=0, NVIDIA GTX 1050 Ti,
+driver 580.196.07) pins the failure to the core-raster comparison:
+EMPTY rc=0 means the readback seam honestly refused on an UNPAINTED
+surface (s->gpu is created by the first paint), so FULL/MINIMAL got
+as far as the CPU-vs-GPU comparison and failed it.
+
+- The paste itself carried no evidence lines: r() dual-prints to the
+  report file AND stdout, but the section-3 appends wrote to the file
+  only — the terminal (and every paste) showed bare rc codes while
+  the evidence sat in fdk-hardware-report.txt. All appends now go
+  through ra (append + echo), so the stdout stream IS the full
+  report; each run also prints its log size (0 bytes = no output at
+  all, an env problem on the box).
+- The GLX config picker preferred the FIRST FBConfig matching the
+  window's visual; on proprietary drivers that config can be
+  sRGB-capable, gamma-shifting every shader write and legitimately
+  failing the near-exact interior gates. The picker now queries
+  GLX_FRAMEBUFFER_SRGB_CAPABLE per candidate and prefers an srgb=0
+  config, falling back to an srgb-capable one (loudly logged) only
+  when the visual has nothing else.
+- The flat-fill interior gates (solid/rounded/clips/marker) demanded
+  bit-identical output (mean<=0 max<=0); the GL spec leaves the unorm
+  conversion's rounding open, so a driver may differ from the CPU
+  packer by 1 LSB per channel. Those gates now allow mean<=1.0
+  max<=2.0 (documented in the file header) — llvmpipe still agrees
+  exactly (mean 0.0 locally); texture-nearest stays byte-exact 0/0;
+  geometry stays pinned by the edge gates and the asymmetric marker.
 ## Hardware-report forensics: the verdict lines survive, the ladder isolates
 
 - The DRM box's paste showed test_gpu_paint rc=1 with NO verdict

@@ -74,26 +74,37 @@ r "---- 3. GPU paint smoke (the CPU-vs-GPU interior/edge split) ----"
 # blits/rotation/texture/atlas) and GPU_EMPTY (untouched surface)
 # isolation runs separate core-raster problems from the dynamic
 # paths and from present/readback alone.
+# ra — report-append with echo: appends a line to the report FILE
+# AND prints it. The first hardware paste proved why this matters:
+# r() dual-prints but a plain >> append went to the file only, so the
+# terminal (and the owner's paste) showed bare rc codes while the
+# evidence sat in fdk-hardware-report.txt. Everything appended in
+# section 3 must go through ra, never a bare >>.
+ra() { while IFS= read -r _line; do printf '%s\n' "$_line" >> "$REPORT"; printf '%s\n' "$_line"; done; }
+
 gpu_run() { # $1 = env prefix, $2 = label
     env $1 ASAN_OPTIONS=detect_leaks=0 build/tests/test_gpu_paint \
         > /tmp/fdk-hw-gpu.log 2>&1
     RC=$?
     r "$2: rc=$RC"
+    r "  (log: $(wc -c < /tmp/fdk-hw-gpu.log 2>/dev/null || echo 0) bytes"
+    r "   — 0 bytes = the process produced no output at all; check the"
+    r "   ASAN/LSAN/FDK env vars on this box)"
     if [ "$RC" -ge 128 ]; then
         r "  (died by signal $((RC - 128)) — a crash, not a verdict)"
     fi
     grep -E 'fdk-gpaint: GL up|fdk-gl: fbconfig' /tmp/fdk-hw-gpu.log \
-        | sed 's/^/  /' >> "$REPORT" 2>/dev/null
+        | sed 's/^/  /' | ra
     if [ "$RC" -eq 0 ]; then
         sed -n '/CPU-vs-GPU interior\/edge split/,$p' /tmp/fdk-hw-gpu.log \
-            | sed 's/^/  /' >> "$REPORT" 2>/dev/null
+            | sed 's/^/  /' | ra
     else
-        tail -40 /tmp/fdk-hw-gpu.log | sed 's/^/  | /' >> "$REPORT" 2>/dev/null
+        tail -40 /tmp/fdk-hw-gpu.log | sed 's/^/  | /' | ra
         # the crash tail ends at death; also surface the GL identity
         grep -E 'fdk-gpaint: GL up|fdk-gl: fbconfig' /tmp/fdk-hw-gpu.log \
-            | sed 's/^/  /' >> "$REPORT" 2>/dev/null
+            | sed 's/^/  /' | ra
         grep -E '\[FAIL\]|\[skip\]|GPU PAINT SMOKE' /tmp/fdk-hw-gpu.log \
-            | sed 's/^/  /' >> "$REPORT" 2>/dev/null
+            | sed 's/^/  /' | ra
     fi
     return $RC
 }

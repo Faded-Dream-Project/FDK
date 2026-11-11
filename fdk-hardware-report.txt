@@ -1,4 +1,4 @@
-==== FDK hardware report — 2026-11-11 13:14:16Z ====
+==== FDK hardware report — 2026-11-11 14:25:10Z ====
 host: Linux 5.10.134-013.15.kangaroo.al8.x86_64 x86_64
 
 ---- 1. build ----
@@ -10,19 +10,40 @@ eglinfo: ABSENT (install mesa-utils-extra for the EGL extension list)
 DRM nodes: NONE (/dev/dri missing — the dmabuf round-trip will SKIP)
 
 ---- 3. GPU paint smoke (the CPU-vs-GPU interior/edge split) ----
-test_gpu_paint (full scene): rc=77
-  | SKIP: no X display (run under Xvfb)
-test_gpu_paint MINIMAL (core raster only): rc=77
-  | SKIP: no X display (run under Xvfb)
-test_gpu_paint EMPTY (present+readback only): rc=77
-  | SKIP: no X display (run under Xvfb)
-isolation: full=77 minimal=77 empty=77 (full!=0 + minimal=0
-  => a dynamic path (blit/rotation/texture/atlas); minimal!=0
-  => the core raster (config/rounding/sRGB); empty!=0 => the
-  present/readback seam itself)
+test_gpu_paint (full scene): rc=0
+  (log: 4151 bytes
+   — 0 bytes = the process produced no output at all; check the
+   ASAN/LSAN/FDK env vars on this box)
+  fdk-gl: fbconfig srgb=0 doublebuf=1 (srgb=1 means the hardware gamma-shifts every write — interior gates would legitimately fail)
+  fdk-gpaint: GL up (renderer=llvmpipe (LLVM 19.1.7, 256 bits), version=4.5 (Compatibility Profile) Mesa 25.0.7-2+deb13u1)
+  CPU-vs-GPU interior/edge split (interior = ref 3x3 uniform; edge = AA band, 1px strokes, ring arcs):
+    solid fill             interior mean= 0.000 max= 0.0 [n>0] | edge mean= 0.000 max=  0.0 p99=  0.0  [ok]
+    rounded fill           interior mean= 0.000 max= 0.0 [n>0] | edge mean= 0.130 max=  1.0 p99=  1.0  [ok]
+    strokes                interior mean= 0.000 max= 0.0 [n>0] | edge mean= 0.098 max=  1.0 p99=  1.0  [ok]
+    gradient               interior mean= 0.000 max= 0.0 [n>0] | edge mean= 1.350 max=  3.0 p99=  3.0  [ok]
+    circles                interior mean= 0.127 max= 1.0 [n>0] | edge mean= 0.334 max=  1.0 p99=  1.0  [ok]
+    nested clips           interior mean= 0.000 max= 0.0 [n>0] | edge mean= 0.000 max=  0.0 p99=  0.0  [ok]
+    axis blit              interior mean= 0.000 max= 0.0 [n>0] | edge mean= 0.000 max=  0.0 p99=  0.0  [ok]
+    rotated blit           interior mean= 0.000 max= 0.0 [n>0] | edge mean= 6.403 max=216.0 p99=216.0  [ok]
+    texture nearest        interior mean= 0.000 max= 0.0 [n>0] | edge mean= 0.000 max=  0.0 p99=  0.0  [ok]
+    texture linear         interior mean= 0.000 max= 0.0 [n>0] | edge mean= 0.000 max=  0.0 p99=  0.0  [ok]
+    asymmetry marker       interior mean= 0.000 max= 0.0 [n>0] | edge mean= 0.000 max=  0.0 p99=  0.0  [ok]
+  [ok] atlas overflow: present still OK after 2800 unique masks
+  [ok] atlas overflow: final frame presented
+  [ok] atlas overflow: second present (back buffer == final)
+  overflow probe px=ffffffff (expect white)
+  [ok] atlas overflow: post-eviction glyph renders correctly
+  [ok] context loss: present reports UNSUPPORTED (no stale frame)
+  14:25:11 [INFO] (x11) GPU present lane active (renderer "llvmpipe (LLVM 19.1.7, 256 bits)")
+  [ok] context loss: a fresh window presents normally
+  [info] swrast never signals fences — the wait is honestly UNSUPPORTED here
+  [ok] GPU resize repaint survived
+  14:25:11 [INFO] (core) shutting down
+  14:25:11 [INFO] (x11) disconnecting
+  GPU PAINT SMOKE: all green
 
 ---- 4. the GL canvas example ----
-gl-canvas: SKIPPED — no DISPLAY (set one, or run under Xvfb)
+gl-canvas: rc=0
 
 ---- 5. the dmabuf round-trip (the DRM-box step) ----
 test_dmabuf: SKIP — no readable /dev/dri/renderD128 (record the SKIP in the release notes; never fake a PASS)

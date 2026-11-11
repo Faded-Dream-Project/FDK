@@ -558,8 +558,9 @@ static GLXFBConfig find_fbconfig_for_visual(struct fdk_x11_gl *gl,
         return NULL;
     }
     GLXFBConfig chosen = NULL;
-    for (int i = 0; i < n && chosen == NULL; i++) {
-        int vid = -1, dbl = -1, rtype = -1, dtype = -1;
+    GLXFBConfig srgb_fallback = NULL;
+    for (int i = 0; i < n; i++) {
+        int vid = -1, dbl = -1, rtype = -1, dtype = -1, srgb = -1;
         (void)gl->fn.glXGetFBConfigAttrib(dpy, cfgs[i], GLXC_VISUAL_ID,
                                           &vid);
         if (vid <= 0 || (VisualID)(unsigned)vid != want) {
@@ -580,7 +581,27 @@ static GLXFBConfig find_fbconfig_for_visual(struct fdk_x11_gl *gl,
         if ((dtype & GLXC_WINDOW_BIT) == 0) {
             continue;
         }
+        /* The paint contract (the gpu-paint smoke's near-exact CPU/GPU
+         * interiors) needs LINEAR writes: an sRGB-capable config
+         * gamma-shifts every color the shader emits, on the driver's
+         * say-so. Several FBConfigs can share one visual — prefer one
+         * with srgb=0; only fall back to an srgb-capable one (loudly
+         * logged by the one-shot probe in try_init) when the visual
+         * has nothing else. An aborted query (-1) counts as unknown
+         * and stays eligible, like llvmpipe's default. */
+        (void)gl->fn.glXGetFBConfigAttrib(
+            dpy, cfgs[i], GLXC_FRAMEBUFFER_SRGB_CAPABLE, &srgb);
+        if (srgb == 1) {
+            if (srgb_fallback == NULL) {
+                srgb_fallback = cfgs[i];
+            }
+            continue;
+        }
         chosen = cfgs[i];
+        break;
+    }
+    if (chosen == NULL && srgb_fallback != NULL) {
+        chosen = srgb_fallback;
     }
     XFree(cfgs);
     return chosen;
