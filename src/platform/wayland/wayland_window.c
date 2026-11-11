@@ -217,6 +217,29 @@ int fdk__wayland_commit_deferred_first_frame(
             fdk_platform_damage full;
             memset(&full, 0, sizeof(full));
             full.full = 1;
+            if (pwindow->render_mode == FDK_RENDER_GPU) {
+                /* GPU paint mode: the engine owns the frame — the
+                 * deferred commit is the engine flush + swap, NOT
+                 * the staging upload (which would composite the
+                 * staging buffer's stale contents over the painted
+                 * back buffer). This is the same path the ops shim
+                 * takes when the app presents post-configure; the
+                 * 2026-11-11 wayland-lane audit caught this branch
+                 * drawing through the CPU lane's present instead. */
+                fdk_result r = fdk_wayland_window_gpu_flush(pwindow,
+                                                            NULL);
+                if (fdk_ok(r)) {
+                    pwindow->rendered_ever = 1;
+                    FDK_DEBUG("deferred GPU-mode first frame "
+                              "committed at configure");
+                    return 1;
+                }
+                /* GPU mode has no CPU fallback by contract: the
+                 * flush's UNSUPPORTED IS the verdict (a dead engine
+                 * or a failed swap — both reported by the flush
+                 * itself). */
+                return r;
+            }
             if (fdk_wayland_egl_window_present(
                     pwindow->egl_win, &full,
                     pwindow->render_size.width,

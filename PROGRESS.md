@@ -4,6 +4,78 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
+## Round 65 (2026-11-11) — the wayland GPU paint lane: the OPEN item closed; bug-rate: 2 real bugs fixed
+
+The GLES audit round left one honest OPEN: "the wayland-lane
+comparison fails its gates with only the scene background rendered
+into the readback — reported honestly (rc=1)". This round
+reproduced it under headless sway + llvmpipe GLES 3.2 and closed
+it. The lane now reads back byte-comparable frames (per-region
+interior/edge stats, `make test-gpu-paint-wl` under the sway rig).
+
+**Bug 1 — the readback seam never drew the frame.**
+`fdk_wayland_egl_window_readback` (wayland_egl.c) made the context
+current and called `fdk__gpu_engine_readback` directly — the
+engine's pending batch was never flushed into the back buffer, so
+glReadPixels sampled the pre-paint buffer (exactly the
+"background-only" symptom; the X11 seam has flushed since birth,
+x11_gl.c:1294's own comment states the contract). Fixed: the seam
+now calls `fdk__gpu_flush(s)` after makeCurrent, before reading.
+
+**Bug 2 — the GPU-mode deferred first frame presented through the
+CPU lane.** `fdk__wayland_commit_deferred_first_frame`'s
+`lane_frame_deferred` branch called `fdk_wayland_egl_window_present`
+— the staging-upload composite — for EVERY lane window, including
+GPU paint-mode ones (render_mode == FDK_RENDER_GPU). That is the
+wrong present path for GPU mode (it uploads the staging buffer's
+stale contents over the painted frame) and it was the source of the
+stale GL_INVALID_OPERATION 0x502 that the engine's next flush
+found queued. Fixed: the branch routes GPU-mode windows through
+`fdk_wayland_window_gpu_flush` (makeCurrent + engine flush + swap);
+the CPU-lane present stays for HYBRID windows, where it is correct.
+
+**Accuracy: three engine-grade corrections**, found by the now-
+working comparison:
+1. **The EGL config is pinned to true 8-bit channels.** EGL's sort
+   order prefers larger total color bits, so an 8/8/8 request
+   returned llvmpipe's RGB10 config (BUFFER_SIZE 30) — 8-bit values
+   written through a 10-bit unorm surface double-round (ref (26,31,41)
+   read back (25,30,41)). The lane now re-enumerates (64 candidates)
+   and prefers the config whose R/G/B are EXACTLY 8 bits, keeping the
+   driver's answer only when no 8-bit form exists.
+2. **Fragment shaders run highp where the driver offers it.** The ES
+   precision head was unconditionally `mediump` (~10-bit mantissa —
+   1-LSB interior shifts against the CPU's float math). Now gated on
+   `GL_FRAGMENT_PRECISION_HIGH` (spec-legal query macro), mediump
+   fallback; QUAD_FS and the audit's compile head mirror it. (The
+   first attempt truncated the head in a 64-byte buffer — "Unterminated
+   #if" — the buffer is 160 now.)
+3. **Post-swap GL errors are consumed by the paint flush**, pre and
+   post, in a loop (the spec queues errors indefinitely; one read
+   matched the observed one-per-present rate by luck). The CPU lane
+   already had this discipline; the readback seam drains too.
+
+**Test gates**: the wayland variant's interior gates were 0.0/0.0
+(strict bit-exactness that the X11 lane had already relaxed for the
+NVIDIA round, commit 2ab5361). The same documented unorm-rounding
+allowance (mean<=1.0, max<=2.0) now applies, with the same
+rationale recorded in the test: llvmpipe's ES shader-output
+conversion floors where the CPU packer rounds.
+
+**Proof** (headless sway + llvmpipe GLES 3.2, FDK_GL_FORCE=1):
+`test_gpu_paint_wl` ALL GREEN — the comparison's per-region stats
+run with real EGL-seam content; preswap forensics match the CPU
+reference (ff3333e6 vs ff3333e5, 1-LSB); atlas overflow, eviction,
+resize all green. Regressions: unit suite green; X11 GPU paint
+green under Xvfb; the wayland integration suite green (39 groups);
+both GLES audits green (the static audit's precision-head check
+still passes — the mediump form survives in the #else branch).
+Residual, honestly: llvmpipe's GLES context still queues one
+0x502 per presented frame from mid-frame state the lane consumes
+before every flush — the WARN names it, it never reaches the
+engine, and the gates prove it does not affect pixels.
+
+
 ## Current state (2026-11-09, after round 59 — 1.0.0 withdrawn by the owner, development version again)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —

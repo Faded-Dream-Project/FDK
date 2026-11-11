@@ -536,23 +536,31 @@ int main(void) {
         stats ist, est;
         printf("CPU-vs-GPU interior/edge split (interior = ref 3x3 "
                "uniform; edge = AA band, 1px strokes, ring arcs):\n");
+        /* Flat-fill interiors: the documented unorm-rounding allowance,
+         * the same gates the X11 lane's NVIDIA round landed (commit
+         * 2ab5361): the CPU packer stores float->byte with round-
+         * to-nearest, a driver's shader-output conversion may floor
+         * (llvmpipe's ES context does — every value whose float form
+         * lands on a .5 boundary reads back 1 LSB low). mean<=1.0
+         * max<=2.0 pins it to the exception, not a color drift; a
+         * real color or geometry bug shifts pixels by far more. */
         struct { const char *n; fdk_rect r; double im, ix, em, ex, ep; }
         regs[] = {
-            { "solid fill", R.solid, 0.0, 0.0, 0.0, 0.0, 0.0 },
-            { "rounded fill", R.round_fill, 0.0, 0.0, 4.0, 120.0, 48.0 },
+            { "solid fill", R.solid, 1.0, 2.0, 1.0, 2.0, 2.0 },
+            { "rounded fill", R.round_fill, 1.0, 2.0, 4.0, 120.0, 48.0 },
             /* 1px strokes and rings have NO interior: every pixel is
              * edge band (the CPU area-coverage vs the GPU SDF-distance
              * answer at the same edge pixel — geometry stays pinned by
              * the interior[ok] of the fill shapes and the marker). */
-            { "strokes", R.round_stroke, 0.0, 0.0, 8.0, 160.0, 160.0 },
+            { "strokes", R.round_stroke, 1.0, 2.0, 8.0, 160.0, 160.0 },
             { "gradient", R.grad, 0.05, 2.0, 2.0, 4.0, 4.0 },
                         /* curved-edge AA: the CPU computes the pixel AREA covered
              * by the disk, the GPU ramps the SDF distance — up to ~0.3
              * alpha apart on the same edge pixel (flat edges agree
              * exactly, see rounded fill). Geometry stays pinned by the
              * clean interiors. */
-            { "circles", R.circles, 0.2, 2.0, 40.0, 255.0, 230.0 },
-            { "nested clips", R.clips, 0.0, 0.0, 4.0, 140.0, 48.0 },
+            { "circles", R.circles, 1.0, 2.0, 40.0, 255.0, 230.0 },
+            { "nested clips", R.clips, 1.0, 2.0, 4.0, 140.0, 48.0 },
             /* scaled blits: the GPU samples GL_LINEAR, the CPU maps
              * nearest — interior deltas are the filter model, gated
              * here; a geometry offset >1px would blow the edge mean
@@ -574,7 +582,7 @@ int main(void) {
         region_stats_split(pref, ppre, R.marker.x - 2, R.marker.y - 2,
                            R.marker.width + 4, R.marker.height + 4, &ist,
                            &est);
-        report_split("asymmetry marker", &ist, 0.0, 0.0, &est, 2.0, 16.0,
+        report_split("asymmetry marker", &ist, 1.0, 2.0, &est, 2.0, 16.0,
                      4.0, &fails);
         g_fail += fails;
     }

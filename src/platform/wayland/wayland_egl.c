@@ -879,6 +879,45 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
             return NULL;
         }
     }
+    /* EGL's sort order prefers LARGER total color bits, so an 8/8/8
+     * request happily returns a 10-bit-per-channel config (llvmpipe's
+     * RGB10: BUFFER_SIZE 30). That breaks the lane's byte-identity
+     * contract by construction — 8-bit values written through a
+     * 10-bit unorm surface double-round, and Mesa's ReadPixels
+     * conversion truncates where the CPU packer rounds (the
+     * 2026-11-11 wayland-lane audit: ref (26,31,41) read back as
+     * (25,30,41), a 1-LSB shift on every other value). Re-enumerate
+     * and prefer the config whose channels are EXACTLY 8 bits; keep
+     * the driver's answer only when no 8-bit form exists (honest,
+     * logged — the pixel gates would then legitimately carry a
+     * 1-LSB allowance). */
+    {
+        EGLConfig cands[64];
+        EGLint got = 0;
+        const EGLint *req = cfg_xrgb;
+        if (!egl->fn.eglChooseConfig(ed, req, cands, 64, &got) || got < 1) {
+            req = cfg_argb;
+            if (!egl->fn.eglChooseConfig(ed, req, cands, 64, &got) ||
+                got < 1) {
+                got = 0; /* keep the single-config answer above */
+            }
+        }
+        for (int i = 0; i < got; i++) {
+            EGLint r = 0, g = 0, b = 0, a = 0;
+            (void)egl->fn.eglGetConfigAttrib(ed, cands[i], EGLC_RED_SIZE,
+                                             &r);
+            (void)egl->fn.eglGetConfigAttrib(ed, cands[i], EGLC_GREEN_SIZE,
+                                             &g);
+            (void)egl->fn.eglGetConfigAttrib(ed, cands[i], EGLC_BLUE_SIZE,
+                                             &b);
+            (void)egl->fn.eglGetConfigAttrib(ed, cands[i], EGLC_ALPHA_SIZE,
+                                             &a);
+            if (r == 8 && g == 8 && b == 8 && a == 0) {
+                egl->config = cands[i];
+                break;
+            }
+        }
+    }
 
     /* The SHARE-ROOT context (the 1.0.0 fix, live-caught by the §19
      * trace rig): one context that is never made current — it exists
@@ -2044,12 +2083,49 @@ fdk_result fdk_wayland_egl_window_paint_flush(
                                 ewin->surface, ewin->ctx)) {
         return FDK_ERR_UNSUPPORTED;
     }
+    /* A pre-swap drain, the CPU lane's own discipline (see
+     * present()'s "the pre-present stale drain"): an error left
+     * over from the previous frame's swap or this window's init
+     * must be consumed BEFORE the engine's flush, because the
+     * flush's tail check marks the engine DEAD on any queued error
+     * — a lane-owned error must never kill the engine (the X11 lane
+     * never noticed: llvmpipe's desktop-GLX swap raises nothing). */
+    {
+    /* Loop, not one read: the spec queues errors INDEFINITELY —
+     * one swap can leave more than one, and any survivor leaks
+     * into the engine's flush (the observed rate was exactly one
+     * per present, one single read matched by luck). */
+        for (;;) {
+            unsigned pre = egl->fn.glGetError();
+            if (pre == 0) {
+                break;
+            }
+            FDK_WARN("GL lane (paint flush): stale GL error 0x%x drained "
+                     "before the engine's flush — raised by the previous "
+                     "frame's swap or setup, not the flush that follows",
+                     pre);
+        }
+    }
     fdk__gpu_flush(s);
     if (s->gpu == NULL) { /* flush marked the engine dead */
         return FDK_ERR_UNSUPPORTED;
     }
     EGLBoolean ok = egl->fn.eglSwapBuffers(egl->egl_display, ewin->surface);
     (void)wl_display_flush(egl->conn->display);
+    {
+        /* The post-swap drain (the CPU lane's se2 discipline), looped
+         * for the same reason as the pre-flush one: every queued
+         * error, not just the first. */
+        for (;;) {
+            unsigned post = egl->fn.glGetError();
+            if (post == 0) {
+                break;
+            }
+            FDK_WARN("GL lane (paint flush): swap queued 0x%x — consumed "
+                     "here so it cannot kill the engine's next flush",
+                     post);
+        }
+    }
     return ok ? FDK_OK : FDK_ERR_UNSUPPORTED;
 }
 
@@ -2532,8 +2608,18 @@ void *fdk_wayland_gl_display(fdk_platform_connection *conn) {
                                                : NULL;
 }
 
-/* Test seam: readback of the GPU frame. makeCurrent, then the
- * engine's glReadPixels path (top-down RGBA8888 into `out`). */
+/* Test seam: readback of the GPU frame. makeCurrent, draw whatever
+ * is pending straight into the back buffer, then read BEFORE any
+ * swap — the X11 seam's contract, stated in its own words: "this
+ * isolates rasterization from present semantics (post-swap
+ * back-buffer content is driver-defined)". The EGL lane needs it
+ * MORE than the GLX one: eglSwapBuffers gives the back buffer
+ * EGL_BUFFER_DESTROYED semantics on this stack (llvmpipe zeroes it),
+ * and the wayland-lane comparison (2026-11-11) read back only the
+ * scene background because the freshly painted batch was never
+ * drawn — the seam skipped the flush, so glReadPixels sampled the
+ * pre-paint buffer. The engine's flush is idempotent on an empty
+ * batch, so this only ever draws what the caller booked. */
 fdk_result fdk_wayland_egl_window_readback(
     struct fdk_wayland_egl_window *ewin, void *surface_ptr, fdk_u32 *out,
     int width, int height) {
@@ -2549,6 +2635,13 @@ fdk_result fdk_wayland_egl_window_readback(
                                 ewin->surface, ewin->ctx)) {
         return FDK_ERR_UNSUPPORTED;
     }
+    /* The pre-flush stale drain (the paint flush's discipline): an
+     * error the previous swap queued must be consumed BEFORE the
+     * engine's flush — the flush's tail check marks the engine dead
+     * on any queued error, and the readback would then fail with a
+     * "precheck" that names a dead engine the caller never killed. */
+    (void)egl->fn.glGetError();
+    fdk__gpu_flush(s);
     return fdk__gpu_engine_readback(s, out, width, height) == 0
                ? FDK_OK
                : FDK_ERR_UNSUPPORTED;

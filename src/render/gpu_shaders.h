@@ -132,7 +132,11 @@ static const char *QUAD_VS =
     "  v_uv = a_pos;\n"
     "}\n";
 static const char *QUAD_FS =
+    "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+    "precision highp float;\n"
+    "#else\n"
     "precision mediump float;\n"
+    "#endif\n"
     "varying vec2 v_uv;\n"
     "uniform sampler2D u_tex;\n"
     "void main() {\n"

@@ -524,10 +524,26 @@ static gl_uint gp_compile(struct fdk_gpu_state *g, unsigned type,
     gl_uint sh = g_gp.CreateShader(type);
     const char *parts[2];
     int nparts = 0;
-    char es_head[64];
+    char es_head[160];
     if (g->es) {
+        /* highp when the fragment stage offers it, mediump otherwise
+         * (GLSL ES 1.00 makes fragment highp OPTIONAL — the spec's
+         * minimum is mediump). The engine's interior gates are
+         * bit-level: a mediump fragment stage computes the SDF in
+         * ~10-bit mantissa precision and shifts solid fills by 1 LSB
+         * against the CPU packer's float math (the 2026-11-11
+         * wayland-lane audit: llvmpipe's ES context, interior
+         * mean=1.0/max=1.0 on shapes the desktop-GL lane matches
+         * exactly). highp is a query macro, not a capability gamble:
+         * where the driver defines GL_FRAGMENT_PRECISION_HIGH the
+         * fragment stage IS highp-capable by spec. */
         snprintf(es_head, sizeof(es_head),
-                 "#define GLES 1\nprecision mediump float;\n");
+                 "#define GLES 1\n"
+                 "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+                 "precision highp float;\n"
+                 "#else\n"
+                 "precision mediump float;\n"
+                 "#endif\n");
         parts[nparts++] = es_head;
     }
     parts[nparts++] = src;

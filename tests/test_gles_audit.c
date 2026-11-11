@@ -309,10 +309,18 @@ static int compile_link(const char *vs_src, const char *fs_src,
     gl_uint_ fs = _glCreateShader(GLC_FRAGMENT_SHADER);
     /* The ES precision head mirrors gp_compile's: GLSL ES 1.00
      * fragment shaders have no default float precision. The negative
-     * control below compiles WITHOUT it and must fail. */
-    char head[64];
+     * control below compiles WITHOUT it and must fail. The gated
+     * highp form matches the engine: where the driver defines
+     * GL_FRAGMENT_PRECISION_HIGH the fragment stage runs highp (the
+     * interior pixel gates are bit-level against the CPU packer). */
+    char head[128];
     snprintf(head, sizeof(head),
-             "#define GLES 1\nprecision mediump float;\n");
+             "#define GLES 1\n"
+             "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+             "precision highp float;\n"
+             "#else\n"
+             "precision mediump float;\n"
+             "#endif\n");
     const char *fparts[2] = { head, fs_src };
     /* GP_VS/QUAD_VS never got the head (vertex shaders have a default
      * highp float in GLSL ES 1.00) — match gp_compile: VS without. */
