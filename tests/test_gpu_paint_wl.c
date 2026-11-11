@@ -65,7 +65,8 @@ typedef struct {
 
 /* Per-pixel per-channel abs diff over a region; p99 from a 256-bin
  * histogram (diffs are 0..255). */
-static void region_stats(const fdk_u32 *ref, const fdk_u32 *gpu, int rx,
+__attribute__((unused)) static void region_stats(
+    const fdk_u32 *ref, const fdk_u32 *gpu, int rx,
                          int ry, int rw, int rh, stats *out) {
     long hist[256] = { 0 };
     double sum = 0;
@@ -199,7 +200,8 @@ static void report_split(const char *name, const stats *in, double ti_mean,
     }
 }
 
-static void report(const char *name, const stats *s, double t_mean,
+__attribute__((unused)) static void report(const char *name, const stats *s,
+                                double t_mean,
                    double t_max, double t_p99, int *fails) {
     printf("  %-22s mean=%7.3f max=%5.1f p99=%5.1f", name, s->mean,
            s->max, s->p99);
@@ -369,7 +371,7 @@ int main(void) {
     static fdk_u32 pref[W * H];
     for (int y = 0; y < H; y++) {
         const fdk_u32 *row =
-            ref->own_pixels + (size_t)y * ref->fb.stride;
+            ref->own_pixels + (size_t)y * (size_t)ref->fb.stride;
         for (int x = 0; x < W; x++) {
             /* own_pixels is BGRX in memory (R in the low byte); the
              * readback seam packs RGBA (R in bits 16-23) — align. */
@@ -594,14 +596,15 @@ int main(void) {
         fdk_result pr = FDK_OK;
         fdk_color c = { 1.0f, 1.0f, 1.0f, 1.0f };
         fdk_u8 mask[24 * 24];
-        for (int k = 0; k < 2800; k++) {
-            unsigned seed = (unsigned)(k * 2654435761u) | 1u;
+        for (unsigned k = 0; k < 2800; k++) {
+            unsigned seed = (k * 2654435761u) | 1u;
             int dim = 12 + (int)(seed % 12u);
             for (int i = 0; i < dim * dim; i++) {
                 seed = seed * 1664525u + 1013904223u;
                 mask[i] = (fdk_u8)(seed >> 24);
             }
-            fdk_rect dst = { (k % 20) * 22, 20 + (k % 8) * 26, dim, dim };
+            fdk_rect dst = { (int)((k % 20u) * 22u),
+                            20 + (int)((k % 8u) * 26u), dim, dim };
             fdk_surface_blend_mask(s, dst, mask, dim, c);
             if (k % 400 == 0) {
                 pr = fdk_surface_present(s);

@@ -189,8 +189,12 @@ static int gp_resolve_procs(void) {
         if (lib == NULL) {
             continue;
         }
-        const unsigned char *(*gs)(unsigned) =
-            (const unsigned char *(*)(unsigned))dlsym(lib, "glGetString");
+        union {
+            void *obj;
+            const unsigned char *(*fn)(unsigned);
+        } u_gs;
+        u_gs.obj = dlsym(lib, "glGetString");
+        const unsigned char *(*gs)(unsigned) = u_gs.fn;
         /* The candidate must answer for the CURRENT context
          * (GL_RENDERER non-NULL = this dispatch owns it). */
         if (gs == NULL || gs(0x1F01) == NULL) {
@@ -198,7 +202,18 @@ static int gp_resolve_procs(void) {
         }
         g_gp.lib = lib;
         g_gp_ok = 1;
-#define GP(field, sym) g_gp.field = (void *)gp_sym(sym)
+/* POSIX dlsym returns void*; ISO C (pedantic) forbids conversion
+ * between object and function pointers — the union carries the
+ * address across, the same idiom the wl EGL fence block uses. */
+#define GP(field, sym)                                                   \
+    do {                                                                 \
+        union {                                                          \
+            void *obj;                                                   \
+            __typeof__(g_gp.field) fn;                                   \
+        } u_;                                                            \
+        u_.obj = gp_sym(sym);                                            \
+        g_gp.field = u_.fn;                                              \
+    } while (0)
         GP(GetString, "glGetString");
         GP(GetError, "glGetError");
         GP(Viewport, "glViewport");
@@ -500,10 +515,10 @@ static int gp_ensure_gl(struct fdk_surface *s) {
         static int logged = 0;
         if (!logged) {
             logged = 1;
-            const char *r = (const char *)g_gp.GetString(0x1F01);
-            const char *v = (const char *)g_gp.GetString(0x1F02);
+            const char *rend = (const char *)g_gp.GetString(0x1F01);
+            const char *vers = (const char *)g_gp.GetString(0x1F02);
             fprintf(stderr, "fdk-gpaint: GL up (renderer=%s, version=%s)\n",
-                    r ? r : "?", v ? v : "?");
+                    rend ? rend : "?", vers ? vers : "?");
         }
     }
     return 1;
@@ -903,7 +918,7 @@ static int gp_atlas_put(struct fdk_surface *s, int w, int h,
     for (int row = 0; row < h; row++) {
         g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, ax, ay + row, w, 1,
                            g->mask_fmt, GL_UNSIGNED_BYTE,
-                           cov + (size_t)row * stride);
+                           cov + (size_t)row * (size_t)stride);
     }
     *u0 = (float)ax;
     *v0 = (float)ay;
@@ -934,7 +949,7 @@ void fdk__gpu_blend_mask(struct fdk_surface *s, fdk_rect dst,
         return;
     }
     unsigned long long hash = gp_fnv(coverage,
-                                     (size_t)stride * dst.height, 0);
+                                     (size_t)stride * (size_t)dst.height, 0);
     hash = gp_fnv((const unsigned char *)&dst.width, sizeof(dst.width),
                   hash);
     hash = gp_fnv((const unsigned char *)&dst.height, sizeof(dst.height),
@@ -1166,7 +1181,7 @@ unsigned fdk__gpu_texture_name(struct fdk_surface *s, void *key, int width,
                 if (conv != NULL) {
                     for (int row = 0; row < height; row++) {
                         gp_swizzle_row(conv,
-                                       pixels + (size_t)row * stride,
+                                       pixels + (size_t)row * (size_t)stride,
                                        width);
                         g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, row,
                                            width, 1, fmt,
@@ -1189,7 +1204,7 @@ unsigned fdk__gpu_texture_name(struct fdk_surface *s, void *key, int width,
                 for (int row = 0; row < height; row++) {
                     g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, row, width, 1,
                                        fmt, GL_UNSIGNED_BYTE,
-                                       pixels + (size_t)row * stride);
+                                       pixels + (size_t)row * (size_t)stride);
                 }
                 slot->needs_upload = 0;
             }
@@ -1338,7 +1353,7 @@ static void gp_pend_drain(struct fdk_gpu_state *g) {
                     for (int row = 0; row < slot->h; row++) {
                         gp_swizzle_row(conv,
                                        slot->pend_px +
-                                           (size_t)row * slot->pend_stride,
+                                           (size_t)row * (size_t)slot->pend_stride,
                                        slot->w);
                         g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, row,
                                            slot->w, 1, dfmt,
@@ -1359,7 +1374,7 @@ static void gp_pend_drain(struct fdk_gpu_state *g) {
                     g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, row, slot->w,
                                        1, dfmt, GL_UNSIGNED_BYTE,
                                        slot->pend_px +
-                                           (size_t)row * slot->pend_stride);
+                                           (size_t)row * (size_t)slot->pend_stride);
                 }
             }
             slot->needs_upload = 0;
@@ -1490,14 +1505,14 @@ void fdk__gpu_blit(struct fdk_surface *s, fdk_rect dst,
         return; /* window-source blit in GPU mode: not supported yet */
     }
     /* own_pixels stride is in fdk_u32 units; the engine wants bytes. */
-    (void)fdk__gpu_texture_name(s, (void *)src, src->fb.width,
-                                src->fb.height, 2, px, src->fb.stride * 4,
-                                NULL);
+    (void)fdk__gpu_texture_name(s, (void *)(uintptr_t)src, src->fb.width,
+                                src->fb.height, 2, px,
+                                src->fb.stride * 4, NULL);
     float su0 = (float)src_rect.x / (float)src->fb.width;
     float sv0 = (float)src_rect.y / (float)src->fb.height;
     float su1 = (float)(src_rect.x + src_rect.width) / (float)src->fb.width;
     float sv1 = (float)(src_rect.y + src_rect.height) / (float)src->fb.height;
-    gp_tex_book_opaque(s, (void *)src, (float)dst.x, (float)dst.y,
+    gp_tex_book_opaque(s, (void *)(uintptr_t)src, (float)dst.x, (float)dst.y,
                        (float)dst.width, (float)dst.height, su0, sv0,
                        su1, sv1, 1.0f, 1);
 }
@@ -1519,9 +1534,9 @@ void fdk__gpu_blit_transformed(struct fdk_surface *s, fdk_matrix m,
     if (px == NULL) {
         return; /* window-source blit in GPU mode: not supported yet */
     }
-    (void)fdk__gpu_texture_name(s, (void *)src, src->fb.width,
-                                src->fb.height, 2, px, src->fb.stride * 4,
-                                NULL);
+    (void)fdk__gpu_texture_name(s, (void *)(uintptr_t)src, src->fb.width,
+                                src->fb.height, 2, px,
+                                src->fb.stride * 4, NULL);
     float w = (float)src->fb.width, h = (float)src->fb.height;
     float sx[4] = { 0, w, w, 0 };
     float sy[4] = { 0, 0, h, h };
@@ -1544,7 +1559,7 @@ void fdk__gpu_blit_transformed(struct fdk_surface *s, fdk_matrix m,
      * must sample LINEAR to match it (the axis blit maps nearest and
      * stays NEAREST). */
     p->filter = 1;
-    p->key = (void *)src;
+    p->key = (void *)(uintptr_t)src;
     p->opaque = 1;
     float su = w > 0 ? 1.0f / w : 0.0f;
     float sv = h > 0 ? 1.0f / h : 0.0f;
@@ -1566,12 +1581,21 @@ int fdk__gpu_engine_readback(struct fdk_surface *s, fdk_u32 *out,
     if (g == NULL || g->dead || out == NULL || width <= 0 ||
         height <= 0 || !gp_ensure_gl(s) || g_gp.ReadPixels == NULL ||
         g_gp.Finish == NULL) {
+        union {
+            void *obj;
+            void (*fn)(int, int, int, int, unsigned, unsigned, void *);
+        } u_rp;
+        union {
+            void *obj;
+            void (*fn)(void);
+        } u_fin;
+        u_rp.fn = g_gp.ReadPixels;
+        u_fin.fn = g_gp.Finish;
         fprintf(stderr,
                 "fdk-gpaint: readback precheck (g=%p dead=%d glready=%d "
                 "rp=%p fin=%p lib=%s)\n",
                 (void *)g, g ? g->dead : -1,
-                g ? g->gl_ready : -1, (void *)g_gp.ReadPixels,
-                (void *)g_gp.Finish,
+                g ? g->gl_ready : -1, u_rp.obj, u_fin.obj,
                 g_gp.lib != NULL ? "resolved" : "none");
         return -1;
     }
@@ -1583,7 +1607,7 @@ int fdk__gpu_engine_readback(struct fdk_surface *s, fdk_u32 *out,
     for (int y = 0; y < height; y++) {
         g_gp.ReadPixels(0, height - 1 - y, width, 1, GL_RGBA,
                         GL_UNSIGNED_BYTE, rowbuf);
-        fdk_u32 *dst = out + (size_t)y * width;
+        fdk_u32 *dst = out + (size_t)y * (size_t)width;
         for (int x = 0; x < width; x++) {
             dst[x] = (fdk_u32)rowbuf[x * 4] |
                      ((fdk_u32)rowbuf[x * 4 + 1] << 8) |

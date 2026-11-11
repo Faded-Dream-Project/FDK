@@ -35,11 +35,22 @@ static int make_frame(int t, int w, int h) {
     uint32_t stride = 0;
     void *map_data = NULL;
     uint32_t *px = NULL;
+    /* POSIX dlsym returns void*; ISO C (pedantic) forbids the direct
+     * conversion — the union idiom (the 2026-11-11 sweep). */
+    union {
+        void *obj;
+        void *(*fn)(struct gbm_bo *, uint32_t, uint32_t, uint32_t,
+                    uint32_t, uint32_t, uint32_t *, void **);
+    } u_map;
+    u_map.obj = dlsym(RTLD_DEFAULT, "gbm_bo_map");
     void *(*map)(struct gbm_bo *, uint32_t, uint32_t, uint32_t, uint32_t,
-                 uint32_t, uint32_t *, void **) = dlsym(
-        RTLD_DEFAULT, "gbm_bo_map");
-    void (*unmap)(struct gbm_bo *, void *) = dlsym(RTLD_DEFAULT,
-                                                   "gbm_bo_unmap");
+                 uint32_t, uint32_t *, void **) = u_map.fn;
+    union {
+        void *obj;
+        void (*fn)(struct gbm_bo *, void *);
+    } u_unmap;
+    u_unmap.obj = dlsym(RTLD_DEFAULT, "gbm_bo_unmap");
+    void (*unmap)(struct gbm_bo *, void *) = u_unmap.fn;
     if (map == NULL || unmap == NULL || g_bo == NULL) {
         return -1;
     }
@@ -50,9 +61,11 @@ static int make_frame(int t, int w, int h) {
     }
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
-            uint32_t r = (uint32_t)((x * 255 / w + t * 7) % 256);
-            uint32_t b = (uint32_t)(y * 255 / h);
-            px[y * (stride / 4) + x] = (0xFFu << 24) | (b << 16) | r;
+            uint32_t r = (uint32_t)(((unsigned)x * 255u / (unsigned)w +
+                                     (unsigned)t * 7u) % 256u);
+            uint32_t b = (uint32_t)((unsigned)y * 255u / (unsigned)h);
+            px[(size_t)y * (stride / 4) + (size_t)x] =
+                (0xFFu << 24) | (b << 16) | r;
         }
     }
     unmap(g_bo, map_data);
@@ -75,15 +88,32 @@ int main(void) {
     }
     void *gbm = g_drm_fd >= 0 ? dlopen("libgbm.so.1", RTLD_NOW)
                               : NULL;
-    struct gbm_dev *(*gbm_create_device)(int) =
-        gbm ? dlsym(gbm, "gbm_create_device") : NULL;
+    union {
+        void *obj;
+        struct gbm_dev *(*fn)(int);
+    } u_mkdev;
+    u_mkdev.obj = gbm ? dlsym(gbm, "gbm_create_device") : NULL;
+    struct gbm_dev *(*gbm_create_device)(int) = u_mkdev.fn;
+    union {
+        void *obj;
+        struct gbm_bo *(*fn)(struct gbm_dev *, uint32_t, uint32_t,
+                             uint32_t, uint32_t);
+    } u_mkbo;
+    u_mkbo.obj = gbm ? dlsym(gbm, "gbm_bo_create") : NULL;
     struct gbm_bo *(*gbm_bo_create)(struct gbm_dev *, uint32_t, uint32_t,
-                                    uint32_t, uint32_t) =
-        gbm ? dlsym(gbm, "gbm_bo_create") : NULL;
-    int (*gbm_bo_get_fd)(struct gbm_bo *) =
-        gbm ? dlsym(gbm, "gbm_bo_get_fd") : NULL;
-    void (*gbm_device_destroy)(struct gbm_dev *) =
-        gbm ? dlsym(gbm, "gbm_device_destroy") : NULL;
+                                    uint32_t, uint32_t) = u_mkbo.fn;
+    union {
+        void *obj;
+        int (*fn)(struct gbm_bo *);
+    } u_getfd;
+    u_getfd.obj = gbm ? dlsym(gbm, "gbm_bo_get_fd") : NULL;
+    int (*gbm_bo_get_fd)(struct gbm_bo *) = u_getfd.fn;
+    union {
+        void *obj;
+        void (*fn)(struct gbm_dev *);
+    } u_devdestroy;
+    u_devdestroy.obj = gbm ? dlsym(gbm, "gbm_device_destroy") : NULL;
+    void (*gbm_device_destroy)(struct gbm_dev *) = u_devdestroy.fn;
     if (gbm_create_device == NULL || gbm_bo_create == NULL ||
         gbm_bo_get_fd == NULL || gbm_device_destroy == NULL) {
         fprintf(stderr,

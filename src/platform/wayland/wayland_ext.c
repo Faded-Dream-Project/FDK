@@ -33,6 +33,8 @@
 #define FDK_LOG_TAG "wayland"
 
 #include "platform/wayland/wayland_platform.h"
+#include "fdk/ext/wayland.h" /* the public prototypes of the
+ * fdk_ext_wl_* functions defined below — same reason as x11_ext.c */
 #include "core/context_internal.h"  /* ctx->conn opens inside the library */
 
 #include "core/alloc_internal.h"

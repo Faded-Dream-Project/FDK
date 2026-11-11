@@ -54,10 +54,10 @@ static void row_abgr8888(const uint8_t *src, uint8_t *dst, int width) {
     }
 }
 
-static void row_argb8888(const uint8_t *src, uint8_t *dst, int width) {
-    /* bytes B,G,R,A (ARGB in LE word form) -> R,G,B,A */
-    row_abgr8888(src, dst, width);
-}
+/* ARGB8888 shares ABGR8888's byte conversion (B,G,R,A -> R,G,B,A):
+ * both word forms pack the SAME bytes on little-endian; the alias
+ * was deleted in the 2026-11-11 dead-code sweep (never selected by
+ * fourcc_row's table). */
 
 static void row_bgrx8888(const uint8_t *src, uint8_t *dst, int width) {
     /* bytes B,G,R,X -> R,G,B,A(255) */
@@ -69,16 +69,8 @@ static void row_bgrx8888(const uint8_t *src, uint8_t *dst, int width) {
     }
 }
 
-static void row_rgbx8888(const uint8_t *src, uint8_t *dst, int width) {
-    row_bgrx8888(src, dst, width);
-}
-
 static void row_rgba8888(const uint8_t *src, uint8_t *dst, int width) {
     memcpy(dst, src, (size_t)width * 4u);
-}
-
-static void row_bgra8888(const uint8_t *src, uint8_t *dst, int width) {
-    row_abgr8888(src, dst, width);
 }
 
 static int fourcc_row(uint32_t fourcc, fdk__dmabuf_row_fn *out) {
@@ -184,21 +176,6 @@ struct plane_map {
     uint8_t *addr;
     size_t len;
 };
-
-static uint8_t *map_for(struct plane_map *maps, int *n_maps, int fd,
-                        size_t len) {
-    for (int i = 0; i < *n_maps; i++) {
-        if (maps[i].fd == fd) {
-            return maps[i].addr;
-        }
-    }
-    int slot = *n_maps;
-    maps[slot].fd = fd;
-    maps[slot].len = len;
-    maps[slot].addr = mmap(NULL, len, PROT_READ, MAP_SHARED, fd, 0);
-    *n_maps = slot + 1;
-    return maps[slot].addr;
-}
 
 fdk_result fdk_texture_import_dmabuf(const fdk_dmabuf_params *params,
                                      fdk_texture **out_texture) {

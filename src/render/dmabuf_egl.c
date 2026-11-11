@@ -29,6 +29,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* POSIX dlsym / eglGetProcAddress return void*; ISO C (pedantic)
+ * forbids conversion between object and function pointers. The
+ * union carries the address across — the loader idiom everywhere
+ * after the 2026-11-11 zero-warning sweep. */
+#define DB_STORE(field, sym)                                             \
+    do {                                                                 \
+        union {                                                          \
+            void *obj;                                                   \
+            __typeof__(field) fn;                                        \
+        } u_;                                                            \
+        u_.obj = (sym);                                                  \
+        (field) = u_.fn;                                                 \
+    } while (0)
+
 /* EGL constants (ABI-stable UAPI values; spelled locally so no EGL
  * header is needed — same policy as the lanes' dlsym tables) */
 #define EGL_EXTENSIONS 0x3055
@@ -104,8 +118,8 @@ static void *side_door_x_display(void) {
     if (lib == NULL) {
         return NULL;
     }
-    void *(*xopen)(const char *) =
-        (void *(*)(const char *))dlsym(lib, "XOpenDisplay");
+    void *(*xopen)(const char *);
+    DB_STORE(xopen, dlsym(lib, "XOpenDisplay"));
     if (xopen == NULL) {
         return NULL;
     }
@@ -121,12 +135,10 @@ void *fdk__dmabuf_egl_x11_display(void *x11_display) {
     if (g_x11_dpy != NULL) {
         return g_x11_dpy_for == x11_display ? g_x11_dpy : NULL;
     }
-    void *(*gdp)(unsigned, void *, const void *) =
-        (void *(*)(unsigned, void *, const void *))
-        dlsym(api->lib, "eglGetPlatformDisplay");
-    unsigned char (*init)(void *, int *, int *) =
-        (unsigned char (*)(void *, int *, int *))dlsym(api->lib,
-                                                       "eglInitialize");
+    void *(*gdp)(unsigned, void *, const void *);
+    DB_STORE(gdp, dlsym(api->lib, "eglGetPlatformDisplay"));
+    unsigned char (*init)(void *, int *, int *);
+    DB_STORE(init, dlsym(api->lib, "eglInitialize"));
     if (gdp == NULL || init == NULL) {
         return NULL;
     }
@@ -162,17 +174,14 @@ struct fdk__dmabuf_egl_api *fdk__dmabuf_egl_api_with_gl_lib(void *lib) {
     }
     view = *base;
     view.lib = base->lib; /* the EGL library stays the base's */
-    view.glGenTextures = (void (*)(int, unsigned *))dlsym(lib, "glGenTextures");
-    view.glBindTexture = (void (*)(unsigned, unsigned))dlsym(lib, "glBindTexture");
-    view.glTexParameteri =
-        (void (*)(unsigned, unsigned, unsigned))dlsym(lib, "glTexParameteri");
-    view.glDeleteTextures =
-        (void (*)(int, const unsigned *))dlsym(lib, "glDeleteTextures");
+    DB_STORE(view.glGenTextures, dlsym(lib, "glGenTextures"));
+    DB_STORE(view.glBindTexture, dlsym(lib, "glBindTexture"));
+    DB_STORE(view.glTexParameteri, dlsym(lib, "glTexParameteri"));
+    DB_STORE(view.glDeleteTextures, dlsym(lib, "glDeleteTextures"));
     /* the image-target bind: the desktop entry name IS the GLES name
      * (GL_OES_EGL_image); resolve it from the same libGL */
-    view.glEGLImageTargetTexture2DOES =
-        (void (*)(unsigned, void *))dlsym(
-            lib, "glEGLImageTargetTexture2DOES");
+    DB_STORE(view.glEGLImageTargetTexture2DOES,
+             dlsym(lib, "glEGLImageTargetTexture2DOES"));
     if (view.glGenTextures == NULL || view.glBindTexture == NULL ||
         view.glTexParameteri == NULL || view.glDeleteTextures == NULL ||
         view.glEGLImageTargetTexture2DOES == NULL) {
@@ -236,31 +245,23 @@ int fdk__dmabuf_egl_load(struct fdk__dmabuf_egl_api **out) {
     }
     int ok = 1;
     g_api.lib = lib;
-    g_api.eglGetCurrentDisplay =
-        db_egl_dlsym(lib, "eglGetCurrentDisplay", 1, &ok);
-    g_api.eglGetCurrentContext =
-        db_egl_dlsym(lib, "eglGetCurrentContext", 1, &ok);
-    g_api.eglQueryString = db_egl_dlsym(lib, "eglQueryString", 1, &ok);
-    g_api.eglGetError = db_egl_dlsym(lib, "eglGetError", 1, &ok);
-    g_api.eglCreateImageKHR =
-        db_egl_dlsym(lib, "eglCreateImageKHR", 1, &ok);
-    g_api.eglDestroyImageKHR =
-        db_egl_dlsym(lib, "eglDestroyImageKHR", 1, &ok);
+    DB_STORE(g_api.eglGetCurrentDisplay, db_egl_dlsym(lib, "eglGetCurrentDisplay", 1, &ok));
+    DB_STORE(g_api.eglGetCurrentContext, db_egl_dlsym(lib, "eglGetCurrentContext", 1, &ok));
+    DB_STORE(g_api.eglQueryString, db_egl_dlsym(lib, "eglQueryString", 1, &ok));
+    DB_STORE(g_api.eglGetError, db_egl_dlsym(lib, "eglGetError", 1, &ok));
+    DB_STORE(g_api.eglCreateImageKHR, db_egl_dlsym(lib, "eglCreateImageKHR", 1, &ok));
+    DB_STORE(g_api.eglDestroyImageKHR, db_egl_dlsym(lib, "eglDestroyImageKHR", 1, &ok));
     /* the modifiers extension is OPTIONAL (its absence just narrows
      * what the driver can import — never a load failure) */
-    g_api.eglQueryDmaBufFormatsEXT =
-        db_egl_dlsym(lib, "eglQueryDmaBufFormatsEXT", 0, &ok);
-    g_api.eglQueryDmaBufModifiersEXT =
-        db_egl_dlsym(lib, "eglQueryDmaBufModifiersEXT", 0, &ok);
-    g_api.eglGetProcAddress =
-        db_egl_dlsym(lib, "eglGetProcAddress", 1, &ok);
+    DB_STORE(g_api.eglQueryDmaBufFormatsEXT, db_egl_dlsym(lib, "eglQueryDmaBufFormatsEXT", 0, &ok));
+    DB_STORE(g_api.eglQueryDmaBufModifiersEXT, db_egl_dlsym(lib, "eglQueryDmaBufModifiersEXT", 0, &ok));
+    DB_STORE(g_api.eglGetProcAddress, db_egl_dlsym(lib, "eglGetProcAddress", 1, &ok));
     if (!ok) {
         g_api.lib = NULL;
         return 0;
     }
-    g_api.glEGLImageTargetTexture2DOES =
-        (void (*)(unsigned, void *))g_api.eglGetProcAddress(
-            "glEGLImageTargetTexture2DOES");
+    DB_STORE(g_api.glEGLImageTargetTexture2DOES,
+             g_api.eglGetProcAddress("glEGLImageTargetTexture2DOES"));
     if (g_api.glEGLImageTargetTexture2DOES == NULL) {
         g_api.lib = NULL;
         return 0;
@@ -268,18 +269,14 @@ int fdk__dmabuf_egl_load(struct fdk__dmabuf_egl_api **out) {
     /* the plain-GL texture calls ride the SAME library the engine
      * resolved (libGLESv2/libGL); resolve them from that library
      * via eglGetProcAddress too — portable across both flavors */
-    g_api.glGenTextures =
-        (void (*)(int, unsigned *))g_api.eglGetProcAddress(
-            "glGenTextures");
-    g_api.glBindTexture =
-        (void (*)(unsigned, unsigned))g_api.eglGetProcAddress(
-            "glBindTexture");
-    g_api.glTexParameteri =
-        (void (*)(unsigned, unsigned, unsigned))g_api.eglGetProcAddress(
-            "glTexParameteri");
-    g_api.glDeleteTextures =
-        (void (*)(int, const unsigned *))g_api.eglGetProcAddress(
-            "glDeleteTextures");
+    DB_STORE(g_api.glGenTextures,
+             g_api.eglGetProcAddress("glGenTextures"));
+    DB_STORE(g_api.glBindTexture,
+             g_api.eglGetProcAddress("glBindTexture"));
+    DB_STORE(g_api.glTexParameteri,
+             g_api.eglGetProcAddress("glTexParameteri"));
+    DB_STORE(g_api.glDeleteTextures,
+             g_api.eglGetProcAddress("glDeleteTextures"));
     if (g_api.glGenTextures == NULL || g_api.glBindTexture == NULL ||
         g_api.glTexParameteri == NULL || g_api.glDeleteTextures == NULL) {
         g_api.lib = NULL;

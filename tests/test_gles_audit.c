@@ -25,7 +25,8 @@
 #include <dlfcn.h>
 #include <stdint.h>
 
-#include "render/gpu_shaders.h" /* the REAL lane shader sources */
+#include "render/gpu_shaders.h"
+#include "render/gpu_shaders_quad.h" /* the REAL lane shader sources */
 
 /* EGL 1.5 constants (values from the spec; hand-declared like the
  * lanes do — the audit must not depend on EGL headers either). */

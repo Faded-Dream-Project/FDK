@@ -10636,8 +10636,6 @@ static void test_dnd_release_drain_gui(void) {
     Atom a_enter = XInternAtom(td, "XdndEnter", False);
     Atom a_position = XInternAtom(td, "XdndPosition", False);
     Atom a_status = XInternAtom(td, "XdndStatus", False);
-    Atom a_drop = XInternAtom(td, "XdndDrop", False);
-    Atom a_leave = XInternAtom(td, "XdndLeave", False);
     Atom a_finished = XInternAtom(td, "XdndFinished", False);
     Atom a_copy = XInternAtom(td, "XdndActionCopy", False);
 

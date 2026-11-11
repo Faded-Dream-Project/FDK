@@ -2402,10 +2402,10 @@ static void texture_sample_linear(const fdk_texture *t, float fx,
     int x1 = x0 + 1 < t->width ? x0 + 1 : t->width - 1;
     int y1 = y0 + 1 < t->height ? y0 + 1 : t->height - 1;
     float ax = fx - (float)x0, ay = fy - (float)y0;
-    const fdk_u8 *p00 = t->pixels + ((size_t)y0 * t->width + x0) * 4u;
-    const fdk_u8 *p10 = t->pixels + ((size_t)y0 * t->width + x1) * 4u;
-    const fdk_u8 *p01 = t->pixels + ((size_t)y1 * t->width + x0) * 4u;
-    const fdk_u8 *p11 = t->pixels + ((size_t)y1 * t->width + x1) * 4u;
+    const fdk_u8 *p00 = t->pixels + ((size_t)y0 * (size_t)t->width + (size_t)x0) * 4u;
+    const fdk_u8 *p10 = t->pixels + ((size_t)y0 * (size_t)t->width + (size_t)x1) * 4u;
+    const fdk_u8 *p01 = t->pixels + ((size_t)y1 * (size_t)t->width + (size_t)x0) * 4u;
+    const fdk_u8 *p11 = t->pixels + ((size_t)y1 * (size_t)t->width + (size_t)x1) * 4u;
     for (int ch = 0; ch < 4; ch++) {
         float top = (float)p00[ch] * (1.0f - ax) + (float)p10[ch] * ax;
         float bot = (float)p01[ch] * (1.0f - ax) + (float)p11[ch] * ax;
@@ -2521,7 +2521,7 @@ fdk_result fdk_texture_draw_ex(fdk_surface *surface, fdk_texture *texture,
                                ((fdk_u32)t[1] << 8) | (fdk_u32)t[2];
                 continue;
             }
-            float a = (float)sa / 255.0f;
+            float a = (float)(unsigned char)sa / 255.0f;
             fdk_u32 dp = drow[x - x0];
             float dr = (float)((dp >> 16) & 0xFFu);
             float dg = (float)((dp >> 8) & 0xFFu);
@@ -2534,10 +2534,16 @@ fdk_result fdk_texture_draw_ex(fdk_surface *surface, fdk_texture *texture,
             float ob = sb * a + db * (1.0f - a);
             fdk_u32 oa = 0xFF000000u;
             if (argb) {
-                float da = (float)((dp >> 24) & 0xFFu);
-                oa = (fdk_u32)(unsigned char)(sa + da * (1.0f - a) + 0.5f)
+                unsigned char da_byte =
+                    (unsigned char)((dp >> 24) & 0xFFu);
+                float da = (float)da_byte;
+                float sa_byte = (float)(unsigned char)sa;
+                oa = (fdk_u32)(unsigned char)(sa_byte + da * (1.0f - a) +
+                                              0.5f)
                      << 24;
             }
+            /* (fdp_u32 -> float truncation is impossible here: the
+             * operands are <= 255 after the & 0xFFu mask.) */
             drow[x - x0] = oa |
                            ((fdk_u32)((unsigned char)(orr + 0.5f)) << 16) |
                            ((fdk_u32)((unsigned char)(og + 0.5f)) << 8) |

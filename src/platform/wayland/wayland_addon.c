@@ -86,6 +86,10 @@ void *fdk_wayland_queue_create(fdk_platform_connection *conn,
 }
 
 void fdk_wayland_queue_destroy(fdk_platform_connection *conn,
+                              void *handle);
+struct fdk_wl_queue *fdk_wl_queue_create_pub(
+    fdk_platform_connection *conn, const char *name);
+void fdk_wayland_queue_destroy(fdk_platform_connection *conn,
                                void *handle) {
     struct fdk_wl_queue *q = handle;
     if (conn == NULL || q == NULL) {

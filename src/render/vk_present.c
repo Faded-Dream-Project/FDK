@@ -903,11 +903,15 @@ struct fdk_vk_window *fdk_vk_window_try_init(struct fdk_vk_lane *lane,
         return NULL;
     }
 
-    if (vk_win_build_swapchain(vwin, w, h) != 0) {
-        lane->fn.vkDestroySurfaceKHR(lane->instance, vwin->surface, NULL);
-        free(vwin);
-        return NULL;
-    }
+    /* NO swapchain here (2026-11-11, the GTX 1050 Ti round): the
+     * swapchain is created at the FIRST PRESENT, post-configure on
+     * Wayland — the ecosystem shape (GTK/SDL never create one
+     * pre-configure). vkCreateSwapchainKHR is the call that wraps
+     * the wl_surface in the wp_linux_drm_syncobj explicit-sync
+     * role; keeping the pre-configure window unwrapped closes the
+     * whole class of early-attach violations. The staging buffer
+     * (the CPU rasterizer's target) is decoupled: it exists from
+     * the first framebuffer acquisition, swapchain or not. */
 
     VkSemaphoreCI_ semi;
     memset(&semi, 0, sizeof(semi));
@@ -934,8 +938,11 @@ struct fdk_vk_window *fdk_vk_window_try_init(struct fdk_vk_lane *lane,
         goto fail;
     }
 
-    FDK_INFO("Vulkan window lane up (%dx%d, %u swapchain images)", vwin->w,
-             vwin->h, vwin->image_count);
+    FDK_INFO("Vulkan window lane up (%dx%d staging; swapchain at first "
+             "present)",
+             w, h);
+    vwin->w = w;
+    vwin->h = h;
     return vwin;
 
 fail:
@@ -1025,11 +1032,12 @@ fdk_u32 *fdk_vk_window_staging(struct fdk_vk_window *vwin, fdk_i32 w,
     if (vwin == NULL || vwin->dead || w < 1 || h < 1) {
         return NULL;
     }
-    if (vwin->w != w || vwin->h != h) {
-        if (vk_win_build_swapchain(vwin, w, h) != 0) {
-            return NULL;
-        }
-    }
+    /* The staging buffer is decoupled from the swapchain (the
+     * deferred-swapchain restructure): it tracks the CPU
+     * rasterizer's size only. The swapchain catches up at the next
+     * present; here only the size note changes. */
+    vwin->w = w;
+    vwin->h = h;
     if (vk_win_ensure_staging(vwin, w, h) != 0) {
         return NULL;
     }
@@ -1037,8 +1045,11 @@ fdk_u32 *fdk_vk_window_staging(struct fdk_vk_window *vwin, fdk_i32 w,
 }
 
 int fdk_vk_window_render_path(const struct fdk_vk_window *vwin) {
-    return vwin != NULL && !vwin->dead &&
-           vwin->swapchain != VK_NULL_H;
+    /* The lane answers from engagement, not from swapchain state:
+     * between window init and the first present there is no
+     * swapchain yet (deferred), but the window IS lane-owned — the
+     * single-owner gates key off this answer. */
+    return vwin != NULL && !vwin->dead && vwin->surface != VK_NULL_H;
 }
 
 int fdk_vk_window_present(struct fdk_vk_window *vwin,
@@ -1050,13 +1061,20 @@ int fdk_vk_window_present(struct fdk_vk_window *vwin,
     }
     struct fdk_vk_lane *lane = vwin->lane;
     if (w != vwin->w || h != vwin->h) {
-        /* Resize (or the caps' extent moved): rebuild before the
-         * acquire. OUT_OF_DATE below handles the driver-initiated
-         * variant. */
-        if (vk_win_build_swapchain(vwin, w, h) != 0 ||
-            vk_win_ensure_staging(vwin, w, h) != 0) {
+        vwin->w = w;
+        vwin->h = h;
+        if (vk_win_ensure_staging(vwin, w, h) != 0) {
             vwin->dead = 1;
             return -1;
+        }
+    }
+    /* The swapchain is born HERE (the deferred-create restructure):
+     * first present, post-configure on Wayland, at a real size — the
+     * ecosystem shape. From the second present on, this is also the
+     * resize/OUT_OF_DATE recreation point. */
+    if (vwin->swapchain == VK_NULL_H) {
+        if (vk_win_build_swapchain(vwin, w, h) != 0) {
+            return -1; /* not dead: the next present retries */
         }
     }
     uint32_t idx = 0;
@@ -1108,41 +1126,27 @@ int fdk_vk_window_present(struct fdk_vk_window *vwin,
     lane->fn.vkCmdPipelineBarrier(vwin->cmd, VK_STAGE_TOP, VK_STAGE_TRANSFER,
                                   0, 0, NULL, 0, NULL, 1, &to_dst);
 
-    /* The copies: full damage = one whole-image copy; partial = one
-     * region per rect (bounded by the damage struct's own 64). */
-    VkBufferImageCopy_ copies[64];
-    uint32_t ncopies = 0;
-    if (damage->full || damage->count == 0) {
-        memset(&copies[0], 0, sizeof(copies[0]));
-        copies[0].bufferOffset = 0;
-        copies[0].bufferRowLength = 0; /* tightly packed */
-        copies[0].imageSubresource.aspectMask = VK_IMG_ASPECT_COLOR;
-        copies[0].imageSubresource.layerCount = 1;
-        copies[0].imageExtent.width = (uint32_t)w;
-        copies[0].imageExtent.height = (uint32_t)h;
-        copies[0].imageExtent.depth = 1;
-        ncopies = 1;
-    } else {
-        uint32_t cnt = damage->count > 64 ? 64u : (uint32_t)damage->count;
-        for (uint32_t i = 0; i < cnt; i++) {
-            const fdk_rect *rc = &damage->rects[i];
-            memset(&copies[i], 0, sizeof(copies[i]));
-            copies[i].bufferOffset = (VkDeviceSize_)rc->y *
-                                         (VkDeviceSize_)w * 4u +
-                                     (VkDeviceSize_)rc->x * 4u;
-            copies[i].bufferRowLength = (uint32_t)w;
-            copies[i].imageSubresource.aspectMask = VK_IMG_ASPECT_COLOR;
-            copies[i].imageSubresource.layerCount = 1;
-            copies[i].imageOffset.x = rc->x;
-            copies[i].imageOffset.y = rc->y;
-            copies[i].imageExtent.width = (uint32_t)rc->width;
-            copies[i].imageExtent.height = (uint32_t)rc->height;
-            copies[i].imageExtent.depth = 1;
-        }
-        ncopies = cnt;
-    }
+    /* THE copy: ONE whole-image copy, every present. The staging
+     * buffer is this lane's RETAINED copy (the role the GL lane's
+     * texture plays): the surface layer guarantees it holds the
+     * complete frame (last-presented + this frame's drawing), while
+     * a rotating swapchain's acquired image does NOT hold the
+     * previous frame — partial-damage copies onto it would leave
+     * garbage in the undamaged regions. Damage still optimizes the
+     * CPU rasterization; the upload is always the whole (few-MB)
+     * frame, which is exactly what the GL lanes' fullscreen quad
+     * repaint does with their texture. */
+    VkBufferImageCopy_ copy;
+    memset(&copy, 0, sizeof(copy));
+    copy.bufferOffset = 0;
+    copy.bufferRowLength = 0; /* tightly packed */
+    copy.imageSubresource.aspectMask = VK_IMG_ASPECT_COLOR;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent.width = (uint32_t)w;
+    copy.imageExtent.height = (uint32_t)h;
+    copy.imageExtent.depth = 1;
     lane->fn.vkCmdCopyBufferToImage(vwin->cmd, vwin->staging_buf, image,
-                                    VK_LAYOUT_TRANSFER_DST, ncopies, copies);
+                                    VK_LAYOUT_TRANSFER_DST, 1, &copy);
 
     VkImageBarrier_ to_present;
     memset(&to_present, 0, sizeof(to_present));

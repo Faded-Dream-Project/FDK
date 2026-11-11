@@ -674,13 +674,18 @@ static fdk_result attach_background_buffer(fdk_platform_window *pwindow, fdk_siz
 
     /* THE §20 SINGLE-OWNER RULE, enforced here so no caller seam can
      * bypass it: the EGL lane owns this surface's buffer state. See
-     * the block comment above for the full chain of reasoning. */
-    if (pwindow->egl_win != NULL) {
+     * the block comment above for the full chain of reasoning. The
+     * Vulkan lane carries the SAME rule (2026-11-11, the owner's
+     * GTX 1050 Ti report: vkCreateSwapchainKHR wraps the wl_surface
+     * in the wp_linux_drm_syncobj role, the theme's background
+     * attach committed without an acquire point, and the
+     * compositor killed the connection with protocol error 4). */
+    if (pwindow->egl_win != NULL || pwindow->vk_win != NULL) {
         if (!pwindow->bg_refused_logged) {
             pwindow->bg_refused_logged = 1;
             FDK_DEBUG("background buffer refused: the GPU lane owns "
                       "this surface's buffer state (single-owner "
-                      "rule — the EGL first frame maps it)");
+                      "rule — the lane's first frame maps it)");
         }
         return FDK_OK;
     }
@@ -1138,8 +1143,15 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
              * shape: one-shot per connection, the same size gate, and
              * the forced-vulkan case keeps the GL lane off the window
              * (a forced backend is a requirement, never silently
-             * substituted). */
+             * substituted). GPU RENDER MODE IS EXCLUDED: that mode's
+             * present is the GL paint engine's flush (gpaint.c, an
+             * EGL/GLES engine by construction) — the Vulkan present
+             * lane serves HYBRID/AUTO windows only, and a GPU-mode
+             * window must never have two presenters (the 2026-11-11
+             * crash: the swapchain wrap and the EGL context fought
+             * over one wl_surface inside lavapipe). */
             if (pwindow->vk_win == NULL && !pwindow->vk_downgraded &&
+                pwindow->render_mode != FDK_RENDER_GPU &&
                 fdk__rb_vulkan_allowed()) {
                 if (pwindow->conn->vk_lane == NULL &&
                     !pwindow->conn->vk_tried) {
@@ -1609,7 +1621,7 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
  * lane-owned surface (the GTX 1050 Ti protocol error 4). */
 static fdk_result commit_render_pending(fdk_platform_window *pwindow,
                                         const fdk_platform_damage *damage) {
-    if (pwindow->egl_win != NULL) {
+    if (pwindow->egl_win != NULL || pwindow->vk_win != NULL) {
         FDK_WARN("classic wl_shm commit refused: the GPU lane owns this "
                  "surface's buffer state (single-owner rule violated "
                  "by an internal state machine bug — report this)");
@@ -2826,14 +2838,14 @@ void fdk_wayland_window_hide(fdk_platform_window *pwindow) {
      * Title, size limits and all other window state survive.
      *
      * §20 single-owner rule: while the GPU lane owns the surface, its
-     * buffer state — including the unmap — belongs to EGL; FDK's
-     * queue sends no attaching commit (a pure-lane window never sets
-     * buffer_attached, so this branch is naturally inert for it; the
-     * guard covers the background-then-lane legacy state where it
-     * would otherwise fire). Unmapping a lane-owned surface is the
-     * lane's teardown's business (fdk_window_destroy →
-     * fdk_wayland_egl_window_destroy). */
-    if (pwindow->egl_win != NULL) {
+     * buffer state — including the unmap — belongs to the lane
+     * (EGL or Vulkan); FDK's queue sends no attaching commit (a
+     * pure-lane window never sets buffer_attached, so this branch is
+     * naturally inert for it; the guard covers the background-then-
+     * lane legacy state where it would otherwise fire). Unmapping a
+     * lane-owned surface is the lane's teardown's business
+     * (fdk_window_destroy → the lane's window destroy). */
+    if (pwindow->egl_win != NULL || pwindow->vk_win != NULL) {
         return;
     }
     if (pwindow->buffer_attached) {

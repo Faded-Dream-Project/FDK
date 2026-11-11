@@ -167,18 +167,23 @@ def findings_for_texture_sites(path, rel, allowed_files_bgra):
 
 def check_shaders():
     out = []
-    hdr = ROOT / "src/render/gpu_shaders.h"
-    t = hdr.read_text(encoding="utf-8")
-    if SHADER_FORBIDDEN.search(t):
-        out.append("src/render/gpu_shaders.h: desktop-only GLSL "
-                   "construct present in the shared shader source")
+    # 2026-11-11: the QUAD_* pair moved to gpu_shaders_quad.h (the
+    # zero-warning split); both files carry the same rules.
+    gp = (ROOT / "src/render/gpu_shaders.h").read_text(encoding="utf-8")
+    quad = (ROOT / "src/render/gpu_shaders_quad.h").read_text(
+        encoding="utf-8")
+    for name, t in (("gpu_shaders.h", gp),
+                    ("gpu_shaders_quad.h", quad)):
+        if SHADER_FORBIDDEN.search(t):
+            out.append("src/render/%s: desktop-only GLSL "
+                       "construct present in the shader source" % name)
     if "precision mediump float;" not in (
             ROOT / "src/render/gpaint.c").read_text(encoding="utf-8"):
         out.append("src/render/gpaint.c: gp_compile lost the ES "
                    "precision head")
-    if "precision mediump float;" not in t:
-        out.append("src/render/gpu_shaders.h: the quad FS lost its "
-                   "inline precision statement")
+    if "precision mediump float;" not in quad:
+        out.append("src/render/gpu_shaders_quad.h: the quad FS lost "
+                   "its inline precision statement")
     return out
 
 

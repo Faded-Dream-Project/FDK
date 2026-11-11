@@ -40,6 +40,8 @@
 
 #include "dbus/dbus_internal.h"
 
+#include <dlfcn.h>
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -144,6 +146,29 @@ void fdk__dbus_shutdown(fdk_context *ctx) {
     fdk_free(ctx->dbus_conns);
     ctx->dbus_conns = NULL;
     ctx->dbus_conn_capacity = 0;
+
+    /* The libdbus exit-leak (the owner's GTX 1050 Ti report, LSan:
+     * 802 bytes in 3 allocations with stacks inside libdbus-1.so.3):
+     * FDK's D-Bus is its own implementation and never loads libdbus —
+     * but the GPU driver stack sometimes does (a vendor ICD linking
+     * it), and libdbus frees its process-global data ONLY at an
+     * explicit dbus_shutdown() the driver never calls. RTLD_NOLOAD
+     * probes WITHOUT loading: absent → nothing to do (the common
+     * case, zero side effects); present → one dbus_shutdown() after
+     * every FDK D-Bus connection is closed, the documented last-user
+     * call. POSIX dlsym returns void*; ISO C (pedantic) forbids
+     * direct object->function conversion — the dereference idiom. */
+    {
+        void *lib = dlopen("libdbus-1.so.3", RTLD_NOW | RTLD_LOCAL |
+                                              RTLD_NOLOAD);
+        if (lib != NULL) {
+            void (*dbus_shutdown)(void) = NULL;
+            *(void **)&dbus_shutdown = dlsym(lib, "dbus_shutdown");
+            if (dbus_shutdown != NULL) {
+                dbus_shutdown();
+            }
+        }
+    }
 }
 
 /* ---- enter/leave: the callback reentrancy discipline ------------------------- */

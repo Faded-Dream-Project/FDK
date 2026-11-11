@@ -164,7 +164,7 @@ enum {
  * standard fullscreen-quad form: a_pos * 2 - 1 spans -1..+1 across
  * the WHOLE viewport; dividing pixel coordinates by u_size here
  * would shrink the quad to a single texel. */
-#include "render/gpu_shaders.h"
+#include "render/gpu_shaders_quad.h"
 
 
 /* The alpha decision above is CORRECTNESS, not style: the staging
@@ -2691,6 +2691,16 @@ fdk_result fdk_wayland_egl_window_cb_flush(struct fdk_wayland_egl_window *ewin,
 
 /* ---- P2: real fences (EGL_KHR_fence_sync; EGL_ANDROID_native_fence_
  * sync gives a native FD where the driver has it) ---------------------- */
+
+/* POSIX dlsym/eglGetProcAddress return void*; ISO C (pedantic)
+ * forbids conversion between object pointers and function
+ * pointers. The union carries the address through its object
+ * pointer member and reads it back as the typed function pointer
+ * member — the strictly-portable idiom (the C committee's
+ * sanctioned pattern; every other lane uses the *(void**)&
+ * dereference form, which gcc accepts but -Wpedantic rightly
+ * flags — this block is held to the stricter standard because its
+ * calls were reviewed one parameter at a time in this round). */
 struct fdk_wl_sync_fns {
     void *create_sync;   /* eglCreateSyncKHR */
     void *destroy_sync;  /* eglDestroySyncKHR */
@@ -2700,16 +2710,24 @@ struct fdk_wl_sync_fns {
 
 static struct fdk_wl_sync_fns g_wl_sync;
 
-typedef void *(*egl_gpa_fn)(void *, const char *);
+/* POSIX dlsym/eglGetProcAddress return void*; ISO C (pedantic)
+ * forbids conversion between object pointers and function
+ * pointers. The three load unions below carry the address through
+ * their object-pointer member and read it back as the typed
+ * function-pointer member — the strictly-portable idiom. This
+ * block is held to the stricter standard because its calls were
+ * reviewed one parameter at a time (the 2026-11-11 sweep found a
+ * wrong-arity call here). */
+typedef void *(*egl_gpa_fn)(const char *);
 
-static int wl_sync_resolve(void *lib_egl, egl_gpa_fn gpa) {
+static int wl_sync_resolve(egl_gpa_fn gpa) {
     if (g_wl_sync.create_sync != NULL) {
         return 1;
     }
-    g_wl_sync.create_sync = gpa(lib_egl, "eglCreateSyncKHR");
-    g_wl_sync.destroy_sync = gpa(lib_egl, "eglDestroySyncKHR");
-    g_wl_sync.client_wait = gpa(lib_egl, "eglClientWaitSyncKHR");
-    g_wl_sync.dup_fd = gpa(lib_egl, "eglDupNativeFenceFDANDROID");
+    g_wl_sync.create_sync = gpa("eglCreateSyncKHR");
+    g_wl_sync.destroy_sync = gpa("eglDestroySyncKHR");
+    g_wl_sync.client_wait = gpa("eglClientWaitSyncKHR");
+    g_wl_sync.dup_fd = gpa("eglDupNativeFenceFDANDROID");
     return g_wl_sync.create_sync != NULL && g_wl_sync.client_wait != NULL &&
            g_wl_sync.destroy_sync != NULL;
 }
@@ -2720,14 +2738,17 @@ fdk_result fdk_wayland_egl_window_fence_insert(
         return FDK_ERR_INVALID_ARGUMENT;
     }
     struct fdk_wayland_egl *egl = ewin->egl;
-    if (!wl_sync_resolve(egl->lib_egl,
-                             (void *)egl->fn.eglGetProcAddress)) {
+    if (!wl_sync_resolve(egl->fn.eglGetProcAddress)) {
         return FDK_ERR_UNSUPPORTED; /* driver lacks EGL_KHR_fence_sync */
     }
-    void *(*create)(void *, unsigned, const void *) =
-        (void *(*)(void *, unsigned, const void *))g_wl_sync.create_sync;
-    void *sync = create(egl->egl_display, 0x30F0 /* EGL_SYNC_FENCE_KHR */,
-                        NULL);
+    /* eglCreateSyncKHR(EGLDisplay, EGLenum type, const EGLint*). */
+    union {
+        void *obj;
+        void *(*fn)(void *, unsigned, const void *);
+    } u_create;
+    u_create.obj = g_wl_sync.create_sync;
+    void *sync = u_create.fn(egl->egl_display,
+                             0x30F0 /* EGL_SYNC_FENCE_KHR */, NULL);
     if (sync == NULL) {
         return FDK_ERR_UNSUPPORTED;
     }
@@ -2741,18 +2762,28 @@ fdk_result fdk_wayland_egl_window_fence_wait(
         return FDK_ERR_INVALID_ARGUMENT;
     }
     struct fdk_wayland_egl *egl = ewin->egl;
-    if (!wl_sync_resolve(egl->lib_egl,
-                             (void *)egl->fn.eglGetProcAddress)) {
+    if (!wl_sync_resolve(egl->fn.eglGetProcAddress)) {
         return FDK_ERR_UNSUPPORTED;
     }
-    unsigned (*cwait)(void *, void *, int) =
-        (unsigned (*)(void *, void *, int))g_wl_sync.client_wait;
-    /* EGL_SYNC_FLUSH_COMMANDS_BIT | forever: the waiter decides. */
-    unsigned r = cwait(egl->egl_display, (void *)(uintptr_t)fence,
-                       0x0001 | 0xFFFFFFFFu);
-    void (*destroy)(void *, void *) =
-        (void (*)(void *, void *))g_wl_sync.destroy_sync;
-    destroy(egl->egl_display, (void *)(uintptr_t)fence);
+    /* eglClientWaitSyncKHR(EGLDisplay, EGLSync, EGLint flags,
+     * EGLTime timeout) — FOUR parameters. The 2026-11-11 sweep
+     * found this cast declared three (flags|timeout merged, the
+     * timeout slot reading register garbage); the fixed signature
+     * passes them as the spec spells them. */
+    union {
+        void *obj;
+        unsigned (*fn)(void *, void *, int, unsigned long long);
+    } u_wait;
+    u_wait.obj = g_wl_sync.client_wait;
+    unsigned r = u_wait.fn(egl->egl_display, (void *)(uintptr_t)fence,
+                           0x0001 /* EGL_SYNC_FLUSH_COMMANDS_BIT */,
+                           0xFFFFFFFFFFFFFFFFull /* EGL_FOREVER */);
+    union {
+        void *obj;
+        void (*fn)(void *, void *);
+    } u_destroy;
+    u_destroy.obj = g_wl_sync.destroy_sync;
+    u_destroy.fn(egl->egl_display, (void *)(uintptr_t)fence);
     /* 0x3051 = EGL_CONDITION_SATISFIED_KHR */
     return r == 0x3051 ? FDK_OK : FDK_ERR_UNSUPPORTED;
 }

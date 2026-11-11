@@ -1170,7 +1170,8 @@ static void test_system_font_discovery(void) {
     char odir[] = "/tmp/fdk-disc-override-XXXXXX";
     assert(mkdtemp(odir) != NULL);
     char probe[256];
-    int n = snprintf(probe, sizeof(probe), "%s/ProbeFace.ttf", odir);
+    int n_written = snprintf(probe, sizeof(probe), "%s/ProbeFace.ttf", odir);
+    size_t n = n_written > 0 ? (size_t)n_written : 0;
     assert(n > 0 && (size_t)n < sizeof(probe));
     assert(tt_copy_file(probe, g_sans) == 0);
 
@@ -1207,16 +1208,16 @@ static void test_system_font_discovery(void) {
         char fdir[] = "/tmp/fdk-disc-fc-XXXXXX";
         assert(mkdtemp(fdir) != NULL);
         char fcache[256], fcopy[256], fconf[256];
-        n = snprintf(fcache, sizeof(fcache), "%s/cache", fdir);
-        assert(n > 0 && (size_t)n < sizeof(fcache));
-        n = snprintf(fcopy, sizeof(fcopy), "%s/FcProbeFace.ttf", fdir);
-        assert(n > 0 && (size_t)n < sizeof(fcopy));
-        n = snprintf(fconf, sizeof(fconf), "%s/fonts.conf", fdir);
-        assert(n > 0 && (size_t)n < sizeof(fconf));
+        int nlen = snprintf(fcache, sizeof(fcache), "%s/cache", fdir);
+        assert(nlen > 0 && (size_t)nlen < sizeof(fcache));
+        nlen = snprintf(fcopy, sizeof(fcopy), "%s/FcProbeFace.ttf", fdir);
+        assert(nlen > 0 && (size_t)nlen < sizeof(fcopy));
+        nlen = snprintf(fconf, sizeof(fconf), "%s/fonts.conf", fdir);
+        assert(nlen > 0 && (size_t)nlen < sizeof(fconf));
         assert(mkdir(fcache, 0700) == 0);
         assert(tt_copy_file(fcopy, g_sans) == 0);
         char conf[1024];
-        n = snprintf(conf, sizeof(conf),
+        nlen = snprintf(conf, sizeof(conf),
                      "<?xml version=\"1.0\"?>\n"
                      "<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n"
                      "<fontconfig>\n"
@@ -1288,8 +1289,9 @@ static void test_system_font_discovery(void) {
     char adir[] = "/tmp/fdk-disc-arch-XXXXXX";
     assert(mkdtemp(adir) != NULL);
     char afont[256];
-    n = snprintf(afont, sizeof(afont), "%s/NotoSans[wdth,wght].ttf", adir);
-    assert(n > 0 && (size_t)n < sizeof(afont));
+    int nlen = snprintf(afont, sizeof(afont), "%s/NotoSans[wdth,wght].ttf",
+                        adir);
+    assert(nlen > 0 && (size_t)nlen < sizeof(afont));
     assert(tt_copy_file(afont, g_sans) == 0);
     tt_scrub_env();
     setenv("FDK_FONT_DIRS", adir, 1);
@@ -1307,11 +1309,11 @@ static void test_system_font_discovery(void) {
     char ndir[] = "/tmp/fdk-disc-nested-XXXXXX";
     assert(mkdtemp(ndir) != NULL);
     char nsub[256], nfont[256];
-    n = snprintf(nsub, sizeof(nsub), "%s/nested", ndir);
-    assert(n > 0 && (size_t)n < sizeof(nsub));
-    n = snprintf(nfont, sizeof(nfont), "%s/LiberationSans-Regular.ttf",
-                 nsub);
-    assert(n > 0 && (size_t)n < sizeof(nfont));
+    int nlenn = snprintf(nsub, sizeof(nsub), "%s/nested", ndir);
+    assert(nlenn > 0 && (size_t)nlenn < sizeof(nsub));
+    nlenn = snprintf(nfont, sizeof(nfont), "%s/LiberationSans-Regular.ttf",
+                    nsub);
+    assert(nlenn > 0 && (size_t)nlenn < sizeof(nfont));
     assert(mkdir(nsub, 0700) == 0);
     assert(tt_copy_file(nfont, g_sans) == 0);
     tt_scrub_env();
@@ -1332,10 +1334,10 @@ static void test_system_font_discovery(void) {
     char bdir[] = "/tmp/fdk-disc-rank-XXXXXX";
     assert(mkdtemp(bdir) != NULL);
     char bold[256], reg[256];
-    n = snprintf(bold, sizeof(bold), "%s/DejaVuSans-Bold.ttf", bdir);
-    assert(n > 0 && (size_t)n < sizeof(bold));
-    n = snprintf(reg, sizeof(reg), "%s/DejaVuSans.ttf", bdir);
-    assert(n > 0 && (size_t)n < sizeof(reg));
+    int nlenb = snprintf(bold, sizeof(bold), "%s/DejaVuSans-Bold.ttf", bdir);
+    assert(nlenb > 0 && (size_t)nlenb < sizeof(bold));
+    nlenb = snprintf(reg, sizeof(reg), "%s/DejaVuSans.ttf", bdir);
+    assert(nlen > 0 && (size_t)nlen < sizeof(reg));
     assert(tt_copy_file(bold, g_sans) == 0);
     assert(tt_copy_file(reg, g_sans) == 0);
     tt_scrub_env();
@@ -1358,10 +1360,10 @@ static void test_system_font_discovery(void) {
     char rdir[] = "/tmp/fdk-disc-resil-XXXXXX";
     assert(mkdtemp(rdir) != NULL);
     char rbad[256], rgood[256];
-    n = snprintf(rbad, sizeof(rbad), "%s/DejaVuSans.ttf", rdir);
-    assert(n > 0 && (size_t)n < sizeof(rbad));
-    n = snprintf(rgood, sizeof(rgood), "%s/NotoSans-Regular.ttf", rdir);
-    assert(n > 0 && (size_t)n < sizeof(rgood));
+    int nlenr = snprintf(rbad, sizeof(rbad), "%s/DejaVuSans.ttf", rdir);
+    assert(nlen > 0 && (size_t)nlen < sizeof(rbad));
+    nlen = snprintf(rgood, sizeof(rgood), "%s/NotoSans-Regular.ttf", rdir);
+    assert(nlenr > 0 && (size_t)nlenr < sizeof(rgood));
     {
         /* Truncated copy: the sfnt magic is in the first 12 bytes so
          * the tag-level gate passes, but the table extents run past
@@ -1512,7 +1514,7 @@ static void test_p4_layout(void) {
     assert(fdk_ok(r));
     printf("p4: %zu clusters, advance %.1f vs %.1f\n", n, advance, adv2);
     assert(n == strlen(txt)); /* ASCII: one cluster per byte */
-    assert(fabsf((double)(advance - adv2)) < 0.01f);
+    assert(fabsf(advance - adv2) < 0.01f);
     assert(cl[0].byte_lo == 0);
     for (size_t k = 0; k < n; k++) {
         assert(cl[k].byte_lo < cl[k].byte_hi);
@@ -1526,7 +1528,7 @@ static void test_p4_layout(void) {
     fdk_text_metrics met;
     memset(&met, 0, sizeof met);
     fdk_font_measure_utf8(f, txt, strlen(txt), &met);
-    assert(fabsf((double)(met.advance_width - (int)advance)) <= 1.0f); /* advance_width is the documented integer round */
+    assert(fabsf((float)(met.advance_width - (int)advance)) <= 1.0f); /* advance_width is the documented integer round */
 
     for (size_t b = 0; b <= strlen(txt); b += 4) {
         fdk_f32 x = -1.0f;
@@ -1539,7 +1541,7 @@ static void test_p4_layout(void) {
     }
     fdk_f32 xend = -1.0f;
     fdk_font_layout_x_at_byte(f, txt, strlen(txt), (size_t)9999, &xend);
-    assert(fabsf((double)(xend - advance)) < 0.5f);
+    assert(fabsf(xend - advance) < 0.5f);
 
     free(cl);
     fdk_font_destroy(f);

@@ -174,7 +174,8 @@ static void *panel_job(void *user_data, void (*report)(double, void *),
     /* The gradient: BGRA8888-LE in memory (B,G,R,A per pixel). */
     for (int y = 0; y < PANEL_H; y++) {
         for (int x = 0; x < PANEL_W; x++) {
-            uint8_t *px = p->pixels + ((size_t)y * PANEL_W + x) * 4;
+            uint8_t *px = p->pixels + ((size_t)y * (size_t)PANEL_W +
+                                     (size_t)x) * 4;
             px[0] = (uint8_t)(x * 255 / (PANEL_W - 1)); /* B */
             px[1] = (uint8_t)(y * 255 / (PANEL_H - 1)); /* G */
             px[2] = (uint8_t)(64);                      /* R */

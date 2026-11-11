@@ -20,6 +20,9 @@
 #define FDK_LOG_TAG "x11"
 
 #include "platform/x11/x11_platform.h"
+#include "fdk/ext/x11.h" /* the public prototypes of the four
+ * fdk_ext_x11_* functions defined below — the missing-prototypes
+ * sweep: the definition must see its own declaration. */
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"

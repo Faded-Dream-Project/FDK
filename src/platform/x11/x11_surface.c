@@ -374,8 +374,14 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
             /* The Vulkan lane goes FIRST (the owner's priority:
              * Vulkan, then OpenGL, then CPU). The same size gate and
              * one-shot discipline as GLX; a refusal is final for this
-             * process (no re-attempt per window). */
+             * process (no re-attempt per window). GPU RENDER MODE IS
+             * EXCLUDED: that mode's present is the GL paint engine's
+             * flush (gpaint.c, a GLX/GLES engine by construction) —
+             * the Vulkan present lane serves HYBRID/AUTO windows only
+             * (see wayland_window.c's twin note for the crash class
+             * this closes). */
             if (pwindow->vk_win == NULL && !pwindow->vk_downgraded &&
+                pwindow->render_mode != FDK_RENDER_GPU &&
                 fdk__rb_vulkan_allowed()) {
                 if (conn->vk_lane == NULL && !conn->vk_tried) {
                     conn->vk_lane = fdk_vk_lane_try_load(

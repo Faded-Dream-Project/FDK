@@ -4,6 +4,66 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
+## Round 67 (2026-11-11) — the GTX 1050 Ti report answered: three real bugs fixed, the zero-warning law enforced
+
+The owner ran the Vulkan lane on real hardware (GTX 1050 Ti +
+NVIDIA + a syncobj-advertising compositor) and sent the log: the
+lane engaged (3 swapchain images, hardware verdict OK), then the
+connection DIED — wp_linux_drm_syncobj_surface_v1 error 4 "Buffer
+attached but no acquire point set" — plus a 23-warning build wall
+and a 3-allocation libdbus leak report. Three real bugs, all
+found only on hardware this sandbox cannot reproduce (pixman sway
+advertises no syncobj manager):
+
+- **Error 4, the §20 single-owner rule violated**: the EGL lane
+  has three gates (background-buffer attach, classic wl_shm
+  commit, unmap) that keep FDK's queue off lane-owned surfaces;
+  the Vulkan lane never got them. The theme's background attach
+  after "Vulkan window lane up" committed a wl_shm buffer onto
+  the syncobj-wrapped surface and the compositor killed the
+  connection. Fixed: all three gates now refuse for vk_win too.
+  PLUS the structural half: the swapchain is now created at the
+  FIRST PRESENT (post-configure, the GTK/SDL ecosystem shape) —
+  the pre-configure window never gets wrapped at all.
+- **Rotating-swapchain garbage (found in review)**: partial-damage
+  copies onto an acquired image that does NOT hold the previous
+  frame would leave garbage in undamaged regions. The staging
+  buffer IS the retained copy (the GL texture's role); every
+  present is ONE whole-image copy. Damage still optimizes the CPU
+  rasterization.
+- **GPU-mode windows must skip the Vulkan lane**: the GL paint
+  engine (gpaint.c) is EGL/GLES by construction; a FDK_RENDER_GPU
+  window grabbed by the Vulkan lane gave one surface two
+  presenters (the crash inside lavapipe's worker thread). Fixed
+  on both backends: render_mode != FDK_RENDER_GPU gates the lane.
+- eglClientWaitSyncKHR (a pre-existing EGL-lane bug the sweep
+  caught): the cast declared THREE params for a FOUR-param
+  function — flags|EGL_FOREVER merged, the timeout slot read
+  register garbage. Fixed with the spec signature + the union
+  idiom; the gpa helper's own 2-arg call on a 1-arg type fixed
+  too.
+- **The libdbus exit leak** (802 B in 3 allocations, stacks inside
+  libdbus-1.so.3): FDK never loads libdbus — the GPU driver stack
+  does, and libdbus frees its globals only at dbus_shutdown(),
+  which the driver never calls. fdk__dbus_shutdown now probes with
+  RTLD_NOLOAD (zero side effects when absent) and calls it after
+  the last FDK D-Bus connection closes.
+- **-Werror added to the root build** (the owner's stated law,
+  now enforced): the last 23 warnings cleared — missing
+  prototypes (the defining .c never included its own public
+  header), dlsym/EGL function-pointer casts (the union idiom
+  everywhere), dead code (dmabuf row fns, managed_find), the
+  shader header split (gpu_shaders.h / gpu_shaders_quad.h — a
+  static const char* unused by an includer is a warning), sign-
+  conversion noise made explicit, test/example walls included.
+  The static GLES audit updated for the split.
+- **Regressions green**: unit suite, X11 + Wayland integration
+  suites, both GPU paint smokes (AUTO AND forced-GL), both GLES
+  audits, exports (1113, +0 this round), examples, tools, the
+  gpu app matrix (AUTO->vulkan both backends, strict refusals
+  exit 1), and the compositor pixel rig still byte-exact
+  (bg 26,31,41 / red 230,64,51 / blue 51,140,242).
+
 ## Round 66 (2026-11-11) — the Vulkan present lane + the backend priority; bug-rate: 2 lane bugs caught by the pixel rigs
 
 The owner's work order: FDK must offer GPU-only rendering with a

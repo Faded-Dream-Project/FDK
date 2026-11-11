@@ -8,8 +8,11 @@
  * and desktop-compat legal; ES 3.x hosts GLSL ES 1.00 shaders by
  * spec. The ES precision prepend is LOAD-BEARING: GLSL ES 1.00
  * fragment shaders have no default float precision — the audit's
- * negative control compiles without it and must fail. */
-
+ * negative control compiles without it and must fail. 
+ *
+ * 2026-11-11 split: the QUAD_* pair lives in gpu_shaders_quad.h now
+ * (the wl EGL quad lane's pair) — a static const char* unused by an
+ * includer is a warning, and the zero-warning rule is the law. */
 static const char *GP_VS =
     "attribute vec2 a_pos;\n"
     "attribute vec2 a_uv;\n"
@@ -119,26 +122,4 @@ static const char *GP_FS_BODY =
     "        c = vec4(t.rgb * v_color.rgb, v_color.a) * v_aux2.x;\n"
     "    }\n"
     "    gl_FragColor = c;\n"
-    "}\n";
-
-static const char *QUAD_VS =
-    "attribute vec2 a_pos;\n"
-    "varying vec2 v_uv;\n"
-    "uniform vec2 u_size;\n"
-    "void main() {\n"
-    "  vec2 ndc = vec2(a_pos.x * 2.0 - 1.0,\n"
-    "                  1.0 - a_pos.y * 2.0);\n"
-    "  gl_Position = vec4(ndc, 0.0, 1.0);\n"
-    "  v_uv = a_pos;\n"
-    "}\n";
-static const char *QUAD_FS =
-    "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
-    "precision highp float;\n"
-    "#else\n"
-    "precision mediump float;\n"
-    "#endif\n"
-    "varying vec2 v_uv;\n"
-    "uniform sampler2D u_tex;\n"
-    "void main() {\n"
-    "  gl_FragColor = vec4(texture2D(u_tex, v_uv).rgb, 1.0);\n"
     "}\n";

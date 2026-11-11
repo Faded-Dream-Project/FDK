@@ -1,5 +1,5 @@
 /* examples/h-status-panel.c — the BLIND example: written ONLY from
- * docs/EXTENDING.md and the public headers (include/fdk/*.h), with
+ * docs/EXTENDING.md and the public headers (include/fdk/ headers), with
  * src/ unread. A status-bar panel:
  *
  *   - a first-class layer surface (BOTTOM, anchored left-right-top,

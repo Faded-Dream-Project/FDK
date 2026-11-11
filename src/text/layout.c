@@ -526,8 +526,13 @@ fdk_result fdk_font_layout_utf8(const fdk_font *font, const char *utf8,
     if (font == NULL || utf8 == NULL || out_n == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
-    fdk__shaped *s = fdk__shape_range((fdk_font *)font, utf8, byte_len,
-                                      0, byte_len, NULL, 0);
+    /* fdk__shape_range takes a non-const font: shaping memoizes into
+     * the font's own cache (text_internal.h). The public layout API
+     * exposes a const font; the identity cast is the documented seam
+     * (the uintptr_t form keeps -Wcast-qual honest about it). */
+    fdk__shaped *s = fdk__shape_range(
+        (fdk_font *)(uintptr_t)font, utf8, byte_len,
+        0, byte_len, NULL, 0);
     if (s == NULL) {
         return FDK_ERR_OUT_OF_MEMORY;
     }
@@ -555,12 +560,17 @@ fdk_result fdk_font_layout_x_at_byte(const fdk_font *font,
     if (byte > byte_len) {
         byte = byte_len;
     }
-    fdk__shaped *s = fdk__shape_range((fdk_font *)font, utf8, byte_len,
-                                      0, byte_len, NULL, 0);
+    /* fdk__shape_range takes a non-const font: shaping memoizes into
+     * the font's own cache (text_internal.h). The public layout API
+     * exposes a const font; the identity cast is the documented seam
+     * (the uintptr_t form keeps -Wcast-qual honest about it). */
+    fdk__shaped *s = fdk__shape_range(
+        (fdk_font *)(uintptr_t)font, utf8, byte_len,
+        0, byte_len, NULL, 0);
     if (s == NULL) {
         return FDK_ERR_OUT_OF_MEMORY;
     }
-    *out_x = fdk__shaped_caret_x(s, byte);
+    *out_x = (fdk_f32)fdk__shaped_caret_x(s, byte);
     fdk__shaped_free(s);
     return FDK_OK;
 }
@@ -571,8 +581,13 @@ fdk_result fdk_font_layout_byte_at_x(const fdk_font *font,
     if (font == NULL || utf8 == NULL || out_byte == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
-    fdk__shaped *s = fdk__shape_range((fdk_font *)font, utf8, byte_len,
-                                      0, byte_len, NULL, 0);
+    /* fdk__shape_range takes a non-const font: shaping memoizes into
+     * the font's own cache (text_internal.h). The public layout API
+     * exposes a const font; the identity cast is the documented seam
+     * (the uintptr_t form keeps -Wcast-qual honest about it). */
+    fdk__shaped *s = fdk__shape_range(
+        (fdk_font *)(uintptr_t)font, utf8, byte_len,
+        0, byte_len, NULL, 0);
     if (s == NULL) {
         return FDK_ERR_OUT_OF_MEMORY;
     }

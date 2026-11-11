@@ -1404,6 +1404,11 @@ fdk_result fdk_x11_gl_window_fence_wait(struct fdk_x11_gl_window *gwin,
 
 
 /* Test seam: the lane's pinned libGL dlopen handle (share-root test). */
+/* TEST SEAMS (declared extern by tests/test_arbitration.c): the
+ * prototypes must be visible at the definitions too. */
+void *fdk_x11_gl_lib_for_test(fdk_platform_window *pw);
+void *fdk_x11_gl_proc_for_test(fdk_platform_window *pw,
+                               const char *name);
 void *fdk_x11_gl_lib_for_test(fdk_platform_window *pw) {
     if (pw == NULL || pw->conn == NULL || pw->conn->gl == NULL) {
         return NULL;
@@ -1419,7 +1424,14 @@ void *fdk_x11_gl_proc_for_test(fdk_platform_window *pw, const char *name) {
         return NULL;
     }
     struct fdk_x11_gl *gl = (struct fdk_x11_gl *)pw->conn->gl;
-    void *(*getproc)(const char *) =
-        (void *(*)(const char *))dlsym(gl->lib, "glXGetProcAddress");
+    void *(*getproc)(const char *);
+    /* POSIX dlsym returns void*; ISO C (pedantic) forbids the direct
+     * conversion — the union idiom (the 2026-11-11 sweep). */
+    union {
+        void *obj;
+        void *(*fn)(const char *);
+    } u_getproc;
+    u_getproc.obj = dlsym(gl->lib, "glXGetProcAddress");
+    getproc = u_getproc.fn;
     return getproc != NULL ? getproc(name) : NULL;
 }

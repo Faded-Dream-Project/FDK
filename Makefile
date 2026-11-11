@@ -69,9 +69,15 @@ FDK_SO_VERSION := $(FDK_VERSION_MAJOR).$(FDK_VERSION_MINOR).$(FDK_VERSION_PATCH)
 FDK_SONAME := libfdk.so.$(FDK_VERSION_MAJOR)
 
 STD      := -std=c17
+# -Werror (2026-11-11, the owner's zero-warning law): a warning
+# anywhere fails the build. The sweep that added it cleared the
+# last 23 (missing prototypes, dlsym/EGL function-pointer casts,
+# dead code, sign-conversion noise); the flag makes them stay
+# cleared — never loosened, only ever satisfied.
 WARN     := -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes \
             -Wmissing-prototypes -Wconversion -Wsign-conversion \
-            -Wcast-qual -Wpointer-arith -Wundef -Wwrite-strings
+            -Wcast-qual -Wpointer-arith -Wundef -Wwrite-strings \
+            -Werror
 FEATURE  := -D_POSIX_C_SOURCE=200809L
 
 # ---- Platform backend dependencies -------------------------------------

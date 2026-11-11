@@ -107,15 +107,6 @@ struct managed_surface {
  * (error 4) otherwise; caught live by the multi-output rig. */
 static struct managed_surface *g_managed = NULL;
 
-static struct managed_surface *managed_find(fdk_ext_surface *es) {
-    for (struct managed_surface *m = g_managed; m != NULL; m = m->next) {
-        if (m->es == es) {
-            return m;
-        }
-    }
-    return NULL;
-}
-
 void fdk_wayland_session_lock_surface_managed_destroy(
     void *es) {
     for (struct managed_surface *m = g_managed; m != NULL; m = m->next) {
@@ -139,6 +130,8 @@ void fdk_wayland_session_lock_surface_managed_destroy(
 
 /* The unlock sweep: whatever tombstones remain go now — every role
  * object is destroyed, no event can name them. */
+void fdk_wayland_session_lock_managed_sweep(void);
+void fdk_session_lock_unlock_impl(void *handle);
 void fdk_wayland_session_lock_managed_sweep(void) {
     struct managed_surface *m = g_managed;
     while (m != NULL) {

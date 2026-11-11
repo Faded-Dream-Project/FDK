@@ -17,6 +17,7 @@ static int fdk_x11_next_wakeup_ms(fdk_platform_connection *conn,
  * import extensions (mesa shares the driver with the GLX lane). The
  * sampling half (GL_OES_EGL_image in the GLX context) is draw-time
  * truth and degrades honestly per draw. */
+int fdk_x11_dmabuf_available(fdk_platform_connection *conn);
 int fdk_x11_dmabuf_available(fdk_platform_connection *conn) {
     (void)conn;
     extern int fdk__dmabuf_egl_x11_available(void *x11_display);
