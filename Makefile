@@ -925,6 +925,27 @@ test-gpu-paint-wl: $(WL_GPU_TEST_BIN)
 	    "$(WL_GPU_TEST_BIN)"; \
 	fi
 
+# The GLES format/construct audit (2026-11-11): boots a REAL strict
+# ES context on llvmpipe (surfaceless/pbuffer EGL, no X11 needed) and
+# creates every construct the GPU lanes use, checking each against
+# that ES version's format table. Negative controls prove the checker
+# itself works (LUMINANCE must fail on ES 3.x; the precision-less
+# shader must fail). Catches LUMINANCE-class bugs in CI without
+# hardware; cannot catch driver quirks beyond the spec.
+AUDIT_BIN := $(BUILD_DIR)/tests/test_gles_audit
+
+$(AUDIT_BIN): tests/test_gles_audit.c src/render/gpu_shaders.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Wno-cast-qual -Isrc $< -o $@ $(LDFLAGS) -ldl -lm
+
+test-gles-audit: $(AUDIT_BIN)
+	"$(AUDIT_BIN)"
+
+test-gles-audit-static:
+	python3 -I tests/gles_static_audit.py
+
+test-gles: test-gles-audit-static test-gles-audit
+
 # Cross-section evidence tool (P1 close-out): CPU-vs-GPU coverage
 # profiles for one circle edge and one rotated edge, with the
 # shift analysis that separates a geometry offset from the AA model.

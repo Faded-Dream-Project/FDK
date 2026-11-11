@@ -21,3 +21,11 @@ for fdk_env_prefix in "$X11_PREFIX" "$WL_PREFIX"; do
     fi
 done
 unset fdk_env_prefix
+# The Mesa EGL vendor for GLVND (libegl-mesa0, added 2026-11-11 for the
+# GLES audit + the wayland GPU lane on llvmpipe): GLVND discovers
+# vendors via its compile-time dir, which the prefix is not — point it
+# at the extracted vendor JSON explicitly. The DRI driver dir rides
+# LD_LIBRARY_PATH so libgallium resolves.
+if [ -f "$WL_PREFIX/../usr/share/glvnd/egl_vendor.d/50_mesa.json" ]; then
+    export __EGL_VENDOR_LIBRARY_FILENAMES="$WL_PREFIX/../usr/share/glvnd/egl_vendor.d/50_mesa.json"
+fi

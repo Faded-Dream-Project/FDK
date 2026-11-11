@@ -3116,3 +3116,38 @@ fdk_result fdk_window_set_idle_inhibited(fdk_window *window,
     return window->ops->window_set_idle_inhibit(window->pwindow,
                                                 inhibited ? 1 : 0);
 }
+
+/* ---- backend-agnostic GL test seams (see window_internal.h) -------- */
+
+fdk_result fdk_window_gpu_readback(fdk_window *window, fdk_u32 *out,
+                                   int width, int height) {
+    if (window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ops == NULL || window->ops->window_gpu_readback == NULL) {
+        return FDK_ERR_UNSUPPORTED; /* no GPU lane on this backend */
+    }
+    return window->ops->window_gpu_readback(window->pwindow, out, width,
+                                            height);
+}
+
+fdk_result fdk_window_gl_fence_insert(fdk_window *window,
+                                      fdk_u64 *out_fence) {
+    if (window == NULL || out_fence == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ops == NULL || window->ops->window_gl_fence_insert == NULL) {
+        return FDK_ERR_UNSUPPORTED; /* no fence machinery on this backend */
+    }
+    return window->ops->window_gl_fence_insert(window->pwindow, out_fence);
+}
+
+fdk_result fdk_window_gl_fence_wait(fdk_window *window, fdk_u64 fence) {
+    if (window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ops == NULL || window->ops->window_gl_fence_wait == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return window->ops->window_gl_fence_wait(window->pwindow, fence);
+}

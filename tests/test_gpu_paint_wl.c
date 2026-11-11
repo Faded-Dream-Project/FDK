@@ -415,7 +415,7 @@ int main(void) {
         } else {
             paint_scene_dynamic(s, card, tex);
         }
-        if (fdk_ok(fdk_wayland_window_gpu_readback(wgpu->pwindow, ppre, W,
+        if (fdk_ok(fdk_window_gpu_readback(wgpu, ppre, W,
                                                H))) {
             FILE *f = fopen("/tmp/gpu_preswap.ppm", "wb");
             if (f != NULL) {
@@ -459,12 +459,40 @@ int main(void) {
         fdk_pump_events(ctx, 16);
     }
 
+    /* Re-paint the scene WITHOUT presenting, then read back through
+     * the platform seam: the seam's engine flush redraws the pending
+     * batch straight into the back buffer and reads BEFORE any swap
+     * (the seam's documented contract). The wayland/EGL back buffer
+     * is destroyed by the swap (EGL_BUFFER_DESTROYED semantics —
+     * llvmpipe zeroes it), so reading the post-swap buffer would
+     * compare against black; the X11/GLX lane only looked green
+     * because llvmpipe's desktop-GLX swap happens to RETAIN the back
+     * buffer. Re-paint + seam-read makes the comparison deterministic
+     * on every lane. */
+    {
+        fdk_surface *s = NULL;
+        fdk_window_get_surface(wgpu, &s);
+        if (getenv("GPU_EMPTY") != NULL) {
+            /* nothing to repaint */
+        } else if (getenv("GPU_MINIMAL") != NULL) {
+            fdk_color bg = { 0.10f, 0.12f, 0.16f, 1.0f };
+            fdk_surface_fill(s, bg);
+            fdk_surface_fill_rect(s, (fdk_rect){ 20, 20, 60, 40 },
+                                  (fdk_color){ 0.9f, 0.2f, 0.2f, 1.0f });
+            fdk_surface_fill_rounded_rect_aa(
+                s, (fdk_rect){ 120, 20, 60, 40 }, 12,
+                (fdk_color){ 0.2f, 0.4f, 0.95f, 1.0f });
+        } else {
+            paint_scene_dynamic(s, card, tex);
+        }
+    }
+
     /* read back through the platform seam and compare */
     static fdk_u32 pgpu[W * H];
     (void)pgpu;
     printf("registry probe: %p\n", (void *)fdk__gpu_surface_for_window(
                                        wgpu->pwindow));
-    fdk_result rb = fdk_wayland_window_gpu_readback(wgpu->pwindow, pgpu, W, H);
+    fdk_result rb = fdk_window_gpu_readback(wgpu, pgpu, W, H);
     int have_gpu = fdk_ok(rb);
     if (!have_gpu) {
         printf("readback seam result: %d\n", (int)rb);
@@ -588,8 +616,15 @@ int main(void) {
               "atlas overflow: final frame presented");
         CHECK(fdk_ok(fdk_surface_present(s)),
               "atlas overflow: second present (back buffer == final)");
+        /* Re-paint the final frame before reading (see the
+         * comparison-phase note: the EGL back buffer is destroyed by
+         * the swap; the seam's flush must redraw the pending batch). */
+        paint_scene_dynamic(s, card, tex);
+        fdk_surface_blend_mask(s, (fdk_rect){ 200, 150, 16, 16 },
+                               final_mask, 16,
+                               (fdk_color){ 1, 1, 1, 1 });
         static fdk_u32 pover[W * H];
-        if (fdk_ok(fdk_wayland_window_gpu_readback(wgpu->pwindow, pover, W,
+        if (fdk_ok(fdk_window_gpu_readback(wgpu, pover, W,
                                                H))) {
             fdk_u32 px = pover[158 * W + 208];
             printf("overflow probe px=%08x (expect white)\n", px);

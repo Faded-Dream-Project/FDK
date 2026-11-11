@@ -71,6 +71,17 @@ void fdk__window_resize_apply(fdk_window_resize_edge edge,
 bool fdk__window_is_double_click(fdk_i64 now_ms, fdk_i64 last_ms,
                                  fdk_i32 dx, fdk_i32 dy);
 
+/* ---- backend-agnostic GL test seams (the per-region stats lanes) ----
+ * Routed through window->ops so the SAME test binary produces the
+ * CPU-vs-GPU comparison on whichever backend the session picked
+ * (X11/GLX or Wayland/EGL). UNSUPPORTED when the backend has no GPU
+ * lane (or the op is absent). */
+fdk_result fdk_window_gpu_readback(fdk_window *window, fdk_u32 *out,
+                                   int width, int height);
+fdk_result fdk_window_gl_fence_insert(fdk_window *window,
+                                      fdk_u64 *out_fence);
+fdk_result fdk_window_gl_fence_wait(fdk_window *window, fdk_u64 fence);
+
 struct fdk_window {
     fdk_context *ctx;                 /* owning context, not owned by us */
     /* Effective render mode (1.0.0): resolved at creation (window

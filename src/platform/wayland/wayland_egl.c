@@ -115,7 +115,13 @@ enum {
     EGLC_WIDTH = 0x3056,
     EGLC_HEIGHT = 0x3057,
     EGLC_SUCCESS = 0x3000,
-    EGLC_PLATFORM_WAYLAND_KHR = 0x31D8
+    EGLC_PLATFORM_WAYLAND_KHR = 0x31D8,
+    EGLC_BUFFER_SIZE = 0x3020,
+    EGLC_DEPTH_SIZE = 0x3025,
+    EGLC_STENCIL_SIZE = 0x3026,
+    EGLC_GL_COLORSPACE = 0x309D,
+    EGLC_GL_COLORSPACE_LINEAR = 0x3089,
+    EGLC_GL_COLORSPACE_SRGB = 0x308B
 };
 
 /* GL/GLES constants (values from the GLES2 specification). */
@@ -158,23 +164,8 @@ enum {
  * standard fullscreen-quad form: a_pos * 2 - 1 spans -1..+1 across
  * the WHOLE viewport; dividing pixel coordinates by u_size here
  * would shrink the quad to a single texel. */
-static const char *QUAD_VS =
-    "attribute vec2 a_pos;\n"
-    "varying vec2 v_uv;\n"
-    "uniform vec2 u_size;\n"
-    "void main() {\n"
-    "  vec2 ndc = vec2(a_pos.x * 2.0 - 1.0,\n"
-    "                  1.0 - a_pos.y * 2.0);\n"
-    "  gl_Position = vec4(ndc, 0.0, 1.0);\n"
-    "  v_uv = a_pos;\n"
-    "}\n";
-static const char *QUAD_FS =
-    "precision mediump float;\n"
-    "varying vec2 v_uv;\n"
-    "uniform sampler2D u_tex;\n"
-    "void main() {\n"
-    "  gl_FragColor = vec4(texture2D(u_tex, v_uv).rgb, 1.0);\n"
-    "}\n";
+#include "render/gpu_shaders.h"
+
 
 /* The alpha decision above is CORRECTNESS, not style: the staging
  * buffer is XRGB8888 (the wl_shm path's own format), so its top byte
@@ -211,6 +202,8 @@ struct fdk_wl_gl_fns {
                                   EGLint *);
     EGLBoolean (*eglSwapBuffers)(EGLDisplay, EGLSurface);
     EGLBoolean (*eglSwapInterval)(EGLDisplay, EGLint);
+    EGLBoolean (*eglQuerySurface)(EGLDisplay, EGLSurface, EGLint,
+                                  EGLint *);
     const char *(*eglQueryString)(EGLDisplay, unsigned int);
     EGLint (*eglGetError)(void);
     void *(*eglGetProcAddress)(const char *);
@@ -238,6 +231,7 @@ struct fdk_wl_gl_fns {
     void (*glUniform1i)(int, int);
     int (*glGetAttribLocation)(unsigned int, const char *);
     void (*glEnableVertexAttribArray)(unsigned int);
+    void (*glDisableVertexAttribArray)(unsigned int);
     void (*glVertexAttribPointer)(unsigned int, int, unsigned int,
                                   unsigned char, int, const void *);
     unsigned int (*glGenBuffers)(int, unsigned int *);
@@ -816,6 +810,7 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     EGL_RESOLVE(eglMakeCurrent, "eglMakeCurrent");
     EGL_RESOLVE(eglGetConfigAttrib, "eglGetConfigAttrib");
     EGL_RESOLVE(eglQueryContext, "eglQueryContext");
+    EGL_RESOLVE(eglQuerySurface, "eglQuerySurface");
     EGL_RESOLVE(eglSwapBuffers, "eglSwapBuffers");
     EGL_RESOLVE(eglSwapInterval, "eglSwapInterval");
     EGL_RESOLVE(eglQueryString, "eglQueryString");
@@ -946,6 +941,7 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     GLES_RESOLVE(glUniform1i, "glUniform1i");
     GLES_RESOLVE(glGetAttribLocation, "glGetAttribLocation");
     GLES_RESOLVE(glEnableVertexAttribArray, "glEnableVertexAttribArray");
+    GLES_RESOLVE(glDisableVertexAttribArray, "glDisableVertexAttribArray");
     GLES_RESOLVE(glVertexAttribPointer, "glVertexAttribPointer");
     GLES_RESOLVE(glGenBuffers, "glGenBuffers");
     GLES_RESOLVE(glBindBuffer, "glBindBuffer");
@@ -1587,6 +1583,35 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
              lane_shape_name(egl->shape), egl->has_bgra_ext,
              egl->has_rowlen_ext,
              egl->bgra_internal_rgba ? "GL_RGBA" : "GL_BGRA_EXT");
+    /* The surface-format facts, the EGL twin of the X11 lane's
+     * "fdk-gl: fbconfig srgb=... doublebuf=..." line (the 2026-11-11
+     * audit: a Wayland session must answer the same sRGB question).
+     * EGL_GL_COLORSPACE needs EGL 1.5; an older stack honestly
+     * reports "query-failed" rather than guessing. */
+    {
+        EGLint bufsz = 0, alphasz = 0, depthsz = 0, stensz = 0;
+        EGLint cs = 0;
+        const char *cs_name = "query-failed";
+        (void)egl->fn.eglGetConfigAttrib(egl->egl_display, egl->config,
+                                         EGLC_BUFFER_SIZE, &bufsz);
+        (void)egl->fn.eglGetConfigAttrib(egl->egl_display, egl->config,
+                                         EGLC_ALPHA_SIZE, &alphasz);
+        (void)egl->fn.eglGetConfigAttrib(egl->egl_display, egl->config,
+                                         EGLC_DEPTH_SIZE, &depthsz);
+        (void)egl->fn.eglGetConfigAttrib(egl->egl_display, egl->config,
+                                         EGLC_STENCIL_SIZE, &stensz);
+        if (egl->fn.eglQuerySurface(egl->egl_display, ewin->surface,
+                                    EGLC_GL_COLORSPACE, &cs)) {
+            cs_name = cs == EGLC_GL_COLORSPACE_SRGB ? "sRGB"
+                    : cs == EGLC_GL_COLORSPACE_LINEAR ? "linear"
+                    : "other";
+        }
+        FDK_INFO("fdk-egl: config buffersize=%d alpha=%d depth=%d "
+                 "stencil=%d colorspace=%s (EGL_GL_COLORSPACE; "
+                 "colorspace conversion is NOT requested — pixels go "
+                 "to the compositor as painted)",
+                 bufsz, alphasz, depthsz, stensz, cs_name);
+    }
     /* FDK_GL_TRACE's one-per-connection engagement dump (TASK 1b):
      * everything a desktop report needs to interpret a lane failure
      * — the EGL stack's identity, the config the lane rides, the
@@ -1897,6 +1922,22 @@ static int draw_fullscreen_quad(struct fdk_wayland_egl_window *ewin,
                egl->fn.glVertexAttribPointer(
                    (unsigned int)egl->program_a_pos, 2, GLC_FLOAT, 0, 0,
                    NULL));
+    /* Disable the attribute arrays this quad does not use. The paint
+     * engine's lane leaves arrays 1..6 enabled (7 arrays, stride 96)
+     * pointing at ITS VBO — after a 1-quad flush that buffer holds 24
+     * bytes, and THIS 6-vertex draw would read up to 576 bytes through
+     * the stale arrays. Desktop-GL drivers don't enforce the read
+     * range (the X11 lane stayed green); strict ES 3.x raises
+     * GL_INVALID_OPERATION at the draw — the 2026-11-11 wayland-lane
+     * audit caught exactly that (every present after a small flush
+     * queued 0x502 into the next flush's error check). Disabling is
+     * also correct on desktop (a disabled unused array is a no-op). */
+    for (unsigned int ai = 0; ai < 16; ai++) {
+        if (ai == (unsigned int)egl->program_a_pos) {
+            continue;
+        }
+        egl->fn.glDisableVertexAttribArray(ai);
+    }
     LANE_GL_OP("glDrawArrays(TRIANGLES, 0, 6)",
                egl->fn.glDrawArrays(GLC_TRIANGLES, 0, 6));
     return LANE_PRESENT_OK;
@@ -2436,6 +2477,20 @@ static int lane_present_attempt(struct fdk_wayland_egl_window *ewin,
         egl->selfcheck = WL_GL_SELFCHECK_PASSED;
     }
 
+    /* Unconditional (not trace-gated — the 2026-11-11 wayland-lane
+     * audit: the failing presents were exactly the untraced ones): a
+     * pre-swap error check + a POST-swap drain. The swap's internal
+     * flush is the last GL work of the present; anything it queues
+     * must not leak into the next engine flush's error check (the
+     * engine marks itself dead on a queued error — a lane-owned
+     * error must never kill the engine). */
+    unsigned pe = egl->fn.glGetError();
+    if (pe != 0) {
+        FDK_WARN("GL lane: present#%d queued 0x%x before the swap "
+                 "(after the tail drain — the upload, the quad draw or "
+                 "the self-check raised it)",
+                 ewin->presents + 1, pe);
+    }
     if (!egl->fn.eglSwapBuffers(egl->egl_display, ewin->surface)) {
         const unsigned int se = (unsigned)egl->fn.eglGetError();
         FDK_WARN("eglSwapBuffers failed (0x%x, %s) at %s after a clean "
@@ -2443,6 +2498,12 @@ static int lane_present_attempt(struct fdk_wayland_egl_window *ewin,
                  "chance before any downgrade",
                  se, lane_egl_err_name(se), ewin->lane_stage);
         return LANE_PRESENT_SWAP;
+    }
+    unsigned se2 = egl->fn.glGetError();
+    if (se2 != 0) {
+        FDK_WARN("GL lane: present#%d queued 0x%x AT THE SWAP (the "
+                 "swap's internal flush raised it) — consumed here so "
+                 "it cannot kill the engine\n", ewin->presents + 1, se2);
     }
     return LANE_PRESENT_OK;
 }

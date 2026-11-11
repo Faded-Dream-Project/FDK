@@ -1,4 +1,76 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+## The GLES audit round: five engine fixes, two hardware-free checkers, the EGL seam
+
+The 2026-11-11 audit round (the GL_LUMINANCE bug was desktop-only and
+invisible on llvmpipe). Findings and fixes, all verified on a real
+strict ES 3.2 context (Mesa llvmpipe, surfaceless EGL) and on the
+desktop-GL X11 lane:
+
+1. **The mask-format probe** (gpaint.c): the R8/RED creation is now
+   decided by a REAL 1x1 probe at bring-up with an honest GL_LUMINANCE
+   fallback (strict ES 2.0 and legacy desktop GL) — the lane requests
+   version-2 EGL contexts, and a strict ES 2.0 stack would have
+   rejected R8 exactly like NVIDIA rejected LUMINANCE.
+2. **GL_BGRA gated** (gpaint.c): the blit-kind texture uploads used
+   0x80E1 ungated (an extension row on ES, core only on desktop); a
+   bring-up probe now decides, and without BGRA the rows swizzle to
+   RGBA on upload (the wayland lane's own RGBA-twin fallback,
+   mirrored). One earlier iteration of this fallback used `continue`
+   in the drain loop and would have skipped the quad draw — caught in
+   review before it shipped.
+3. **UNPACK_ROW_LENGTH resets** (gpaint.c): the lane's staging upload
+   leaves UNPACK_ROW_LENGTH at the window stride; the engine's row
+   uploads inherited it and strict ES raised GL_INVALID_OPERATION
+   (the desktop lane never noticed). Both engine upload paths reset
+   the state they depend on. This was the 17:01Z report's "0x502 at
+   texture drain" on the wayland lane, misattributed to the drain's
+   own ops by GetError-consumption order.
+4. **The lane's quad draw disables unused attribute arrays**
+   (wayland_egl.c): arrays 1..6 stayed enabled from the engine
+   pointing at the engine's VBO — after a 1-quad flush a 6-vertex
+   present draw read up to 576 bytes from a 24-byte buffer; strict ES
+   raises INVALID_OPERATION at the draw (desktop drivers don't
+   enforce the read range — the X11 lane stayed green).
+5. **The seam is backend-routed**: the tests called the X11-named
+   readback/fence entries directly, so a Wayland session ran
+   glXMakeCurrent against a wl_surface-backed window ("fdk-gpaint-seam:
+   glXMakeCurrent failed" in the 17:01Z report). A window_gpu_readback
+   op joins the ops vtable, both backends implement it, and the window
+   layer routes fdk_window_gpu_readback / fdk_window_gl_fence_*.
+   The EGL lane also prints its surface-format facts (buffersize /
+   alpha / depth / stencil / colorspace) — the X11 lane's fbconfig
+   line's twin.
+
+New checkers (both wired into CI and run-hardware.sh section 4.5):
+- **tests/gles_static_audit.py** — the checker with teeth: Mesa is
+  LENIENT where NVIDIA is strict (it accepts GL_LUMINANCE on ES 3.x
+  and even ES 3.x formats on ES 2.0 requests — the runtime audit's
+  negative controls honestly report "did not fire" on Mesa), so the
+  source-level format-constant audit is what catches the bug class in
+  CI. Teeth proven: injecting the historical GL_LUMINANCE creation
+  produces findings at the exact line.
+- **tests/test_gles_audit.c** — boots a real ES context (surfaceless
+  llvmpipe; the prefix gained libegl-mesa0 + libgl1-mesa-dri for the
+  GLVND vendor), walks the ES version's format table (R8/RED,
+  LUMINANCE, RGBA, extension-gated BGRA, ROW_LENGTH, NPOT, FBO +
+  ReadPixels), compiles THE REAL lane shaders (now shared verbatim via
+  src/render/gpu_shaders.h) and proves the ES precision head is
+  load-bearing.
+
+The EGL readback seam (section 4.6): on a compositor session the
+wayland lane now produces the SAME per-region interior/edge stats as
+the X11 lane — locally proven end-to-end (sway headless + FDK_GL_FORCE,
+the lane boots on real GLES 3.2, the seam returns stats). OPEN: the
+comparison's gates fail with only the scene's background rendered into
+the readback — one more strict-ES rendering finding in the lane's
+present path, reported honestly (rc=1, no faked pass), with the
+per-op diagnostics in place for the next paste to name it on NVIDIA.
+
+The harness (section 4.6 + the per-lane honesty): each gpu_run now
+prints "pixel comparison: VERIFIED / UNVERIFIED" explicitly, an
+UNVERIFIED pass is labeled PRESENT-ONLY (never a pixel-equivalence
+pass), and the wayland lane runs alongside the X11 lane when
+WAYLAND_DISPLAY is set.
 ## The GPU paint lane's atlas is GLES-legal (GL_R8/GL_RED)
 
 The 2026-11-11 17:01Z report (NVIDIA GTX 1050 Ti, driver 580.196.07,

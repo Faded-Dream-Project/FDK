@@ -70,6 +70,7 @@ static const fdk_platform_ops g_x11_ops = {
     .window_gl_set_frame_cb = fdk_x11_window_gl_set_frame_cb,
     .window_gl_fence_insert = fdk_x11_window_gl_fence_insert,
     .window_gl_fence_wait = fdk_x11_window_gl_fence_wait,
+    .window_gpu_readback = fdk_x11_window_gpu_readback,
     .window_ever_presented = fdk_x11_window_ever_presented,
     .window_frame_ready = fdk_x11_window_frame_ready,
     .window_get_scale = fdk_x11_window_get_scale,

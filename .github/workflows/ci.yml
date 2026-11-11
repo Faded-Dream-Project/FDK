@@ -66,7 +66,8 @@ jobs:
             libx11-dev libxext-dev libxtst-dev libxi-dev zlib1g-dev \
             libwayland-dev libxkbcommon-dev \
             dbus libglib2.0-bin \
-            libgl1 xvfb fonts-dejavu-core python3-pil \
+            libgl1 libegl1 libgles2 libgl1-mesa-dri \
+            xvfb fonts-dejavu-core python3-pil \
             libharfbuzz0b libfribidi0 fonts-wqy-zenhei fonts-urw-base35 \
             libxrandr-dev \
             fonts-noto-core
@@ -115,6 +116,28 @@ jobs:
 
       - name: X11 integration suite (throwaway Xvfb)
         run: make test-x11
+
+      # The GLES format/construct audits (2026-11-11): the static
+      # source audit (the checker with teeth — LUMINANCE-class bugs
+      # are source-static, Mesa is too lenient to exercise them at
+      # runtime) and the runtime audit (a REAL strict ES context on
+      # llvmpipe, surfaceless EGL — the format matrix + the lane's
+      # actual shaders + the negative controls' honest leniency
+      # report). Both are hardware-free.
+      - name: GLES static format audit
+        run: make test-gles-audit-static
+
+      - name: GLES runtime format audit (surfaceless llvmpipe ES)
+        run: make test-gles-audit
+
+      # The X11 GPU-paint lane (desktop-GL GLX on llvmpipe, the
+      # target owns its Xvfb): the CPU-vs-GPU per-region comparison +
+      # the GPU-mode contracts. The wayland GPU-paint lane runs on
+      # the hardware box via tests/run-hardware.sh section 4.6 (its
+      # comparison has a known-open finding — see the 2026-11-11
+      # notes — so it is not wired red into CI yet).
+      - name: GPU paint smoke — the X11 lane (llvmpipe GLX)
+        run: make test-gpu-paint
 
       - name: Native D-Bus client — live bus (dbus-run-session + Xvfb)
         # The hand-rolled client against a REAL throwaway dbus-daemon:

@@ -474,7 +474,7 @@ int main(void) {
         } else {
             paint_scene_dynamic(s, card, tex);
         }
-        if (fdk_ok(fdk_x11_window_gpu_readback(wgpu->pwindow, ppre, W,
+        if (fdk_ok(fdk_window_gpu_readback(wgpu, ppre, W,
                                                H))) {
             FILE *f = fopen("/tmp/gpu_preswap.ppm", "wb");
             if (f != NULL) {
@@ -523,7 +523,7 @@ int main(void) {
     (void)pgpu;
     printf("registry probe: %p\n", (void *)fdk__gpu_surface_for_window(
                                        wgpu->pwindow));
-    fdk_result rb = fdk_x11_window_gpu_readback(wgpu->pwindow, pgpu, W, H);
+    fdk_result rb = fdk_window_gpu_readback(wgpu, pgpu, W, H);
     int have_gpu = fdk_ok(rb);
     if (!have_gpu) {
         printf("readback seam result: %d\n", (int)rb);
@@ -654,7 +654,7 @@ int main(void) {
         CHECK(fdk_ok(fdk_surface_present(s)),
               "atlas overflow: second present (back buffer == final)");
         static fdk_u32 pover[W * H];
-        if (fdk_ok(fdk_x11_window_gpu_readback(wgpu->pwindow, pover, W,
+        if (fdk_ok(fdk_window_gpu_readback(wgpu, pover, W,
                                                H))) {
             fdk_u32 px = pover[158 * W + 208];
             printf("overflow probe px=%08x (expect white)\n", px);
@@ -710,10 +710,10 @@ int main(void) {
         paint_scene_dynamic(sf, card, tex);
         fdk_surface_present(sf);
         fdk_u64 fence = 0;
-        fdk_result fi = fdk_x11_window_gl_fence_insert(wgpu->pwindow,
+        fdk_result fi = fdk_window_gl_fence_insert(wgpu,
                                                        &fence);
         if (fdk_ok(fi)) {
-            fdk_result fw = fdk_x11_window_gl_fence_wait(wgpu->pwindow,
+            fdk_result fw = fdk_window_gl_fence_wait(wgpu,
                                                          fence);
             if (fw == FDK_ERR_UNSUPPORTED) {
                 /* llvmpipe/swrast creates valid sync objects but never

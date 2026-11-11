@@ -113,10 +113,18 @@ gpu_run() { # $1 = env prefix, $2 = label
     fi
     grep -E 'fdk-gpaint: GL up|fdk-gl: fbconfig' /tmp/fdk-hw-gpu.log \
         | sed 's/^/  /' | ra
-    if grep -q 'GPU readback seam unavailable' /tmp/fdk-hw-gpu.log; then
+    # TASK-4 honesty: state the pixel-comparison status explicitly per
+    # lane, and never let an UNVERIFIED run read as a pixel pass.
+    if grep -q 'CPU-vs-GPU interior/edge split' /tmp/fdk-hw-gpu.log; then
+        r "  pixel comparison: VERIFIED (per-region interior/edge stats)"
+    else
         SEAM_DOWN=1
-        r "  comparison unverified: the readback seam is unavailable on"
-        r "  this session (rc verifies present-level only, not pixels)"
+        r "  pixel comparison: UNVERIFIED (no readback seam on this"
+        r "  lane — rc verifies present-level only, never pixels)"
+        if [ "$RC" -eq 0 ]; then
+            r "  >> '$2' PASS IS PRESENT-ONLY — NOT a pixel-equivalence"
+            r "  >> pass (the comparison never ran)"
+        fi
     fi
     if [ "$RC" -eq 0 ]; then
         sed -n '/CPU-vs-GPU interior\/edge split/,$p' /tmp/fdk-hw-gpu.log \
@@ -172,6 +180,65 @@ if make PREFIX="$P" install > /dev/null 2>&1 \
     fi
 else
     r "gl-canvas: BUILD FAILED — capture the cc output manually (pkg-config wayland-client xkbcommon)"
+fi
+r ""
+
+r "---- 4.5 the GLES audits (no hardware needed) ----"
+if python3 -I tests/gles_static_audit.py > /tmp/fdk-hw-audit-s.log 2>&1; then
+    r "gles static audit: OK (core ES 3.0 formats; gated BGRA; no "
+    r "  LUMINANCE outside the sanctioned fallback)"
+else
+    RC=$?
+    r "gles static audit: rc=$RC — FINDINGS:"
+    grep 'FINDING' /tmp/fdk-hw-audit-s.log | sed 's/^/  /' | ra
+fi
+if make build/tests/test_gles_audit > /dev/null 2>&1; then
+    if [ -f /home/z/apt/prefix/usr/share/glvnd/egl_vendor.d/50_mesa.json ]; then
+        export __EGL_VENDOR_LIBRARY_FILENAMES=/home/z/apt/prefix/usr/share/glvnd/egl_vendor.d/50_mesa.json
+        export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}/home/z/apt/prefix/usr/lib/x86_64-linux-gnu/dri"
+    fi
+    ASAN_OPTIONS=detect_leaks=0 build/tests/test_gles_audit \
+        > /tmp/fdk-hw-audit-r.log 2>&1
+    RC=$?
+    r "gles runtime audit: rc=$RC (a real ES context boots the lane "
+    r "  constructs; negative controls report Mesa leniency honestly)"
+    grep -E 'context:|NEGATIVE CONTROL|GLES AUDIT|controls that' \
+        /tmp/fdk-hw-audit-r.log | sed 's/^/  /' | ra
+else
+    r "gles runtime audit: BUILD FAILED — capture the cc output"
+fi
+r ""
+
+r "---- 4.6 the wayland GPU lane (EGL seam; needs WAYLAND_DISPLAY) ----"
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    if make build/tests/test_gpu_paint_wl > /dev/null 2>&1; then
+        ASAN_OPTIONS=detect_leaks=0 build/tests/test_gpu_paint_wl \
+            > /tmp/fdk-hw-gpu-wl.log 2>&1
+        WRC=$?
+        r "test_gpu_paint_wl (wayland lane): rc=$WRC"
+        grep -E 'fdk-gpaint: GL up|fdk-egl: config|GPU lane upload' \
+            /tmp/fdk-hw-gpu-wl.log | sed 's/^/  /' | ra
+        if grep -q 'CPU-vs-GPU interior/edge split' \
+                /tmp/fdk-hw-gpu-wl.log; then
+            r "  pixel comparison: VERIFIED (EGL seam per-region stats)"
+        else
+            r "  pixel comparison: UNVERIFIED (no EGL seam content —"
+            r "  rc verifies present-level only, never pixels)"
+            if [ "$WRC" -eq 0 ]; then
+                r "  >> wayland-lane PASS IS PRESENT-ONLY — NOT a"
+                r "  >> pixel-equivalence pass"
+            fi
+        fi
+        if [ "$WRC" -ne 0 ]; then
+            grep -E '\[FAIL\]|\[skip\]|GPU PAINT SMOKE' \
+                /tmp/fdk-hw-gpu-wl.log | sed 's/^/  /' | ra
+        fi
+    else
+        r "test_gpu_paint_wl: BUILD FAILED — capture the cc output"
+    fi
+else
+    r "wayland GPU lane: SKIPPED — no WAYLAND_DISPLAY (real-GPU EGL"
+    r "  stats need a compositor session; Xvfb cannot provide one)"
 fi
 r ""
 

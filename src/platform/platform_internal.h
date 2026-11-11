@@ -655,6 +655,17 @@ typedef struct fdk_platform_ops {
                                          fdk_u64 *out_fence);
     fdk_result (*window_gl_fence_wait)(fdk_platform_window *pwindow,
                                        fdk_u64 fence);
+    /* The CPU-vs-GPU readback seam (the per-region stats lane):
+     * backend-agnostic routing so a Wayland session on a real GPU
+     * produces the same stats the X11 lane does — the 2026-11-11
+     * audit found the seam implemented on BOTH backends but the
+     * tests calling the X11 entry directly, which on a Wayland
+     * session made glXMakeCurrent run against a wl_surface-backed
+     * window and fail ("fdk-gpaint-seam: glXMakeCurrent failed").
+     */
+    fdk_result (*window_gpu_readback)(fdk_platform_window *pwindow,
+                                      fdk_u32 *out, int width,
+                                      int height);
     fdk_result (*window_present)(fdk_platform_window *pwindow,
                                  const fdk_platform_damage *damage);
 

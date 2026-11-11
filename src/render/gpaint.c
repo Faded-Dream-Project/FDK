@@ -247,116 +247,8 @@ static int gp_resolve_procs(void) {
 /* ------------------------------------------------------------------ */
 /* Shaders                                                             */
 
-static const char *GP_VS =
-    "attribute vec2 a_pos;\n"
-    "attribute vec2 a_uv;\n"
-    "attribute vec4 a_color;\n"
-    "attribute vec4 a_aux0;\n"
-    "attribute vec4 a_aux1;\n"
-    "attribute vec4 a_aux2;\n"
-    "attribute vec4 a_clip;\n"
-    "varying vec2 v_uv;\n"
-    "varying vec4 v_color;\n"
-    "varying vec4 v_aux0;\n"
-    "varying vec4 v_aux1;\n"
-    "varying vec4 v_aux2;\n"
-    "varying vec4 v_clip;\n"
-    "uniform vec2 u_vp;\n"
-    "void main() {\n"
-    "    v_uv = a_uv;\n"
-    "    v_color = a_color;\n"
-    "    v_aux0 = a_aux0;\n"
-    "    v_aux1 = a_aux1;\n"
-    "    v_aux2 = a_aux2;\n"
-    "    v_clip = a_clip;\n"
-    "    vec2 c = a_pos / u_vp * 2.0 - 1.0;\n"
-    "    gl_Position = vec4(c.x, -c.y, 0.0, 1.0);\n"
-    "}\n";
+#include "gpu_shaders.h"
 
-static const char *GP_FS_BODY =
-    "varying vec2 v_uv;\n"
-    "varying vec4 v_color;\n"
-    "varying vec4 v_aux0;\n"
-    "varying vec4 v_aux1;\n"
-    "varying vec4 v_aux2;\n"
-    "varying vec4 v_clip;\n"
-    "uniform sampler2D u_tex;\n"
-    "float sd_rect(vec2 p, vec2 b) {\n"
-    "    vec2 d = abs(p) - b;\n"
-    "    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);\n"
-    "}\n"
-    "void main() {\n"
-    "    if (gl_FragCoord.x < v_clip.x || gl_FragCoord.x > v_clip.z ||\n"
-    "        gl_FragCoord.y < v_clip.y || gl_FragCoord.y > v_clip.w) {\n"
-    "        discard;\n"
-    "    }\n"
-    "    float mode = v_aux0.x;\n"
-    "    vec2 half_sz = v_aux2.zw * 0.5;\n"
-    "    vec2 p = v_uv;\n" /* rect-local pixels */
-    "    vec4 c = vec4(0.0);\n"
-    "    if (mode < 0.5) {\n" /* fill: rect (radius) or circle */
-    "        float d;\n"
-    "        if (v_aux0.w < 0.5) {\n"
-    /*  rounded box: sd of the box inset by r, MINUS r (the standard
-        rounded-box SDF — without the -r the shape is the inset box) */
-    "            d = sd_rect(p - half_sz, half_sz - vec2(v_aux0.y)) -\n"
-    "                v_aux0.y;\n"
-    "        } else {\n"
-    "            d = length(p - half_sz) - min(half_sz.x, half_sz.y);\n"
-    "        }\n"
-    "        float a = clamp(0.5 - d, 0.0, 1.0);\n"
-    "        c = vec4(v_color.rgb, v_color.a * a);\n"
-    "    } else if (mode < 1.5) {\n" /* stroke: ring at stroke_half */
-    "        float d;\n"
-    "        if (v_aux0.w < 0.5) {\n"
-    "            d = sd_rect(p - half_sz, half_sz - vec2(v_aux0.y)) -\n"
-    "                v_aux0.y;\n"
-    "        } else {\n"
-    /*  circle stroke: the quad is padded 1px (the emitter), the true
-        radius rides aux0.y — undo the pad before the SDF */
-    "            d = length(p - half_sz) -\n"
-    "                (min(half_sz.x, half_sz.y) - v_aux0.y);\n"
-    "        }\n"
-    /*  Rect strokes: the CPU paints the boundary PIXEL ring, whose
-        center sits half a pixel INSIDE the shape edge — the ring
-        band below is inside-only and matches. Circle strokes: the
-        CPU's coverage is the 2px triangle 1-|dist-R|, straddling the
-        mathematical radius (the radial cross-section evidence:
-        two half-coverage pixels, cpu 103/101 vs the old gpu 203/0) —
-        the circle branch uses that triangle directly. */
-    "        float a;\n"
-    "        if (v_aux0.w < 0.5) {\n"
-    "            float ring = abs(d + v_aux0.z) - v_aux0.z;\n"
-    "            a = clamp(0.5 - ring, 0.0, 1.0);\n"
-    "        } else {\n"
-    "            a = clamp(1.0 - abs(d), 0.0, 1.0);\n"
-    "        }\n"
-    "        c = vec4(v_color.rgb, v_color.a * a);\n"
-    "    } else if (mode < 2.5) {\n" /* vertical gradient */
-    "        float t = clamp(p.y / max(v_aux2.w, 1.0), 0.0, 1.0);\n"
-    "        vec3 rgb = mix(v_color.rgb, v_aux1.rgb, t);\n"
-    "        float alpha = mix(v_color.a, v_aux1.a, t);\n"
-    "        c = vec4(rgb, alpha);\n"
-    "    } else if (mode < 3.5) {\n" /* shadow: gaussian-ish falloff */
-    "        float d = max(sd_rect(p - half_sz, half_sz), 0.0);\n"
-    "        float sigma = max(v_aux0.z, 0.5);\n"
-    "        float a = exp(-(d * d) / (2.0 * sigma * sigma));\n"
-    "        c = vec4(v_color.rgb, v_color.a * a);\n"
-    "    } else if (mode < 4.5) {\n" /* texture RGBA (uv 0..1) */
-    "        vec4 t = texture2D(u_tex, v_uv);\n"
-    "        c = vec4(t.rgb * v_color.rgb, t.a * v_color.a) *\n"
-    "            v_aux2.x;\n" /* global alpha rides aux2.x */
-    "    } else if (mode < 5.5) {\n" /* glyph coverage (LUMINANCE) */
-    "        float l = texture2D(u_tex, v_uv).r;\n"
-    "        c = vec4(v_color.rgb, v_color.a * l * v_aux2.x);\n"
-    "    } else {\n"             /* mode 6: texture, OPAQUE (surface
-                                     blits — the XRGB X byte is zero,
-                                     alpha must not come from it) */
-    "        vec4 t = texture2D(u_tex, v_uv);\n"
-    "        c = vec4(t.rgb * v_color.rgb, v_color.a) * v_aux2.x;\n"
-    "    }\n"
-    "    gl_FragColor = c;\n"
-    "}\n";
 
 /* ------------------------------------------------------------------ */
 /* Per-surface engine state                                            */
@@ -404,7 +296,26 @@ struct fdk_gpu_state {
 
     int width, height;
     int pend_filter_cur; /* sampler state last set on a pend slot */
-    int es;      /* GLES flavor (precision stmt + LUMINANCE atlas) */
+    int es;      /* GLES flavor (precision stmt prepended) */
+    /* The single-channel mask format pair, decided ONCE at bring-up
+     * by a REAL 1x1 creation probe (not by version sniffing):
+     * GL_R8/GL_RED on ES 3.x and desktop GL 3.0+ (core everywhere
+     * there); GL_LUMINANCE on strict ES 2.0 and legacy desktop GL
+     * (2.1/3.0-and-earlier compat) where R8 does not exist. Every
+     * mask creation and mask upload consults this pair — the
+     * 2026-11-11 audit: requesting version-2 EGL contexts (the
+     * wayland lane does) yields a STRICT ES 2.0 context on Mesa,
+     * where GL_R8/GL_RED are exactly as absent as GL_LUMINANCE is
+     * from ES 3.x. */
+    unsigned mask_ifmt; /* internalformat for mask texture creation  */
+    unsigned mask_fmt;  /* format for mask creation and uploads       */
+    /* GL_BGRA (0x80E1) availability, probed the same way: core in
+     * desktop GL, an EXT_texture_format_BGRA8888 row on ES — NOT
+     * core ES 3.0 (the 2026-11-11 audit). When absent, blit-kind
+     * (rgba==2) textures create as GL_RGBA and the BGRX source rows
+     * swizzle to RGBA on upload (the wayland lane's own "RGBA twin"
+     * fallback, mirrored for the engine's texture registry). */
+    int bgra_ok;
     int gl_oes_egl_image; /* the GLX context exposes GL_OES_EGL_image
                            * (mesa: the EGLImage side door) — set at
                            * GL bring-up from the extension string */
@@ -438,6 +349,18 @@ struct fdk_gpu_state {
  * here. */
 static struct fdk_gpu_state *gp_state(struct fdk_surface *s) {
     return (struct fdk_gpu_state *)s->gpu;
+}
+
+/* BGRX -> RGBA row swizzle (the no-GL_BGRA fallback): alpha takes
+ * 0xFF (the X byte is unused; the blit shader ignores it anyway). */
+static void gp_swizzle_row(unsigned char *dst, const unsigned char *src,
+                           int n_px) {
+    for (int i = 0; i < n_px; i++) {
+        dst[i * 4 + 0] = src[i * 4 + 2];
+        dst[i * 4 + 1] = src[i * 4 + 1];
+        dst[i * 4 + 2] = src[i * 4 + 0];
+        dst[i * 4 + 3] = 0xFF;
+    }
 }
 
 static int gp_program(struct fdk_gpu_state *g);
@@ -487,7 +410,57 @@ static int gp_ensure_gl(struct fdk_surface *s) {
     }
     g_gp.GenBuffers(1, &g->vbo);
 
-    /* Atlas texture (LUMINANCE works on both flavors). */
+    /* The mask format probe: create a 1x1 R8/RED texture and ASK the
+     * driver. NO_ERROR -> R8/RED for the session; any error ->
+     * GL_LUMINANCE (ES 2.0- and desktop-legal) with an honest log
+     * line. The probe texture is deleted either way; the atlas below
+     * uses the decided pair. */
+    g->mask_ifmt = 0x8229; /* GL_R8 */
+    g->mask_fmt = 0x1903;  /* GL_RED */
+    {
+        gl_uint probe_tex = 0;
+        g_gp.GenTextures(1, &probe_tex);
+        g_gp.BindTexture(GL_TEXTURE_2D, probe_tex);
+        g_gp.TexImage2D(GL_TEXTURE_2D, 0, (gl_int)g->mask_ifmt, 1, 1, 0,
+                        g->mask_fmt, GL_UNSIGNED_BYTE, NULL);
+        unsigned perr = g_gp.GetError();
+        g_gp.BindTexture(GL_TEXTURE_2D, 0);
+        g_gp.DeleteTextures(1, &probe_tex);
+        if (perr != GL_NO_ERROR) {
+            g->mask_ifmt = 0x1909; /* GL_LUMINANCE */
+            g->mask_fmt = 0x1909;
+            g_gp.GetError(); /* drain whatever the probe queued */
+            fprintf(stderr,
+                    "fdk-gpaint: GL_R8/GL_RED rejected (0x%x) — mask "
+                    "format falls back to GL_LUMINANCE for this session "
+                    "(strict ES 2.0 or legacy desktop GL; ES 3.x/desktop "
+                    "3.0+ take R8)\n", perr);
+        }
+    }
+    g->bgra_ok = 1;
+    {
+        static const unsigned char four_px[4] = { 1, 2, 3, 4 };
+        gl_uint probe_tex = 0;
+        g_gp.GenTextures(1, &probe_tex);
+        g_gp.BindTexture(GL_TEXTURE_2D, probe_tex);
+        g_gp.TexImage2D(GL_TEXTURE_2D, 0, 0x80E1 /* GL_BGRA */, 1, 1, 0,
+                        0x80E1, GL_UNSIGNED_BYTE, four_px);
+        g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, 0x80E1,
+                           GL_UNSIGNED_BYTE, four_px);
+        unsigned berr = g_gp.GetError();
+        g_gp.BindTexture(GL_TEXTURE_2D, 0);
+        g_gp.DeleteTextures(1, &probe_tex);
+        if (berr != GL_NO_ERROR) {
+            g->bgra_ok = 0;
+            g_gp.GetError(); /* drain the probe's queued errors */
+            fprintf(stderr,
+                    "fdk-gpaint: GL_BGRA rejected (0x%x) — blit-kind "
+                    "textures convert to RGBA on upload for this "
+                    "session (no EXT_texture_format_BGRA8888)\n",
+                    berr);
+        }
+    }
+    /* Atlas texture (the probed mask pair — see the probe above). */
     g_gp.GenTextures(1, &g->atlas_tex);
     g_gp.ActiveTexture(GL_TEXTURE0);
     g_gp.BindTexture(GL_TEXTURE_2D, g->atlas_tex);
@@ -507,8 +480,9 @@ static int gp_ensure_gl(struct fdk_surface *s) {
          * equally fine with R8. The mask shader samples .r, and the
          * RED sample value equals the old kind's, so semantics are
          * unchanged. */
-        g_gp.TexImage2D(GL_TEXTURE_2D, 0, GL_R8, GP_ATLAS, GP_ATLAS,
-                        0, GL_RED, GL_UNSIGNED_BYTE, zeros);
+        g_gp.TexImage2D(GL_TEXTURE_2D, 0, (gl_int)g->mask_ifmt,
+                        GP_ATLAS, GP_ATLAS, 0, g->mask_fmt,
+                        GL_UNSIGNED_BYTE, zeros);
         free(zeros);
         /* A creation-time GL error used to sit queued until the first
          * drain check — a world away in the log. Diagnose it here. */
@@ -516,8 +490,9 @@ static int gp_ensure_gl(struct fdk_surface *s) {
         if (aerr != GL_NO_ERROR) {
             fprintf(stderr,
                     "fdk-gpaint: atlas texture creation failed 0x%x "
-                    "(driver rejected GL_R8/GL_RED? GLES 3.0+ or "
-                    "desktop GL 3.0+ required)\n", aerr);
+                    "(the probed mask pair %04x/%04x itself rejected? "
+                    "unexpected — the 1x1 probe passed)\n",
+                    aerr, g->mask_ifmt, g->mask_fmt);
         }
     }
     g->gl_ready = 1;
@@ -910,8 +885,9 @@ static int gp_atlas_put(struct fdk_surface *s, int w, int h,
     g_gp.ActiveTexture(GL_TEXTURE0);
     g_gp.BindTexture(GL_TEXTURE_2D, g->atlas_tex);
     for (int row = 0; row < h; row++) {
-        g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, ax, ay + row, w, 1, GL_RED,
-                           GL_UNSIGNED_BYTE, cov + (size_t)row * stride);
+        g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, ax, ay + row, w, 1,
+                           g->mask_fmt, GL_UNSIGNED_BYTE,
+                           cov + (size_t)row * stride);
     }
     *u0 = (float)ax;
     *v0 = (float)ay;
@@ -997,21 +973,21 @@ static unsigned gp_tex_realize(struct fdk_gpu_state *g,
     g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     g_gp.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     g_gp.PixelStorei(0x0CF5 /* UNPACK_ALIGNMENT */, 1);
-    /* format: 0=red (GL_R8 single-channel mask — the old LUMINANCE
-     * kind is not a GLES 3.x format and left these textures
-     * storage-less on NVIDIA), 1=rgba (fdk_texture), 2=bgra (offscreen
-     * surface pixels are BGRX in memory with X unused — uploading them
-     * as RGBA made every texel alpha 0, i.e. invisible). */
-    gl_uint ifmt = slot->rgba == 0 ? GL_R8
+    /* format: 0=the probed single-channel mask pair (R8/RED on ES
+     * 3.x + desktop 3.0+, GL_LUMINANCE on strict ES 2.0 — see the
+     * bring-up probe), 1=rgba (fdk_texture), 2=bgra (offscreen
+     * surface pixels are BGRX in memory with X unused — uploading
+     * them as RGBA made every texel alpha 0, i.e. invisible). */
+    gl_uint ifmt = slot->rgba == 0 ? g->mask_ifmt
                                    : GL_RGBA; /* placeholder, replaced below */
     (void)ifmt;
     g_gp.TexImage2D(GL_TEXTURE_2D, 0,
-                    (gl_int)(slot->rgba == 0 ? GL_R8
-                             : slot->rgba == 2 ? 0x80E1 /* GL_BGRA */
-                                               : GL_RGBA),
+                    (gl_int)(slot->rgba == 0 ? g->mask_ifmt
+                             : slot->rgba == 2 && g->bgra_ok ? 0x80E1
+                             : GL_RGBA),
                     slot->w, slot->h, 0,
-                    slot->rgba == 0 ? GL_RED
-                    : slot->rgba == 2 ? 0x80E1
+                    slot->rgba == 0 ? g->mask_fmt
+                    : slot->rgba == 2 && g->bgra_ok ? 0x80E1
                                       : GL_RGBA,
                     GL_UNSIGNED_BYTE, NULL);
     slot->needs_upload = 1;
@@ -1160,20 +1136,47 @@ unsigned fdk__gpu_texture_name(struct fdk_surface *s, void *key, int width,
         if (g->gl_ready) {
             gp_tex_realize(g, slot);
             g_gp.PixelStorei(0x0CF5, 1);
-            gl_uint fmt = format_rgba == 0 ? GL_RED
-                          : format_rgba == 2 ? 0x80E1 /* GL_BGRA */
-                                             : GL_RGBA;
-            if (stride == width * (format_rgba ? 4 : 1)) {
+            g_gp.PixelStorei(0x0CF2 /* UNPACK_ROW_LENGTH */, 0);
+            gl_uint fmt = format_rgba == 0 ? g->mask_fmt
+                          : format_rgba == 2 && g->bgra_ok ? 0x80E1
+                          : GL_RGBA;
+            /* kind 2 without GL_BGRA: swizzle rows to RGBA first (the
+             * probe's documented fallback). On a row-buffer
+             * allocation failure the raw BGRX bytes upload as-is —
+             * R/B-swapped colors, loudly logged, never a silent
+             * drop. */
+            if (format_rgba == 2 && !g->bgra_ok) {
+                unsigned char *conv = malloc((size_t)width * 4);
+                if (conv != NULL) {
+                    for (int row = 0; row < height; row++) {
+                        gp_swizzle_row(conv,
+                                       pixels + (size_t)row * stride,
+                                       width);
+                        g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, row,
+                                           width, 1, fmt,
+                                           GL_UNSIGNED_BYTE, conv);
+                    }
+                    free(conv);
+                    slot->needs_upload = 0;
+                } else {
+                    fprintf(stderr,
+                            "fdk-gpaint: BGRA->RGBA row buffer "
+                            "allocation failed — uploading raw BGRX "
+                            "(R/B-swapped colors this frame)\n");
+                    slot->needs_upload = 0;
+                }
+            } else if (stride == width * (format_rgba ? 4 : 1)) {
                 g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
                                    fmt, GL_UNSIGNED_BYTE, pixels);
+                slot->needs_upload = 0;
             } else {
                 for (int row = 0; row < height; row++) {
                     g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, row, width, 1,
                                        fmt, GL_UNSIGNED_BYTE,
                                        pixels + (size_t)row * stride);
                 }
+                slot->needs_upload = 0;
             }
-            slot->needs_upload = 0;
         } else {
             /* No current context: book the pixels; the flush's drain
              * realizes + uploads before replaying the draw. */
@@ -1290,14 +1293,58 @@ static void gp_pend_drain(struct fdk_gpu_state *g) {
         unsigned name = gp_tex_realize(g, slot);
         if (slot->needs_upload && slot->pend_px != NULL) {
             g_gp.PixelStorei(0x0CF5, 1);
-            gl_uint dfmt = slot->rgba == 0 ? GL_RED
-                           : slot->rgba == 2 ? 0x80E1 /* GL_BGRA */
-                                             : GL_RGBA;
-            for (int row = 0; row < slot->h; row++) {
-                g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, row, slot->w, 1,
-                                   dfmt, GL_UNSIGNED_BYTE,
-                                   slot->pend_px +
-                                       (size_t)row * slot->pend_stride);
+            gl_uint dfmt = slot->rgba == 0 ? g->mask_fmt
+                           : slot->rgba == 2 && g->bgra_ok ? 0x80E1
+                           : GL_RGBA;
+            /* Unconditional per-op error attribution: the drain's
+             * final GetError names no call, and trace-gated checks
+             * covered only traced runs — on a strict driver the op
+             * that raised it must be named in the log every time. */
+            if (g_gp.GetError() != GL_NO_ERROR) {
+                fprintf(stderr,
+                        "fdk-gpaint: drain: stale error entering "
+                        "upload for slot %dx%d kind %d\n",
+                        slot->w, slot->h, slot->rgba);
+            }
+            /* The lane's staging upload leaves UNPACK_ROW_LENGTH set
+             * (its window-stride shape) — this engine's row uploads
+             * name their own width and must not inherit it (strict
+             * ES validated the leftover length against this upload's
+             * smaller extent and raised GL_INVALID_OPERATION; the
+             * desktop lane never noticed). */
+            g_gp.PixelStorei(0x0CF2 /* UNPACK_ROW_LENGTH */, 0);
+            /* No continue here: the quad draw below must run in
+             * every path (the 2026-11-11 audit round caught the
+             * continue-skips-the-draw variant before it shipped). */
+            if (slot->rgba == 2 && !g->bgra_ok) {
+                unsigned char *conv = malloc((size_t)slot->w * 4);
+                if (conv != NULL) {
+                    for (int row = 0; row < slot->h; row++) {
+                        gp_swizzle_row(conv,
+                                       slot->pend_px +
+                                           (size_t)row * slot->pend_stride,
+                                       slot->w);
+                        g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, row,
+                                           slot->w, 1, dfmt,
+                                           GL_UNSIGNED_BYTE, conv);
+                    }
+                    free(conv);
+                } else {
+                    fprintf(stderr,
+                            "fdk-gpaint: BGRA->RGBA row buffer "
+                            "allocation failed — uploading raw BGRX "
+                            "(R/B-swapped colors this frame)\n");
+                    g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, slot->w,
+                                       slot->h, dfmt, GL_UNSIGNED_BYTE,
+                                       slot->pend_px);
+                }
+            } else {
+                for (int row = 0; row < slot->h; row++) {
+                    g_gp.TexSubImage2D(GL_TEXTURE_2D, 0, 0, row, slot->w,
+                                       1, dfmt, GL_UNSIGNED_BYTE,
+                                       slot->pend_px +
+                                           (size_t)row * slot->pend_stride);
+                }
             }
             slot->needs_upload = 0;
             slot->pend_px = NULL;
@@ -1351,24 +1398,40 @@ static void gp_pend_drain(struct fdk_gpu_state *g) {
                                p->filter ? GL_LINEAR : GL_NEAREST);
             g->pend_filter_cur = p->filter;
         }
+        {
+            unsigned te1 = g_gp.GetError();
+            if (te1 != GL_NO_ERROR) {
+                fprintf(stderr,
+                        "fdk-gpaint: drain: error 0x%x BEFORE draw %d "
+                        "(realize/upload/bind/filter raised it)\n",
+                        te1, i);
+            }
+        }
         g_gp.DrawArrays(GL_TRIANGLES, 0, GP_QUAD_VERTS);
-        if (getenv("FDK_GP_TRACE") != NULL) {
-            unsigned char probe[4];
-            g_gp.Finish();
-            g_gp.ReadPixels((int)(p->cx[0] + p->cx[1]) / 2,
-                            (int)p->cy[0], 1, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-                            probe);
-            fprintf(stderr,
-                    "fdk-gpaint: drain draw %d op=%d (%.0f,%.0f)"
-                    "(%.0f,%.0f)(%.0f,%.0f)(%.0f,%.0f) slot %dx%d\n",
-                    i, p->opaque, p->cx[0], p->cy[0], p->cx[1], p->cy[1],
-                    p->cx[2], p->cy[2], p->cx[3], p->cy[3], slot->w,
-                    slot->h);
+        {
+            unsigned te2 = g_gp.GetError();
+            if (te2 != GL_NO_ERROR) {
+                fprintf(stderr,
+                        "fdk-gpaint: drain: DrawArrays %d raised 0x%x "
+                        "(slot %dx%d kind %d name %u)\n",
+                        i, te2, slot->w, slot->h, slot->rgba,
+                        slot->name);
+            }
         }
     }
     g->pend_count = 0;
     if (getenv("FDK_GP_TRACE") != NULL) {
         fprintf(stderr, "fdk-gpaint: drained texture draws\n");
+        unsigned terr = g_gp.GetError();
+        if (terr != GL_NO_ERROR) {
+            fprintf(stderr,
+                    "fdk-gpaint: trace: error 0x%x AFTER the draw "
+                    "batch (the draws raised it)\n", terr);
+        } else {
+            fprintf(stderr,
+                    "fdk-gpaint: trace: no error after the draw "
+                    "batch\n");
+        }
     }
     unsigned err = g_gp.GetError();
     if (err != GL_NO_ERROR) {
@@ -1559,14 +1622,42 @@ void fdk__gpu_flush(struct fdk_surface *s) {
     g_gp.Disable(GL_SCISSOR_TEST); /* clips ride the per-quad data */
     g_gp.Enable(GL_BLEND);
     g_gp.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    int flush_trace = getenv("FDK_GP_TRACE") != NULL;
+    if (flush_trace) {
+        unsigned fe0 = g_gp.GetError();
+        if (fe0 != GL_NO_ERROR) {
+            fprintf(stderr,
+                    "fdk-gpaint: trace: error 0x%x ALREADY QUEUED at "
+                    "flush entry (verts=%d) — the lane's present "
+                    "raised it\n", fe0,
+                    g->vert_count / GP_QUAD_FLOATS);
+        }
+    }
+#define FP_CHECK(what) \
+    do { \
+        if (flush_trace) { \
+            unsigned fe = g_gp.GetError(); \
+            if (fe != GL_NO_ERROR) { \
+                fprintf(stderr, \
+                        "fdk-gpaint: trace: flush %s raised 0x%x " \
+                        "(verts=%d g=%p prog=%u loc_vp=%d)\n", what, fe, \
+                        g->vert_count / GP_QUAD_FLOATS, (void *)g, \
+                        g->program, g->loc_vp); \
+            } \
+        } \
+    } while (0)
     g_gp.UseProgram(g->program);
+    FP_CHECK("UseProgram");
     g_gp.Uniform2f(g->loc_vp, (float)g->width, (float)g->height);
+    FP_CHECK("Uniform2f");
     g_gp.ActiveTexture(GL_TEXTURE0);
     g_gp.BindTexture(GL_TEXTURE_2D, g->atlas_tex);
+    FP_CHECK("atlas bind");
     g_gp.BindBuffer(GL_ARRAY_BUFFER, g->vbo);
     gl_sizeiptr bytes =
         (gl_sizeiptr)g->vert_count * (gl_sizeiptr)sizeof(float);
     g_gp.BufferData(GL_ARRAY_BUFFER, bytes, g->verts, GL_STREAM_DRAW);
+    FP_CHECK("bufferdata");
     for (int i = 0; i < 7; i++) {
         g_gp.VertexAttribPointer((gl_uint)i, GP_ATTRS[i].size, GL_FLOAT, 0,
                                  GP_QUAD_FLOATS * (int)sizeof(float),
@@ -1575,10 +1666,14 @@ void fdk__gpu_flush(struct fdk_surface *s) {
                                      (int)sizeof(float)));
         g_gp.EnableVertexAttribArray((gl_uint)i);
     }
+    FP_CHECK("attribs");
     g_gp.DrawArrays(GL_TRIANGLES, 0, g->vert_count / GP_QUAD_FLOATS);
-    if (getenv("FDK_GP_TRACE") != NULL) {
-        fprintf(stderr, "fdk-gpaint: flush %d quads (%d floats)\n",
-                g->vert_count / GP_QUAD_FLOATS, g->vert_count);
+    FP_CHECK("batch draw");
+#undef FP_CHECK
+    if (flush_trace) {
+        fprintf(stderr,
+                "fdk-gpaint: flush done g=%p verts=%d\n", (void *)g,
+                g->vert_count / GP_QUAD_FLOATS);
     }
     g->vert_count = 0;
     gp_pend_drain(g); /* texture draws booked before GL was up */

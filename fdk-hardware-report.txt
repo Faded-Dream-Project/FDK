@@ -1,4 +1,4 @@
-==== FDK hardware report — 2026-11-11 17:25:53Z ====
+==== FDK hardware report — 2026-11-11 18:55:35Z ====
 host: Linux 5.10.134-013.15.kangaroo.al8.x86_64 x86_64
 
 ---- 1. build ----
@@ -17,6 +17,7 @@ test_gpu_paint (full scene): rc=0
    ASAN/LSAN/FDK env vars on this box)
   fdk-gl: fbconfig srgb=0 doublebuf=1 (srgb=1 means the hardware gamma-shifts every write — interior gates would legitimately fail)
   fdk-gpaint: GL up (renderer=llvmpipe (LLVM 19.1.7, 256 bits), version=4.5 (Compatibility Profile) Mesa 25.0.7-2+deb13u1)
+  pixel comparison: VERIFIED (per-region interior/edge stats)
   CPU-vs-GPU interior/edge split (interior = ref 3x3 uniform; edge = AA band, 1px strokes, ring arcs):
     solid fill             interior mean= 0.000 max= 0.0 [n>0] | edge mean= 0.000 max=  0.0 p99=  0.0  [ok]
     rounded fill           interior mean= 0.000 max= 0.0 [n>0] | edge mean= 0.130 max=  1.0 p99=  1.0  [ok]
@@ -35,16 +36,31 @@ test_gpu_paint (full scene): rc=0
   overflow probe px=ffffffff (expect white)
   [ok] atlas overflow: post-eviction glyph renders correctly
   [ok] context loss: present reports UNSUPPORTED (no stale frame)
-  17:26:04 [INFO] (x11) GPU present lane active (renderer "llvmpipe (LLVM 19.1.7, 256 bits)")
+  18:55:45 [INFO] (x11) GPU present lane active (renderer "llvmpipe (LLVM 19.1.7, 256 bits)")
   [ok] context loss: a fresh window presents normally
   [info] swrast never signals fences — the wait is honestly UNSUPPORTED here
   [ok] GPU resize repaint survived
-  17:26:04 [INFO] (core) shutting down
-  17:26:04 [INFO] (x11) disconnecting
+  18:55:45 [INFO] (core) shutting down
+  18:55:45 [INFO] (x11) disconnecting
   GPU PAINT SMOKE: all green
 
 ---- 4. the GL canvas example ----
 gl-canvas: rc=0
+
+---- 4.5 the GLES audits (no hardware needed) ----
+gles static audit: OK (core ES 3.0 formats; gated BGRA; no 
+  LUMINANCE outside the sanctioned fallback)
+gles runtime audit: rc=0 (a real ES context boots the lane 
+  constructs; negative controls report Mesa leniency honestly)
+  context: OpenGL ES 3.2 Mesa 25.0.7-2+deb13u1 | egl 1.5 | surfaceless-capable display extensions present
+    tex LUMINANCE/UB (NEGATIVE CONTROL)            accepted — control did not fire on this stack (lenient driver; NVIDIA rejects) (0x0)
+    FS without the precision head (NEGATIVE CONTROL) accepted — control did not fire on this stack (lenient driver; NVIDIA rejects) (0x0)
+  controls that did not fire on this stack: 2 (Mesa is lenient where NVIDIA is strict — the static audit is the checker with teeth here)
+  ==== GLES AUDIT: all green ====
+
+---- 4.6 the wayland GPU lane (EGL seam; needs WAYLAND_DISPLAY) ----
+wayland GPU lane: SKIPPED — no WAYLAND_DISPLAY (real-GPU EGL
+  stats need a compositor session; Xvfb cannot provide one)
 
 ---- 5. the dmabuf round-trip (the DRM-box step) ----
 test_dmabuf: SKIP — no readable /dev/dri/renderD128 (record the SKIP in the release notes; never fake a PASS)
