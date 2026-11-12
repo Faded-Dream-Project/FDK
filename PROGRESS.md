@@ -4,6 +4,68 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
+## Round 71 (2026-11-12) — the hardware sweep's own numbers exposed a batch-units bug; the honest CPU column
+
+The owner's hardware sweep (GTX 1050 Ti) arrived with three
+observations: (1) CPU rendering pegs exactly ONE core at 100%;
+(2) GPU rendering drops from a perfect 144 fps only as the batch
+count climbs — and the batch counts looked absurd (78 flushes for
+51k quads); (3) "the CPU does calculations still" — CPU-ms/frame
+grew with load even in GPU mode, so FDK "probably manages resources
+kinda badly". Each observation landed somewhere real:
+
+- THE BATCH-UNITS BUG (observation 2, the sharp one): quads/batch
+  came out 413/645/661/657 across the four rungs — the batch
+  capacity was ~682 quads, NOT the GP_MAX_QUADS=4096 the code
+  claimed. Root cause: vert_count counts FLOATS; a quad costs
+  GP_QUAD_FLOATS(24) x GP_QUAD_VERTS(6) = 144 floats; but the
+  malloc and both flush checks compared against
+  GP_QUAD_FLOATS x GP_MAX_QUADS = 24 x 4096 — the 6-vertex factor
+  missing, 4096 quads' budget declared but 682 delivered. The pend
+  (texture) path had the units RIGHT, which is how the slip
+  survived every pixel test: everything drew correctly, only
+  slower. Fixed with a GP_BATCH_FLOATS capacity macro at all three
+  sites; GP_MAX_QUADS raised to 16384 (DrawArrays has no index
+  ceiling, so the only cost is staging memory — 9.4 MB/surface;
+  same upload bytes per frame, 4-6x fewer BufferData/draw calls).
+  Sandbox before/after at 12.8k prims: ~19 flushes/frame -> 1.
+- THE HONEST CPU COLUMN (observation 3): "CPU-ms/frame" was WALL
+  time around paint+present. EGL's default swap interval is 1, so
+  at a held 144 fps the column charged the thread up to 6.9 ms of
+  VBLANK SLEEP as CPU work — the column lied exactly when things
+  were going WELL. gpu_load now reports both: wall-ms (vsync
+  included) and thread-CPU-ms (CLOCK_THREAD_CPUTIME_ID — only the
+  nanoseconds a core executed the thread), plus the idle% between
+  them. The A/B now reads itself: CPU leg wall == thread-CPU, 0%
+  idle (every nanosecond rasterizing); GPU leg thread-CPU tiny,
+  84-89% idle (waiting on the device). On hardware, a vsync-capped
+  rung will show the same shape — high idle is HEALTHY, not waste.
+- ONE CORE PEGGED (observation 1): correct and by design — the
+  rasterizer and the paint-emission thread are single-threaded
+  (GPU vertex emission is inherently serial: one stream, one
+  order). Multicore would parallelize RASTERIZATION (tiles across
+  workers), which is the CPU leg — a much later project; the GPU
+  leg's "unused cores" are idle because the DEVICE is doing the
+  work, not because resources are mismanaged. The engine's job at
+  high load is to keep ONE core mostly idle, which the new columns
+  now prove directly.
+
+Also: the sandbox recycled to the bone this round (repo, prefix,
+and /home/z/apt all gone — the Round 70 push was the only
+survivor). Re-cloned from GitHub and found
+restore_wayland_toolchain.sh predating the GPU-lane work: it never
+downloaded libwayland-egl1/libegl-mesa0/libglvnd0/libgl1-mesa-dri/
+libllvm19, so the rebuilt prefix had a dangling libwayland-egl.so
+symlink and an empty glvnd vendor dir — GPU mode refused. The
+script now carries the five debs; verified the fixed prefix brings
+the llvmpipe lane back.
+
+Verification: full 4-rung ladder (0.8-46 fps on llvmpipe, batches
+per rung 56/18/6/12 vs the owner's 866/2160/2793/3040), CPU leg
+(0% idle, quads 0), refusal regression exit 1, unit suite green,
+hold capture at a 3.2k-prims rung byte-exact background + 7435
+distinct colors.
+
 ## Round 70 (2026-11-12) — the hardware report read, and the sweep that makes the meter move
 
 The owner ran the A/B on real hardware (GTX 1050 Ti class): the

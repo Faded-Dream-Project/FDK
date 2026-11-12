@@ -270,7 +270,18 @@ static int gp_resolve_procs(void) {
 
 #define GP_QUAD_FLOATS 24 /* 6 verts x (pos2 uv2 col4 aux0..2 clip4) */
 #define GP_QUAD_VERTS 6
-#define GP_MAX_QUADS 4096
+/* The 2026-11-12 units bug (the GTX 1050 Ti sweep exposed it): the
+ * capacity sites compared vert_count against GP_QUAD_FLOATS *
+ * GP_MAX_QUADS, missing the 6-vertex factor — one quad costs
+ * GP_QUAD_FLOATS * GP_QUAD_VERTS floats, so the batch broke at 682
+ * quads, not 4096 (~660 quads/batch at every sweep rung; rung 4 paid
+ * 78 flushes for 51k quads). GP_BATCH_FLOATS is the true capacity.
+ * GP_MAX_QUADS rose to 16384 with the fix: DrawArrays takes a plain
+ * vertex count (no index buffer, no 16-bit ceiling), so the only
+ * cost is staging memory — 9.4 MB per surface — and heavy frames
+ * make 4x fewer BufferData/draw calls. */
+#define GP_MAX_QUADS 16384
+#define GP_BATCH_FLOATS (GP_QUAD_FLOATS * GP_QUAD_VERTS * GP_MAX_QUADS)
 #define GP_ATLAS 1024
 #define GP_ATLAS_SLOTS 2048
 #define GP_TEX_SLOTS 256
@@ -642,7 +653,7 @@ int fdk__gpu_surface_init(struct fdk_surface *s, int width, int height) {
     if (g == NULL) {
         return 0;
     }
-    g->verts = malloc(sizeof(float) * GP_QUAD_FLOATS * GP_MAX_QUADS);
+    g->verts = malloc(sizeof(float) * GP_BATCH_FLOATS);
     g->atlas_slots = calloc(GP_ATLAS_SLOTS, sizeof(*g->atlas_slots));
     g->tex = calloc(GP_TEX_SLOTS, sizeof(*g->tex));
     g->pend = calloc(GP_MAX_PEND, sizeof(*g->pend));
@@ -754,11 +765,11 @@ static void gp_quad(struct fdk_surface *s, float x, float y, float w,
         return;
     }
     if (g->vert_count + GP_QUAD_FLOATS * GP_QUAD_VERTS >
-        GP_QUAD_FLOATS * GP_MAX_QUADS) {
+        GP_BATCH_FLOATS) {
         fdk__gpu_flush(s);
     }
     if (g->dead || g->vert_count + GP_QUAD_FLOATS * GP_QUAD_VERTS >
-                       GP_QUAD_FLOATS * GP_MAX_QUADS) {
+                       GP_BATCH_FLOATS) {
         /* Still no room after the flush attempt (GL not brought up
          * yet — the flush retained its verts): drop this quad rather
          * than run past the buffer. */
@@ -1426,6 +1437,11 @@ static void gp_pend_drain(struct fdk_gpu_state *g) {
             for (int j = 0; j < 4; j++) *v++ = g->clip[j];
         }
         g_gp.BindBuffer(GL_ARRAY_BUFFER, g->vbo);
+        /* ONE quad per pend draw: upload exactly its floats, not the
+         * batch store (BufferData reallocates the store to this size;
+         * the batch flush re-sizes it on its own upload — GL allows
+         * per-call sizes, and 9.4 MB per texture quad would be a
+         * regression). */
         g_gp.BufferData(GL_ARRAY_BUFFER,
                         (gl_sizeiptr)GP_QUAD_FLOATS * GP_QUAD_VERTS *
                             (gl_sizeiptr)sizeof(float),

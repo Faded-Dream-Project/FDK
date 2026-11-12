@@ -11,14 +11,21 @@
  *      circles, gradient bars, text. Enough quads that a CPU
  *      rasterizer visibly sinks and a GPU does not.
  *
- *   2. MEASUREMENT — fps, CPU wall time per frame (the paint calls
- *      only, timed with CLOCK_MONOTONIC), and the engine's own
- *      counters via fdk_window_gpu_paint_stats(): quads and batches
- *      per frame, lifetime totals, atlas/texture uploads. In GPU
- *      mode the quads ARE the GPU's draw work — thousands of quads
- *      with near-zero CPU paint time is the signature of "the GPU
- *      is doing it". In CPU mode the same scene runs with the
- *      counters at zero and the paint time doing the talking.
+ *   2. MEASUREMENT — fps, WALL time per frame (paint+present, the
+ *      vsync wait INCLUDED — EGL's default swap interval is 1), and
+ *      THREAD-CPU time per frame (CLOCK_THREAD_CPUTIME_ID: only the
+ *      nanoseconds a core actually executed this thread — the honest
+ *      "what did the CPU do" number, vblank sleeps excluded). The
+ *      gap between the two columns is the idle share: a vsync-capped
+ *      rung holds fps with high idle; a CPU-bound rung shows the
+ *      thread-CPU column racing toward the wall column. Plus the
+ *      engine's own counters via fdk_window_gpu_paint_stats(): quads
+ *      and batches per frame, lifetime totals, atlas/texture
+ *      uploads. In GPU mode the quads ARE the GPU's draw work —
+ *      thousands of quads with near-zero thread-CPU time is the
+ *      signature of "the GPU is doing it". In CPU mode the same
+ *      scene runs with the counters at zero and the thread-CPU time
+ *      doing the talking.
  *
  *   3. MODE HONESTY — the app runs in FDK_RENDER_GPU (the mode
  *      where the paint engine owns every draw and there is NO CPU
@@ -79,6 +86,20 @@
 static double now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+}
+
+/* Thread CPU time: ONLY the nanoseconds this thread actually spent
+ * executing on a core (vblank sleeps inside present do not count).
+ * The old "CPU-ms/frame" column was WALL time around paint+present —
+ * with EGL's default swap interval 1 that includes up to one full
+ * vblank period of pure waiting, so a vsync-capped rung READ as CPU
+ * work it never did (the 2026-11-12 hardware report made the column
+ * lie visible: 144 fps held while "CPU" looked busy). This clock is
+ * the honest one. */
+static double thread_cpu_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 }
 
@@ -175,7 +196,8 @@ static void paint_frame(fdk_surface *s, fdk_font *font, int frame,
  * into a silent stall (the Round 69 honesty contract). */
 typedef struct rung_out {
     double elapsed_ms;
-    double paint_ms;
+    double paint_ms;   /* wall time around paint+present (vsync incl.) */
+    double thread_ms;  /* true thread CPU time — the honest column */
     int frames;
     int refused;
 } rung_out;
@@ -196,6 +218,7 @@ static void run_rung(fdk_context *ctx, fdk_surface *s, fdk_font *font,
         }
     }
     double t0 = now_ms();
+    double c0 = thread_cpu_ms();
     for (;;) {
         double elapsed = now_ms() - t0;
         if (elapsed >= (double)run_ms) {
@@ -211,6 +234,7 @@ static void run_rung(fdk_context *ctx, fdk_surface *s, fdk_font *font,
         out->frames++;
         fdk_pump_events(ctx, 1);
     }
+    out->thread_ms = thread_cpu_ms() - c0;
 }
 
 int main(void) {
@@ -365,6 +389,20 @@ int main(void) {
         double cpu_ms = out.frames > 0
                             ? out.paint_ms / (double)out.frames
                             : 0.0;
+        /* True thread CPU per frame, and the idle share it implies:
+         * a rung pinned at vsync spends most of its WALL time asleep
+         * in eglSwapBuffers — that sleep is NOT CPU work, and the
+         * gap between the columns is exactly it. */
+        double tcpu_ms = out.frames > 0
+                             ? out.thread_ms / (double)out.frames
+                             : 0.0;
+        double idle_pct = out.paint_ms > 0.0
+                              ? 100.0 * (1.0 - out.thread_ms /
+                                                   out.paint_ms)
+                              : 0.0;
+        if (idle_pct < 0.0) {
+            idle_pct = 0.0;
+        }
         double quads_pf =
             dframes > 0 ? (double)dquads / (double)dframes : 0.0;
         /* Every quad is 2 triangles of SDF fragment work. */
@@ -374,16 +412,17 @@ int main(void) {
                              : 0.0;
         if (rung == 0) {
             first_fps = (int)(fps + 0.5);
-            first_cpu_ms = cpu_ms;
+            first_cpu_ms = tcpu_ms;
         }
         last_fps = (int)(fps + 0.5);
         top_prims = rung_prims;
 
-        printf("gpu_load: rung %d/%d %6d prims — %3d fps, %6.2f "
-               "CPU-ms/frame, %7.0f quads/frame (%1.0f ktri/s, %llu "
+        printf("gpu_load: rung %d/%d %6d prims — %5.1f fps, %6.2f "
+               "wall-ms (paint+present, vsync incl.), %6.2f thread-CPU-ms, "
+               "%3.0f%% idle, %7.0f quads/frame (%1.0f ktri/s, %llu "
                "batches)%s\n",
-               rung + 1, nrungs, rung_prims, (int)(fps + 0.5), cpu_ms,
-               quads_pf, ktris_s, dbatches,
+               rung + 1, nrungs, rung_prims, fps, cpu_ms, tcpu_ms,
+               idle_pct, quads_pf, ktris_s, dbatches,
                out.refused > 0 ? "  PRESENTS REFUSED" : "");
 
         /* Climb: x4, honoring the rig's clamp. */
@@ -440,7 +479,7 @@ int main(void) {
          * hold; low utilization at the FIRST rung is expected and
          * honest — light scenes are light work. */
         printf("gpu_load: scale check — %d prims @ %d fps vs %d prims "
-               "@ %d fps%s (%.2f CPU-ms at rung 1)\n",
+               "@ %d fps%s (%.2f thread-CPU-ms at rung 1)\n",
                prims, first_fps, top_prims, last_fps,
                last_fps >= first_fps
                    ? ": fps HELD while the load climbed — the device "
