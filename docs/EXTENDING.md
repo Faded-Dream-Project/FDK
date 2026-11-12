@@ -571,12 +571,15 @@ extension-API v3 folding is opt-in access + honest capability flags:
 What still is NOT provided (raise an API proposal; never work
 around it):
 
-- First-class input-method (zwp_input_method_v2/v3), session-lock,
-  and xdg-activation host APIs — the protocols are generated and
-  text-input/foreign-toplevel already serve FDK's own IME and taskbar
-  substrate; hosting roles for add-ons is queued.
-- dmabuf/EGLImage import into FDK's compositing path (video
-  surfaces): capability-flagged UNSUPPORTED today.
+- Input-method (zwp_input_method_v2) and session-lock
+  (ext-session-lock-v1) have their client half (fdk_input_method_*,
+  fdk_session_lock_* above, examples d/ and f/) — what remains
+  queued is the v3 IM protocol and hosting-side conveniences
+  beyond the raw proxies the add-on drives today.
+- dmabuf import landed (P4, fdk_texture_dmabuf_* — examples g/
+  and 09; zero-copy on the EGL-lane path) — what remains queued
+  is camera/EGLStream-class acquisition; the caller still owns
+  buffer acquisition (linux-dmabuf / DRI3 / GBM).
 - X11 residues (protocol truth, documented rather than faked):
   _NET_WM_STRUT_PARTIAL is screen-global — a secondary-monitor
   panel reserves space the way the running WM interprets; layer
