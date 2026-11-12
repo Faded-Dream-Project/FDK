@@ -4,6 +4,46 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
+## Round 70 (2026-11-12) — the hardware report read, and the sweep that makes the meter move
+
+The owner ran the A/B on real hardware (GTX 1050 Ti class): the
+CPU leg pegged one core with a terrible frame rate; the GPU leg
+kept fps and moved the GPU utilization meter by only ~10%. Verdict
+from the owner: "probably hardware acceleration works, tests seem
+to prove it."
+
+Correct read — and the missing context, now built:
+
+- The 10% number is EXPECTED at 800 prims/frame. Utilization is a
+  ratio of work DONE to work AVAILABLE; a 1050 Ti has ~40x the
+  fill/vertex throughput of the CPU's rasterization substitute.
+  The old single-load test was a penlight aimed at a stadium. The
+  proof the owner already has is the CPU leg collapsing while the
+  GPU leg didn't — that asymmetry IS the acceleration; a CPU
+  fallback masquerading as GPU would have shown a pegged core and
+  no meter movement at all.
+- gpu_load SWEEP mode (default ON): a load LADDER — x4 primitives
+  per rung (800 → 3.2k → 12.8k → 51.2k at defaults, SWEEP_STEPS
+  up to 8, SWEEP_MAX_PRIMS clamps slow rigs/CPU legs). Per rung:
+  fps, CPU-ms/frame, quads/frame, ktri/s, batch count — engine
+  counters diffed per rung so each row is self-contained. Present
+  refusals are counted and VERDICT-flagged (the Round 69 honesty
+  contract extended to the sweep). The scale-check line spells out
+  the read: fps HELD at 16-64x the primitives = the device is
+  absorbing the load; watch the meter during the top rungs and the
+  HOLD_MS hold (which now paints at the TOP rung — the
+  meter-watcher's moment).
+- Sandbox verification (llvmpipe = the honest slow-GPU stand-in):
+  the GPU sweep shows the engine's own ceiling (54 → 16 → 4 fps
+  across the ladder, CPU-ms climbing — vertex emission isn't free
+  at 12.8k prims on this rig; on hardware the rungs stay flat
+  until much higher), the CPU leg clamped and showed the classic
+  sink (10 → 3 fps, 0 quads — no engine), the no-lane refusal
+  still exits 1 with the reason, the unit suite is green, and the
+  compositor capture during a top-rung hold shows the byte-exact
+  background with 7003 distinct colors — the ladder's heaviest
+  rung demonstrably rendering through the engine.
+
 ## Round 69 (2026-11-12) — "is the GPU ACTUALLY doing it": answered, measured, and one honesty hole closed
 
 The owner's question cut deeper than the last round: light apps

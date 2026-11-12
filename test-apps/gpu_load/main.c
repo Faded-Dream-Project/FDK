@@ -27,11 +27,32 @@
  *      drop-back is impossible by construction, not by promise.
  *
  * Knobs (environment):
- *   LOAD_PRIMS  primitives per frame          (default 800)
- *   RUN_MS      measurement duration in ms    (default 3000)
+ *   LOAD_PRIMS  primitives per frame          (default 800; the
+ *               sweep's FIRST rung)
+ *   RUN_MS      measurement duration in ms    (default 3000; per
+ *               rung in sweep mode)
  *   HOLD_MS     extra visible hold, repainting (default 0; for
- *               screen probes / cameras — the visual proof)
+ *               screen probes / cameras — the visual proof; in
+ *               sweep mode the hold paints at the TOP rung, so a
+ *               meter watching during the hold sees peak load)
  *   W, H        window size                   (default 900x600)
+ *   SWEEP       1 = ladder mode (default), 0 = the single-load run
+ *   SWEEP_STEPS rungs in the ladder           (default 4, max 8)
+ *   SWEEP_MAX_PRIMS  clamp rungs above this   (default 0 = none;
+ *               set it on the CPU leg or a slow rig — a rung's
+ *               cost is at least one full frame)
+ *
+ * SWEEP mode (2026-11-12, the owner's hardware report: CPU leg
+ * pegged a core, GPU utilization +10%): the utilization meter only
+ * moves when the load is big enough, so the sweep CLIMBS — x4
+ * primitives per rung (800 → 3.2k → 12.8k → 51.2k at defaults),
+ * reporting per rung: fps, CPU-ms/frame, quads/frame and ktris/s
+ * from the engine's own counters. On hardware the GPU run should
+ * hold fps while quads/frame climbs 4x per rung — and the meter
+ * finally moves. Low utilization at LOW rungs is expected and
+ * honest: a light scene is light work; the ladder exists to find
+ * where "light" stops. Watch the meter (nvidia-smi / the task
+ * manager) during SWEEP + HOLD_MS=10000: the climb, then the hold.
  *
  * A/B the paths (same scene, same measurement):
  *   FDK_RENDER=gpu  ./gpu_load     (the full-GPU paint engine)
@@ -146,6 +167,52 @@ static void paint_frame(fdk_surface *s, fdk_font *font, int frame,
                           (fdk_color){ 0.95f, 0.55f, 0.20f, 1.0f });
 }
 
+/* One rung: run the scene at `prims` for `run_ms`, return the
+ * timing; the ENGINE-side numbers come back through `stats` (a
+ * lifetime snapshot — the caller diffs against the previous rung to
+ * make each row self-contained). Present refusals are counted: a
+ * GPU-mode window that stops presenting must say so, not vanish
+ * into a silent stall (the Round 69 honesty contract). */
+typedef struct rung_out {
+    double elapsed_ms;
+    double paint_ms;
+    int frames;
+    int refused;
+} rung_out;
+
+static void run_rung(fdk_context *ctx, fdk_surface *s, fdk_font *font,
+                     int w, int h, int prims, int run_ms, int warm,
+                     rung_out *out) {
+    memset(out, 0, sizeof(*out));
+    if (warm) {
+        /* One uncounted frame at this rung's load: the atlas/texture
+         * counters and the batch-fullness path settle before the
+         * clock starts (the same reasoning as the single-run
+         * warm-up, applied per rung). */
+        paint_frame(s, font, 0, w, h, prims);
+        if (!fdk_ok(fdk_surface_present(s))) {
+            out->refused = 1;
+            return;
+        }
+    }
+    double t0 = now_ms();
+    for (;;) {
+        double elapsed = now_ms() - t0;
+        if (elapsed >= (double)run_ms) {
+            out->elapsed_ms = elapsed;
+            break;
+        }
+        double p0 = now_ms();
+        paint_frame(s, font, out->frames + 1, w, h, prims);
+        if (!fdk_ok(fdk_surface_present(s))) {
+            out->refused++;
+        }
+        out->paint_ms += now_ms() - p0;
+        out->frames++;
+        fdk_pump_events(ctx, 1);
+    }
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
@@ -157,6 +224,15 @@ int main(void) {
     int h = env_int("H", 600);
     if (w < 200) w = 200;
     if (h < 160) h = 160;
+
+    /* The ladder (default ON): x4 primitives per rung. SWEEP=0 keeps
+     * the original single-load run for quick A/B comparisons. */
+    int sweep = env_int("SWEEP", 1);
+    int steps = env_int("SWEEP_STEPS", 4);
+    int sweep_max = env_int("SWEEP_MAX_PRIMS", 0);
+    if (steps < 1) steps = 1;
+    if (steps > 8) steps = 8;
+    if (prims < 1) prims = 1;
 
     fdk_init_options opts;
     memset(&opts, 0, sizeof(opts));
@@ -218,12 +294,12 @@ int main(void) {
         return 2;
     }
 
-    /* Warm-up: one frame before the clock starts (first frame pays
-     * atlas builds, texture realizes, lane bring-up — not steady
-     * state; measuring it would flatter BOTH paths). The present
-     * result is CHECKED: GPU mode refuses loudly when its lane
-     * cannot engage, and this app's whole point is refusing a
-     * silent CPU substitute — the check is the contract. */
+    /* Warm-up at the FIRST rung's load: one frame before any clock
+     * starts (first frame pays atlas builds, texture realizes, lane
+     * bring-up — not steady state; measuring it would flatter BOTH
+     * paths). The present result is CHECKED: GPU mode refuses loudly
+     * when its lane cannot engage, and this app's whole point is
+     * refusing a silent CPU substitute — the check is the contract. */
     paint_frame(s, font, 0, w, h, prims);
     r = fdk_surface_present(s);
     if (!fdk_ok(r)) {
@@ -244,49 +320,108 @@ int main(void) {
         fdk_pump_events(ctx, 16);
     }
 
-    /* The measured run. */
-    double t0 = now_ms();
-    double paint_ms = 0.0;
-    int frames = 0;
-    double elapsed = 0.0;
-    for (; elapsed < (double)run_ms; elapsed = now_ms() - t0) {
-        double p0 = now_ms();
-        paint_frame(s, font, frames + 1, w, h, prims);
-        (void)fdk_surface_present(s);
-        paint_ms += now_ms() - p0;
-        frames++;
-        fdk_pump_events(ctx, 1);
-    }
-
-    /* The report: mode, backend, device, timing, engine counters. */
+    /* The report preamble: mode, backend, device — once. */
     fdk_render_backend backend = FDK_RENDER_BACKEND_CPU;
     (void)fdk_window_get_render_backend(win, &backend);
     const char *device = fdk_window_render_device(win);
-    fdk_gpu_paint_stats gs;
-    memset(&gs, 0, sizeof(gs));
-    (void)fdk_window_gpu_paint_stats(win, &gs);
-
-    double fps = elapsed > 0.0 ? frames * 1000.0 / elapsed : 0.0;
-    double cpu_ms = frames > 0 ? paint_ms / (double)frames : 0.0;
-    double quads_pf = frames > 0 ? (double)gs.total_quads / frames : 0.0;
-
     printf("gpu_load: mode=%s backend=%s device=\"%s\"\n",
            mode_name(fdk_window_render_mode(win)), backend_name(backend),
            device);
-    printf("gpu_load: %d frames in %.0f ms — %.1f fps, %.2f CPU-ms/frame "
-           "(paint+present, app thread)\n",
-           frames, elapsed, fps, cpu_ms);
+    if (sweep) {
+        printf("gpu_load: sweep %d rung%s x %d ms (x4 prims per rung)\n",
+               steps, steps == 1 ? "" : "s", run_ms);
+    }
+
+    /* The measured run(s): one load, or the ladder. */
+    fdk_gpu_paint_stats gs;
+    memset(&gs, 0, sizeof(gs));
+    (void)fdk_window_gpu_paint_stats(win, &gs);
+    unsigned long long prev_quads = gs.total_quads;
+    unsigned long long prev_batches = gs.total_batches;
+    unsigned long long prev_frames = gs.total_frames;
+    int nrungs = sweep ? steps : 1;
+    int rung_prims = prims;
+    int top_prims = prims;
+    int refused_total = 0;
+    int first_fps = 0, last_fps = 0;
+    double first_cpu_ms = 0.0;
+
+    for (int rung = 0; rung < nrungs; rung++) {
+        rung_out out;
+        run_rung(ctx, s, font, w, h, rung_prims, run_ms, rung > 0,
+                 &out);
+        refused_total += out.refused;
+        (void)fdk_window_gpu_paint_stats(win, &gs);
+        unsigned long long dquads = gs.total_quads - prev_quads;
+        unsigned long long dbatches = gs.total_batches - prev_batches;
+        unsigned long long dframes = gs.total_frames - prev_frames;
+        prev_quads = gs.total_quads;
+        prev_batches = gs.total_batches;
+        prev_frames = gs.total_frames;
+
+        double fps = out.elapsed_ms > 0.0
+                         ? out.frames * 1000.0 / out.elapsed_ms
+                         : 0.0;
+        double cpu_ms = out.frames > 0
+                            ? out.paint_ms / (double)out.frames
+                            : 0.0;
+        double quads_pf =
+            dframes > 0 ? (double)dquads / (double)dframes : 0.0;
+        /* Every quad is 2 triangles of SDF fragment work. */
+        double ktris_s = out.elapsed_ms > 0.0
+                             ? (double)dquads * 2.0 /
+                                   (out.elapsed_ms / 1000.0) / 1000.0
+                             : 0.0;
+        if (rung == 0) {
+            first_fps = (int)(fps + 0.5);
+            first_cpu_ms = cpu_ms;
+        }
+        last_fps = (int)(fps + 0.5);
+        top_prims = rung_prims;
+
+        printf("gpu_load: rung %d/%d %6d prims — %3d fps, %6.2f "
+               "CPU-ms/frame, %7.0f quads/frame (%1.0f ktri/s, %llu "
+               "batches)%s\n",
+               rung + 1, nrungs, rung_prims, (int)(fps + 0.5), cpu_ms,
+               quads_pf, ktris_s, dbatches,
+               out.refused > 0 ? "  PRESENTS REFUSED" : "");
+
+        /* Climb: x4, honoring the rig's clamp. */
+        if (rung + 1 < nrungs) {
+            long next = (long)rung_prims * 4;
+            if (sweep_max > 0 && next > sweep_max) {
+                next = sweep_max;
+            }
+            if (next <= rung_prims) {
+                printf("gpu_load: sweep clamped at %d prims "
+                       "(SWEEP_MAX_PRIMS) — ladder stops\n",
+                       rung_prims);
+                break;
+            }
+            rung_prims = (int)next;
+        }
+    }
+
+    /* Verdict (from the engine's own lifetime numbers). */
+    double quads_pf = gs.total_frames > 0
+                          ? (double)gs.total_quads /
+                                (double)gs.total_frames
+                          : 0.0;
     printf("gpu_load: GPU paint engine: active=%u dead=%u — %.0f "
-           "quads/frame, %llu batches lifetime, %llu atlas + %llu "
+           "quads/frame avg, %llu batches lifetime, %llu atlas + %llu "
            "texture uploads\n",
            gs.active, gs.dead, quads_pf, gs.total_batches,
            gs.atlas_uploads, gs.texture_uploads);
-    if (gs.active && !gs.dead && gs.total_frames > 0) {
+    if (gs.active && !gs.dead && gs.total_frames > 0 &&
+        refused_total == 0) {
         printf("gpu_load: VERDICT — the GPU paint engine carried every "
-               "frame (%llu presents, %.0f quads each); CPU work per "
-               "frame was vertex emission + the present call, no "
-               "rasterization.\n",
-               gs.total_frames, quads_pf);
+               "frame (%llu presents); CPU work per frame was vertex "
+               "emission + the present call, no rasterization.\n",
+               gs.total_frames);
+    } else if (refused_total > 0) {
+        printf("gpu_load: VERDICT — %d present(s) REFUSED — the lane "
+               "stopped serving frames; see the log above.\n",
+               refused_total);
     } else if (gs.active && gs.dead) {
         printf("gpu_load: VERDICT — the engine DIED mid-run (the lane "
                "downgrade); see the log above.\n");
@@ -295,10 +430,30 @@ int main(void) {
                "CPU-rasterized (this is the FDK_RENDER=cpu behavior; "
                "compare its CPU-ms/frame against the GPU run).\n");
     }
+    if (sweep && nrungs > 1 && first_fps > 0) {
+        /* The scaling check, spelled out: in GPU mode the same fps
+         * with 4x (or 16x) the primitives means the DEVICE absorbed
+         * the load — the CPU certainly could not (its cost scales
+         * with pixel coverage, and it was already measured at the
+         * first rung). This is the line to read against the
+         * utilization meter: watch it during the top rungs / the
+         * hold; low utilization at the FIRST rung is expected and
+         * honest — light scenes are light work. */
+        printf("gpu_load: scale check — %d prims @ %d fps vs %d prims "
+               "@ %d fps%s (%.2f CPU-ms at rung 1)\n",
+               prims, first_fps, top_prims, last_fps,
+               last_fps >= first_fps
+                   ? ": fps HELD while the load climbed — the device "
+                     "is absorbing it (watch the GPU meter now)"
+                   : ": fps sank as the load climbed — the ceiling "
+                     "approached",
+               first_cpu_ms);
+    }
 
-    /* Optional visible hold for screen probes. */
+    /* Optional visible hold for screen probes (at the TOP rung's
+     * load — the meter-watcher's moment). */
     for (int t = 0; hold_ms > 0 && t < hold_ms; t += 33) {
-        paint_frame(s, font, frames + 1 + t / 33, w, h, prims);
+        paint_frame(s, font, t / 33, w, h, top_prims);
         (void)fdk_surface_present(s);
         fdk_pump_events(ctx, 33);
     }
