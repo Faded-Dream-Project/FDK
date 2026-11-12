@@ -635,8 +635,18 @@ struct fdk_vk_lane *fdk_vk_lane_try_load(fdk_platform_connection *conn,
         lane->fn.vkGetPhysicalDeviceProperties(lane->pdev, props);
         uint32_t api = *(const uint32_t *)(const void *)(props + 0);
         const char *name = (const char *)(props + 20);
+        /* Truncation is expected and safe: the spec allows device
+         * names up to 803 bytes; device_name[256] keeps the report
+         * bounded and snprintf NUL-terminates on its own. */
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
         (void)snprintf(lane->device_name, sizeof(lane->device_name), "%s",
                        name);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
         lane->software = vk_software_icd(name);
         if (api == 0) {
             FDK_DEBUG("Vulkan device \"%s\" pre-1.0 — lane off", name);

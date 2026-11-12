@@ -82,6 +82,7 @@ RUNTIME_DEPS="$(for soname in $NEEDED; do
         libX11.so.6)                          pkg="libx11-6" ;;
         libXext.so.6)                         pkg="libxext6" ;;
         libXrandr.so.2)                       pkg="libxrandr2" ;;
+        libXrender.so.1)                      pkg="libxrender1" ;;
         libz.so.1)                            pkg="zlib1g" ;;
         libwayland-client.so.0)               pkg="libwayland-client0" ;;
         libxkbcommon.so.0)                    pkg="libxkbcommon0" ;;

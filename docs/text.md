@@ -35,7 +35,7 @@ render in visual order, not backwards), GSUB/GPOS shaping
 per-script fontconfig fallback so CJK next to Latin picks the right
 font per segment. Without the libraries the classic
 codepoint-at-a-time LTR walk runs instead, with metrics identical to
-1.4.x. See "Complex-script shaping" below. Codepoints missing from
+1.0.x. See "Complex-script shaping" below. Codepoints missing from
 the font AND every fallback render as the font's `.notdef` glyph,
 and invalid UTF-8 decodes to U+FFFD one bad byte at a time, never
 reading past `byte_len`.
@@ -157,9 +157,8 @@ entries** (fdk_alloc'd, ASan-tracked via the stb allocator hooks).
 Subpixel positioning keys each entry by *(glyph, subpixel phase)* —
 four phases per distinct glyph — so 2048 entries preserve the
 real-glyph coverage the original 512 gave at integer positioning.
-Lookup is a linear scan of live entries — fine at 2048 entries
-because rasterization and blending dominate; promotion to a hash
-table is a recorded optimization for when profiling justifies it.
+Lookup is hash-indexed (open addressing over the key, round 13) — fine at 2048 entries
+because rasterization and blending dominate; the cache has been hash-indexed since round 13 (open addressing over the key).
 When the cache is full, the least-recently-used entry is evicted.
 That keeps entire alphabets plus punctuation resident across all
 phases; eviction only matters for CJK-heavy runs (and then it is
@@ -471,7 +470,7 @@ explicit `FDK_SHAPING=0` leg). `make test-textdemo`
 screenshots compared shaped-vs-legacy with join anchors and a
 negative control.
 
-`tests/test_text.c` (11 cases, ASan+UBSan): lifecycle and failure
+`tests/test_text.c` (13 cases, ASan+UBSan): lifecycle and failure
 modes, metrics sanity and 2× scale proportionality, measurement
 (including the rounding behavior above), draw/damage/ink-bounds
 agreement, cache-hit determinism and eviction, clip-stack honoring,
@@ -485,6 +484,6 @@ fan-out). `tests/test_x11_integration.c` adds a
 server-side readback case that verifies real glyph ink reached the X
 server's pixels inside the measured metrics box and nowhere else.
 Both suites honestly skip when the environment has no system font.
-`examples/05_text.c` exercises all of it live (wordmark, size
+`examples/03_text.c` exercises all of it live (wordmark, size
 ladder, measured-run chaining, animated per-glyph wave, live cache
 stats).

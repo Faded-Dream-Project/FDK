@@ -51,7 +51,7 @@ capability flags, FDK_EXT_API_VERSION 3.
   meaning silently.
 - **The event type numbers** (fdk_event.h): same contract as caps.
 - **`FDK_EXT_API_VERSION` 3**: the v3 add-on contract — "fields
-  APPENDED, never reordered" (fdk_extend.h:256-259). The version
+  APPENDED, never reordered" (fdk_extend.h:275). The version
   moves to 4 only when a break is unavoidable, and the break must be
   listed in EXTENDING.md §2.
 - **The export map** (build/libfdk.exports.map): every symbol named

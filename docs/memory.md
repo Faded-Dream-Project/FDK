@@ -70,8 +70,10 @@ The stabilization pass audited the whole tree against the following
 criteria, with the results recorded here so the audit is reproducible
 rather than a vibe:
 
-1. **No raw malloc/free outside `src/core/alloc.c`.** Verified by
-   grep: every allocation site goes through `fdk_alloc`/
+1. **Raw malloc/free is confined to `src/core/alloc.c` plus the
+   audited exceptions** (the progress/done node queues in
+   `src/core/thread.c`, and two theme-side rule frees): every other
+   allocation site goes through `fdk_alloc`/
    `fdk_alloc_array`/`fdk_realloc`/`fdk_free` (the checked,
    zero-initializing, overflow-guarded wrappers).
 2. **Every allocation path has a matching free on EVERY exit.**

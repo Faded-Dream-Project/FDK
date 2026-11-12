@@ -14,7 +14,7 @@ developed as part of the
 [![Built with C](https://img.shields.io/badge/built%20with-C-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Standard: C17](https://img.shields.io/badge/standard-C17-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Backends: X11 and Wayland](https://img.shields.io/badge/backends-X11%20%7C%20Wayland-blueviolet?style=flat-square)](docs/architecture.md)
-[![Status: in development](https://img.shields.io/badge/status-in%20development-orange?style=flat-square)](docs/versioning.md)
+[![Release: 1.0.0](https://img.shields.io/badge/release-1.0.0-brightgreen?style=flat-square)](https://github.com/Faded-Dream-Project/FDK/releases/tag/v1.0.0)
 [![Part of Faded Dream](https://img.shields.io/badge/part%20of-Faded%20Dream-purple?style=flat-square)](https://github.com/Faded-Dream-Project/Faded-Dream-dotfiles)
 
 </div>
@@ -29,12 +29,12 @@ layout, text, and theme engines, and FDK-drawn window decorations —
 with no GTK/Qt dependency and a minimal, always-justified dependency
 set (`docs/dependencies.md`).
 
-> **Building FDK:** `main` is the development branch — the only
-> branch, and the one to build from. The project is **in development,
-> no stable release yet**: every push to `main` is CI-gated, but
-> "green on main" means "not broken", not "released".
+> **FDK 1.0.0 is released** — 2026-11-12, tag [`v1.0.0`](https://github.com/Faded-Dream-Project/FDK/releases/tag/v1.0.0),
+> the first official release. `main` remains the only branch and the
+> one to build from: every push is CI-gated — "green on main" means
+> "not broken"; the releases page is what "released" means.
 
-**Status:** **in development — no stable release yet.** The public
+**Status:** **1.0.0 — the first official release** (2026-11-12, tag `v1.0.0`). The public
 **extension API** (`fdk/fdk_extend.h`, `docs/EXTENDING.md`) is the
 landmark of the current tree: a small, documented, stable, versioned
 surface that add-on packages build on so FDK stays simple and becomes
@@ -43,10 +43,10 @@ is the in-tree worked example; an add-on compiles against FDK's
 installed public headers and library only). The
 versioning policy and the SONAME scheme (`libfdk.so.1`, ABI
 append-only) are development-time policy — they govern how the tree
-evolves as it heads toward a first stable release, which the owner
-will cut when it is genuinely ready. A cross-distribution packaging
+evolves through the 1.0.0 release and beyond. A cross-distribution packaging
 + CI pipeline is built and kept green on every push as a validation
-check (`docs/packaging.md`); nothing is published anywhere. The
+check (`docs/packaging.md`); the v1.0.0 source is published on the
+[releases page](https://github.com/Faded-Dream-Project/FDK/releases). The
 phase-by-phase account of what is and isn't covered lives in
 `ROADMAP.md` and `PROGRESS.md`.
 
@@ -166,9 +166,28 @@ suite (`docs/testing.md`).
 
 ## Installation
 
-There are no published packages — the project is in development.
-Build from source (below); the packaging recipes in `docs/packaging.md`
-exist and are exercised by CI on every push, as validation checks.
+FDK **1.0.0** is released — the first official release ships as
+native distro packages for five families, built and verified by the
+release pipeline (`docs/packaging.md`):
+
+| Family | Runtime package | Development package |
+|---|---|---|
+| Debian / Ubuntu (`.deb`) | `libfdk1_1.0.0-1_amd64.deb` | `fdk-dev_1.0.0-1_amd64.deb` |
+| Fedora / RHEL clones (`.rpm`) | `libfdk1-1.0.0-1.x86_64.rpm` | `fdk-devel-1.0.0-1.x86_64.rpm` |
+| Arch Linux (`.pkg.tar.zst`) | `fdk-1.0.0-1-x86_64.pkg.tar.zst` | (same package) |
+| Void Linux (`.xbps`) | `fdk-libs-1.0.0_1.x86_64.xbps` | `fdk-devel-1.0.0_1.x86_64.xbps` |
+| Alpine (`.apk`, musl) | `fdk-1.0.0-r0-x86_64.apk` | `fdk-dev-1.0.0-r0-x86_64.apk` |
+
+All are on the
+[`v1.0.0` releases page](https://github.com/Faded-Dream-Project/FDK/releases/tag/v1.0.0),
+built for `x86_64` against glibc (Alpine: musl). Install with your
+package manager (`apt install ./libfdk1_*.deb`, `dnf install
+./libfdk1-*.rpm`, `pacman -U fdk-*.pkg.tar.zst`, `xbps-install
+./fdk-libs-*.xbps`, `apk add --allow-untrusted ./fdk-1.0.0-r0.apk`).
+Applications built with FDK need only the runtime package; the
+development package carries the headers, pkg-config metadata, and the
+`fdk-theme` / `fdk-set` / `fdk-prefs` tools. Building from source
+(below) works everywhere else.
 
 ## Building
 

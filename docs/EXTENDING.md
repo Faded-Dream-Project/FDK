@@ -828,7 +828,9 @@ it. Getters never touch a socket.
 The reference shells (notifyd, trayhost) scale EVERYTHING off
 this number — card and bar geometry, paddings, icon boxes,
 button and menu rows — with `--font-size N` pinning it for
-tests; `FDK_UI_FONT_SIZE=24 notifyd` is the whole setup. Core's
+tests; `FDK_UI_FONT_SIZE=24 notifyd` is the whole setup. (notifyd
+and trayhost live in the FDK-Layer-Shell repository — they moved
+with the layer-shell add-on on 2026-11-06.) Core's
 own chrome follows with `fdk__ui_derived_px(ref)`: a
 historically-fixed size re-derived at
 `round(ref * fdk_ui_font_px() / 14)` (the design baseline), so
@@ -933,7 +935,7 @@ child, move/resize proven by hit-testing the NEW geometry, the
 place_below stacking flip by which surface takes the click, the
 popup refusal, nested create, the parent sweep protocol-clean, and
 a grim+PIL pixel readback proving the child's DESYNC commits
-composite over the parent). 855 exports, +7.
+composite over the parent). 1114 exports today (the 2026-11-12 audit count).
 
 ---
 

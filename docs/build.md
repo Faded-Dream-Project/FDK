@@ -75,8 +75,10 @@ cc myapp.c $(pkg-config --cflags --libs fdk) -o myapp
 
 The installed `fdk.pc` carries the platform dependencies the build
 resolved (X11, and Wayland/xkbcommon when enabled) as
-`Requires.private` — the shared library needs nothing extra from the
-app, and static linking pulls the transitive set in automatically.
+`Libs.private` raw flags (pkg-config's `Requires.private` resolution
+was abandoned — it fails on machines without the platform dev
+packages); the shared library needs nothing extra from the app, and
+static linking pulls the transitive set in automatically.
 The version in `fdk.pc` is generated from `include/fdk/fdk_version.h`
 at install time, so it can never drift from the headers.
 
@@ -95,7 +97,8 @@ overridable: `LIBDIR`, `INCDIR`, `BINDIR`, `DATADIR`):
 | `$(INCDIR)/fdk/`                      | public headers                |
 | `$(LIBDIR)/libfdk.a`, `libfdk.so`     | the library                  |
 | `$(LIBDIR)/pkgconfig/fdk.pc`          | pkg-config file               |
-| `$(BINDIR)/fdk-theme`, `fdk-prefs`    | the command-line tools        |
+| `$(BINDIR)/fdk-theme`, `fdk-set`,
+`fdk-prefs`                  | the command-line tools        |
 | `$(DATADIR)/fdk/.FDKThemes/*.fdk`     | the one shipped face (faded-dream — the packaged copy of the built-in default) |
 
 The .FDKThemes directory is on the runtime discovery path through
@@ -176,7 +179,7 @@ tempted to "simplify" this back to one object tree.
 
 The build compiles with `-Wall -Wextra -Wpedantic -Wshadow
 -Wstrict-prototypes -Wmissing-prototypes -Wconversion
--Wsign-conversion -Wcast-qual -Wpointer-arith -Wundef -Wwrite-strings`.
+-Wsign-conversion -Wcast-qual -Wpointer-arith -Wundef -Wwrite-strings`, and `-Werror` (since 2026-11-11).
 Per project principle, warnings get fixed, not suppressed — if a
 warning flag is ever removed from this list, that removal itself
 should be justified in the commit that does it.
@@ -189,14 +192,17 @@ Phase 8 xdg-decoration-unstable-v1) and
 `libwayland-client`'s own listener-registration inlines
 (`wl_proxy_add_listener`'s `(void (**)(void))` cast) trigger that
 warning upstream, in code FDK does not own or control. No other
-warning is suppressed anywhere in the project, and no source file
-outside `src/platform/wayland/` receives any `-Wno-...` flag.
+warning is suppressed in the library; the test and example TUs
+carry the same `-Wno-cast-qual` (their harness headers hit the
+same upstream cast), and nothing else is suppressed anywhere.
 
 The scanner output lives in
 `src/platform/wayland/generated/` and is CHECKED IN (both protocols
 are stable enough that regenerating per build buys nothing and costs
 a build-time wayland-scanner dependency). Regenerating, if ever
-needed:
+needed (fetch the protocol XML from the wayland-protocols release
+matching the checked-in bindings — only xdg-shell, viewporter, and
+fractional-scale are vendored in third_party/wayland-protocols/):
 
     wayland-scanner client-header < xdg-decoration-unstable-v1.xml         > src/platform/wayland/generated/xdg-decoration-unstable-v1-client-protocol.h
     wayland-scanner private-code < xdg-decoration-unstable-v1.xml         > src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c

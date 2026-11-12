@@ -1,5 +1,12 @@
 # RELEASE-READINESS — what stands between this tree and 1.0.0
 
+> **Update 2026-11-12 — the release is cut.** G1–G6 green, the
+> real-desktop sign-off signed (docs/REAL-DESKTOP-SIGNOFF.md),
+> `fdk_version.h` final `1.0.0`, tag `v1.0.0`, the GitHub release
+> published. The counts and §-references below predate the
+> TESTING-ON-DESKTOP.md renumbering (28 → 19 sections) and later
+> export growth (1010 → 1114); kept as the audit snapshot it was.
+
 **Written:** 2026-11-05, after round 26 (`7f83a00`) and the CI repair
 that follows it. This is the answer to the owner's question — "what's
 left to build so FDK can build any app without limit?" — read out of

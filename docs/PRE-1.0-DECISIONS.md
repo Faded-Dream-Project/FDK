@@ -2,7 +2,7 @@
 
 Companion to docs/PRE-1.0-AUDIT.md: for each layout exposure and
 frozen semantic — the risk, the cheapest reduction while NO stability
-promise exists yet, and the recommendation. None of these are applied;
+promise exists yet, and the recommendation. All were applied and closed before the 1.0.0 release (2026-11-12);
 they are decisions to make BEFORE signing 1.0.
 
 ## The layout exposures

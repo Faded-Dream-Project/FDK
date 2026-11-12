@@ -29,7 +29,7 @@ each class has its own change rule:
 
 | Class | Structs | Rule after the freeze |
 |---|---|---|
-| **Opaque objects** | `fdk_context`, `fdk_window`, `fdk_widget`, `fdk_font`, `fdk_surface`, `fdk_theme`, `fdk_catalog`, `fdk_menu`, `fdk_menu_item`, `fdk_dialog` | Layout lives under `src/`; NEVER exposed. Free to change internally. |
+| **Opaque objects** | `fdk_context`, `fdk_window`, `fdk_widget`, `fdk_font`, `fdk_surface`, `fdk_theme`, `fdk_catalog`, `fdk_menu`, `fdk_menu_item` | Layout lives under `src/`; NEVER exposed. Free to change internally. |
 | **Value types** | `fdk_point`, `fdk_size`, `fdk_rect`, `fdk_pointf`, `fdk_sizef`, `fdk_rectf`, `fdk_color`, `fdk_date`, `fdk_time`, `fdk_locale`, `fdk_plural_operands`, `fdk_widget_event`, `fdk_a11y_event`, the `fdk_event_data` union and its members, `fdk_font_metrics`, `fdk_text_metrics`, `fdk_font_cache_stats`, `fdk_surface_info`, `fdk_text_line` | FROZEN: no field changes, no reordering, no size change. Passed by value freely (they are FDK's `GdkRectangle`/`QRect`). The library carries compile-time size assertions (`src/core/abi_check.c`) so an accidental edit fails the build, not someone's app. |
 | **Input structs** | `fdk_init_options`, `fdk_window_options`, `fdk_dialog_options`, `fdk_number_options` | Append-only, zero-init-safe, passed by pointer (documented at each definition). |
 | **Result structs** | `fdk_a11y_info` | CALLER-allocated and library-filled (with owned strings released via `fdk_a11y_info_free`): treated as frozen — future additions get ACCESSOR functions, never new fields, because an old caller's allocation is smaller than a new library's writes. |

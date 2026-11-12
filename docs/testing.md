@@ -1,5 +1,12 @@
 # FDK Testing
 
+> Note: several helper scripts named in the desktop-walkthrough
+> sections (`run_*_demo_x11.sh`, `verify_*.sh`, the xdnd/wl_dnd
+> sources, `probe_placement.sh`, `install_openbox_rig.sh`,
+> `rebuild_sway_rig.sh`) lived in the desktop staging environment
+> outside this repository; the in-tree rigs are `tests/` and
+> `scripts/` as they exist today.
+
 ## Two test suites, deliberately separated
 
 **`make test`** — platform-independent. Never requires a display of
@@ -68,11 +75,11 @@ translation, focus lifecycle (drop on hide/disable, window
 blur/regain), Tab traversal (wrap, override, modifier guard),
 destroy-during-dispatch (self, ancestor, whole root — the deferred
 free exercised under ASan), measure/arrange hooks, and inter-tree
-isolation. 17 cases, all under ASan+UBSan.
+isolation. 19 cases, all under ASan+UBSan.
 
 ## Text tests (Phase 6)
 
-`tests/test_text.c` runs headless in plain `make test` (10 cases,
+`tests/test_text.c` runs headless in plain `make test` (15 cases,
 ASan+UBSan) and needs no display — only a system TrueType font
 (DejaVu Sans / Noto Sans candidates; the whole suite honestly skips,
 [X11-suite style](#known-xvfb-flakiness-investigated-and-fixed), when
@@ -111,7 +118,7 @@ font exists.
 
 ## Widget catalog tests (Phase 6)
 
-`tests/test_controls.c` (10 headless cases, ASan+UBSan, font-gated
+`tests/test_controls.c` (17 headless cases, ASan+UBSan, font-gated
 honest skip): label geometry (natural size == measured text,
 re-measure on set_text, ink confined to bounds), label modes (WRAP
 natural height = line count at the requested width, narrower arrange
@@ -155,7 +162,7 @@ run.
 ## Layout tests (Phase 5)
 
 The layout engine is pure geometry over the widget hooks, so
-`tests/test_layout.c` runs headless in plain `make test` (13 cases,
+`tests/test_layout.c` runs headless in plain `make test` (15 cases,
 ASan+UBSan): box measure math (naturals + spacing + padding +
 margins, homogeneous, orientation), arrangement math (packing,
 expansion absorbing the leftover, cross-axis align/expand), margins
@@ -554,7 +561,7 @@ deliberately not asserted on Wayland — no toplevel-grab protocol
 exists; dialogs there are non-modal, documented.)
 
 **Demo rig**: `scripts/run_advanced_demo_x11.sh` drives
-`examples/11_advanced` with real clicks (the same XSendEvent
+`examples/07_advanced` with real clicks (the same XSendEvent
 discipline), PIL-verifying five frames — File menu popup, combo
 dropdown, modal dialog, nested submenu, chain dismissed (the
 last one structurally: the driver's XQueryTree assertion that
@@ -563,7 +570,7 @@ window left the server) — plus all the demo's phase markers.
 
 ## Accessibility tests (Phase 10, first slice)
 
-**Headless** (`tests/test_a11y.c`, 97 checks in plain `make test`,
+**Headless** (`tests/test_a11y.c`, 276 checks in plain `make test`,
 ASan+UBSan): the whole layer is display-independent because it IS
 the widget layer. Covered: the describe matrix over the full
 catalog (roles, computed names, core + semantic states, value
@@ -616,7 +623,7 @@ documentation contract that a fully destroyed pointer is UB (the
 dying-widget refusal protects mid-teardown callbacks only) —
 noted in-source rather than tested-with-UB.
 
-**X11 GUI**: `examples/12_narrator.c` doubles as the live proof —
+**X11 GUI**: `examples/08_narrator.c` doubles as the live proof —
 run under Xvfb with `FDK_DEMO_FRAMES`, its stdout must contain
 the full narration sequence (forced announcement, four focus
 utterances, the toggle and value utterances in order) and it must
@@ -1017,7 +1024,7 @@ Lessons (each cost an hour; all now encoded in the rigs):
      is fcntl-O_NONBLOCK + poll-pump loops now.
   2. The XTEST driver's startup self-check MOVED THE POINTER
      (11,22), thrashing drag targets between invocations; it is
-     opt-in via FDK_XTEST_SELFCHECK=1.
+     opt-in via XTEST_SELFCHECK=1.
   3. sway grants the seat's POINTER capability only when the
      virtual pointer produces its FIRST event — after injector
      start, inject a priming motion before waiting on anything
@@ -1146,7 +1153,7 @@ the loop caught five real bugs in implementation order — each one
 documented where the fix landed. Two lessons worth keeping:
 
 **Pin the grammar table-first.** test_shortcut.c's valid-spec table
-(75 entries covering every key name and modifier combination)
+(97 entries covering every key name and modifier combination)
 found the QWERTY/alphabetical letters-table inversion on its FIRST
 run: "Ctrl+S" parsed to physical L. A parser is exactly the kind of
 code where the author's mental model and the code can disagree
@@ -1344,8 +1351,8 @@ itself, which is why verify-exports greps `nm -D` output instead
 of trusting the map file it just generated.
 
 **The delta between "mentioned in headers" and "exported" must be
-explainable by name.** 445 `fdk_` mentions in `include/fdk`
-resolve to 441 exported symbols; the four drop-outs are exactly
+explainable by name.** 1122 `fdk_` mentions in `include/fdk`
+resolve to 1114 exported symbols; the eight drop-outs are exactly
 the non-symbol mentions — the typedefs `fdk_a11y_action_set`,
 `fdk_plural_category`, `fdk_surface` and the static-inline helper
 `fdk_ok`. An unexplainable name in that delta is either a
@@ -1358,7 +1365,7 @@ diff, not the count.
 
 Both configurations run the check: the debug archive carries
 ASan `__odr_asan.*` aliases the release archive does not, and the
-exported surface must be identical (441) either way.
+exported surface must be identical (1114) either way.
 
 ## 1.0.0 — four timing lessons from one widget batch
 
@@ -2053,7 +2060,7 @@ could never show: theme directory names legally contain slashes
 directory of every real theme), and hicolor's Directories= line is
 11 KiB (an 8 KiB line cap rejected the spec's own flagship theme).
 Both rigs (fixture + real) live in scripts/ and their screenshots
-land in docs/screenshots/ and download/fdk-picker-demo/.
+land in docs/screenshots/ (and the capture rig's output directory).
 
 ## 1.0.0 — the audit lessons: detection, refusal, and the independent reference
 

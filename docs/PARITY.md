@@ -5,7 +5,7 @@ build ANY desktop application with FDK and not feel the toolkit's
 limits — the API surface GTK4 and Qt6 Widgets cover, FDK covers
 too, and where a category is deliberately thinner the reason is
 stated here, not hidden. This audit enumerates what FDK ships
-(1,046 exported symbols, 40 widget classes, both backends), compares
+(1,114 exported symbols, 40 widget classes, both backends), compares
 it category by category against GTK4 and Qt6 Widgets, and lists
 the gaps with a priority verdict. It was produced by reading
 FDK's headers and sources directly — every "have" claim below is a
@@ -56,7 +56,7 @@ difference every other "different shape" verdict traces back to.
 
 ## 3. Widgets
 
-38 classes: button (4 roles: normal/suggested/destructive/link),
+40 classes: button (4 roles: normal/suggested/destructive/link),
 toggle, checkbox, radio, menu + menu bar + menu button (4 arrow
 variants, check/radio/separator items), entry (+search entry, 7
 built-in icon slots), textview, label (wrap/nowrap/ellipsize),
@@ -224,7 +224,7 @@ application doing heavy per-frame vector work draws on CPU.
 
 ## 10. Desktop integration
 
-- D-Bus: a NATIVE wire client (fdk_dbus.h, 105 decls — bus,
+- D-Bus: a NATIVE wire client (fdk_dbus.h, 114 decls — bus,
   calls, signals, properties, watch; no libdbus linkage).
 - Notifications (org.freedesktop.Notifications: send/withdraw/
   capabilities/status; the SERVER side is add-on territory by D-005),
@@ -299,9 +299,7 @@ D-Bus/tray/notifications/session, i18n, undo, animation, shell
 surfaces (an add-on package), and now printing —
 with the deliberate shape differences (no GObject/moc, token
 themes, immediate-mode rendering, one-clipboard-content-at-a-
-time) documented above. What remains open is stated in the table:
-text-on-extension-surfaces, the inline chooser widget forms, the
-deeper Pango attribute tail.
+time) documented above. What remains open is the deeper Pango attribute tail alone — the text-on-extension-surfaces and inline-chooser rows above are CLOSED in the tree.
 
 ---
 

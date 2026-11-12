@@ -14,7 +14,7 @@ validation check so the recipes can never silently rot.
 
 > **The release-posture guard** (`fdk_require_release_posture`) stays
 > as infrastructure: while the public version carries a pre-release
-> suffix (as it does now), packaging discloses a `PACKAGING-SKIP`
+> suffix ((when it does — the release version 1.0.0 carries no suffix)), packaging discloses a `PACKAGING-SKIP`
 rather than staging an inconsistent payload — the posture the whole
 > project is in.
 
@@ -162,7 +162,7 @@ similar default UI font is picked up automatically; override with
 ## Pre-release versions in package metadata
 
 While the version string carries a hyphenated pre-release suffix —
-`1.0.0-rc2` today — the five package grammars disagree about that
+`1.0.0` today — the five package grammars disagree about that
 suffix, and four of them reject it outright, so the pipeline
 translates it once, at the metadata layer (`fdk_packver` in
 `packaging/ci/common.sh`):

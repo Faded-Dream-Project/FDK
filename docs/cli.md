@@ -17,7 +17,9 @@ prefs and theme-discovery surfaces.
 
 ## The global settings store
 
-The toolkit keeps ONE preference of its own: the theme name. It
+The toolkit keeps a few preferences of its own: the theme name and
+the `ui.*` keys (`ui.font_size`, `ui.scale` — the UI font size
+answers, docs/EXTENDING.md §17). It
 lives in the reserved application id `fdk` of the prefs system
 (`fdk_prefs.h`), resolved exactly like any application's store:
 

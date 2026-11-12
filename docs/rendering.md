@@ -537,8 +537,8 @@ stay on the CPU, where they are exact, testable headless, and
 identical across machines. GPU-side scaling (a HiDPI present-time
 scale, removing the CPU's integer composite step) is the natural
 follow-up and needs no architectural change; an EGL sibling for the
-Wayland backend is the same shape but is NOT shipped unverified —
-this tree has no EGL runtime to test against, and unverified lanes
+Wayland backend is the same shape but is shipped and hardware-verified —
+the Wayland EGL lane ships as src/platform/wayland/wayland_egl.c (hardware-verified in 1.0.0); unverified lanes
 are worse than none.
 
 ## What is deliberately not here yet

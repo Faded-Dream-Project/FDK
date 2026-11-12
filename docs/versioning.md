@@ -9,18 +9,17 @@ is whatever `include/fdk/fdk_version.h` says — currently `1.0.0`
 across the tree read `1.0.0`). On 2026-11-09 that first release
 was briefly tagged and published — the full walkthrough evidence
 is real (docs/REAL-DESKTOP-SIGNOFF.md) — and then **withdrawn by
-the owner the same day**: back to development, no tags exist and
-none are created until the owner says otherwise. The project has
-no releases page, no release branch, and no tags; the owner
-decides if and when a first stable release is ever cut, and how it
-is numbered. Every version move is made exactly the way this
+the owner the same day**: back to development. On 2026-11-12 the
+owner ordered the release cut for real — this document records
+that act: tag `v1.0.0`, the GitHub release published, the version
+final `1.0.0`. Every version move is made exactly the way this
 document demands: by the project owner, explicitly — not by
 autonomy, feature accumulation, or semver pressure. (For the entire
 life before the 1.0.0 era the number was a project joke (`0.0.1` —
 *this absurdly capable toolkit is still called 0.0.1*.)
 
 ```
-Public version:       1.0.0         (unreleased; development iteration — no tag, no release)
+Public version:       1.0.0         (released 2026-11-12 — tag v1.0.0)
 Engineering standard: extremely high (unchanged by the number)
 ```
 

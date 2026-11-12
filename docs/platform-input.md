@@ -38,7 +38,8 @@ Every key event carries both:
 Resolution paths differ per backend:
 
 - **X11 (1.0.0)**: an XIM input context (XCreateIC with
-  XIMPreeditNothing | XIMStatusNothing) per window;
+  XIMPreeditCallbacks | XIMStatusNothing, falling back to
+  XIMPreeditNothing when the IM refuses callbacks) per window;
   Xutf8LookupString fills the codepoint, giving full-Unicode text
   entry including compose-key sequences. Before 1.0.0 the plain
   XLookupString path was Latin-1-only.
@@ -123,7 +124,7 @@ Wayland derives from xkbcommon's depressed-modifier set.
 ## Key repeat
 
 - **X11**: the server-side auto-repeat (requested at connect via
-  XAutoRepeatOn semantics) emits a KeyPress of an already-down
+  XkbSetDetectableAutoRepeat semantics) emits a KeyPress of an already-down
   keycode; `x11_events.c` tracks a 256-bit per-keycode down-set and
   marks those presses `is_repeat = 1`. Widgets that follow
   hold-to-repeat (Entry's Backspace runs, window shortcuts) work.

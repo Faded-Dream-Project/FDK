@@ -694,11 +694,18 @@ before every flush — the WARN names it, it never reaches the
 engine, and the gates prove it does not affect pixels.
 
 
-## Current state (2026-11-09, after round 59 — 1.0.0 withdrawn by the owner, development version again)
+## Current state (2026-11-12 — 1.0.0 RELEASED)
+
+The first official release is cut: tag `v1.0.0`, version final
+`1.0.0`, the GitHub release published. The 2026-11-12 docs-vs-code
+audit (35 doc files, four parallel passes) is folded into the tree
+in the release commit.
+
+## State snapshot (2026-11-09, after round 59 — 1.0.0 withdrawn by the owner, development version again)
 
 - **Version:** 1.0.0 line (no tags; the repo's own M-9 rule holds —
   no tag without the owner's sign-off).
-- **Surface:** 1,046 exported symbols, 34 public headers, 40 widget
+- **Surface:** 1,114 exported symbols, 34 public headers, 40 widget
   classes (the scale button joined the catalog);
   extension API v3 (widget hosting); PARITY.md audited against the
   GTK4 4.24 catalog and Qt6 — its gap table now carries zero OPEN
@@ -720,7 +727,7 @@ engine, and the gates prove it does not affect pixels.
   SIGNOFF.md); (2) then the tag is the owner's call.
 
 > **Repository posture (2026-10-31):** the project is **in
-> development — no stable release yet.** One branch (`main`), zero
+> released — 1.0.0, tag `v1.0.0` (2026-11-12).** One branch (`main`), zero
 > tags, no GitHub releases, no published packages. The v1.0.0-era
 > release material referenced throughout the historical entries
 > below belonged to the project's former repository and no longer

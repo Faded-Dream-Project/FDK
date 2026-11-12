@@ -6,7 +6,7 @@ Specification](https://dbus.freedesktop.org/doc/dbus-specification.html)
 in raw C — no libdbus, no sd-bus, no GLib/GIO, no new link-time or
 run-time dependency of any kind (docs/DECISIONS.md D-001, the owner's
 hard rule). The public surface is `include/fdk/fdk_dbus.h`
-(112 exported symbols; `fdk_dbus_connect*` is the entry).
+(114 exported symbols; `fdk_dbus_connect*` is the entry).
 
 ## What the module does
 

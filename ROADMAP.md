@@ -8,8 +8,8 @@
 ## Part 1 — the 1.0.0 register (current, from the old ROADMAP-1.0.0.md)
 
 **Status:** IN IMPLEMENTATION (Phase 2, owner-approved). The tree
-carries a `1.0.0-rcN` development version — **the project is in
-development, no stable release yet, no tags, nothing published**.
+carries the final `1.0.0` — **released 2026-11-12: tag `v1.0.0`, the
+first official release, artifacts on the GitHub releases page**.
 Per-item status is marked inline as work lands; the
 owner's Phase 2 directive: implement every tier (MUST, SHOULD,
 COULD, DEFER), re-audit when done, keep going until nothing
@@ -37,7 +37,7 @@ marked as such.
   rigs and tests), **L** (a subsystem, several slices).
 - ABI risk: whether closing the gap needs anything beyond FDK's
   append-only discipline (docs/abi-policy.md). Every item below is
-  closable append-only; the two version bumps (extension API v2, no
+  closable append-only; the version bumps (extension API now at v3, no
   SONAME change) are the only ABI-adjacent events, and both are
   additive.
 
@@ -347,7 +347,7 @@ unaffected):
 | M-4 | window identity | **DONE** | = B-04 (icons/PID part); the activation half closed as S-6 | — |
 | M-6 | X11 multi-monitor | **DONE** | = B-05 (both halves; D-015) | owner's real-desktop check |
 | M-7 | D-Bus foundation + dark mode | **DONE** (foundation 4d42c8c; dark mode d2a253f) | live-bus battery green incl. cross-implementation; wire bytes pinned vs captured reference output; fuzzed; CI makes skips fatal | — [VERIFIED-CHANGED: the row's "rides on top (next)" is stale — dark mode landed] |
-| M-9 | the release gate | **IN PROGRESS** | discipline verified: no tags exist in this repository and none are created, the rc line is held as a development version, per-push CI, per-item docs | the walkthrough evidence is real and signed (docs/REAL-DESKTOP-SIGNOFF.md, 2026-11-09), but the owner withdrew the 1.0.0 tag the same day and moved the project back to development; no tags exist, none are created — re-walk before any future tag |
+| M-9 | the release gate | **IN PROGRESS** | discipline verified: the tag discipline held until the 2026-11-12 release (v1.0.0, the owner's order), per-push CI, per-item docs | the walkthrough evidence is real and signed (docs/REAL-DESKTOP-SIGNOFF.md, 2026-11-09), but the owner withdrew the 1.0.0 tag the same day and moved the project back to development; no tags exist, none are created — re-walk before any future tag |
 | S-3 | idle inhibition | **DONE** | = B-11 (both mechanisms; the live-bus mock + the sway rig) | — |
 | S-4 | input regions | **DONE** | fdk_window_set_input_region + fdk_ext_surface_set_input_region, both backends, XTEST + sway-injector proof; D-017 | — |
 | S-5 | cursor shape set | **DONE** | = B-12 (both backends; the hermetic RENDER proof on Xvfb, the enum-table pin on sway) | — |
@@ -472,7 +472,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | M-4 | **Window identity**: `_NET_WM_ICON` + xdg-toplevel-icon-v1 (set both, harmless where unsupported) + `_NET_WM_PID` + `WM_CLIENT_MACHINE` + `WM_WINDOW_ROLE`; `fdk_window_set_icon` API. **[DONE 2026-10-28: both setters + create-time PID/machine/role; X11 property round-trip rig; Wayland protocol wiring + honest no-op]** | B-04 (icons/PID part) | S |
 | M-6 | **X11 multi-monitor**: RandR output enumeration + change events in core (the app-facing substrate any shell surface builds on). | B-05 | M | **[DONE 2026-10-29 — see the B-05 register row]** |
 | M-7 | **The D-Bus foundation + dark mode**: **DONE (the foundation, rc2)** — a native client in raw C from the public specification (src/dbus/, 115 exported symbols), zero new dependencies of any kind, riding the FDK event loop; wire bytes pinned against captured reference-implementation output; fuzzed in `make test`; live-bus suite `make test-dbus` (real dbus-daemon: calls, errors, timeouts, match rules/signals, properties, name watching, introspection, close-from-callback reentrancy; CI makes skips fatal). Dark-mode following rides on top (next). **[VERIFIED-CHANGED: it no longer rides on top - dark mode (B-06) LANDED at d2a253f; M-7 is complete]** | B-08, B-06 | L |
-| M-9 | **The release gate**: every MUST lands with its rigs in this repo's style (in-test compositors/WMs, pixel readbacks, protocol traces), CHANGELOG + EXTENDING.md + README updates, extension API v2 bump if ops grow, five-family packaging version bumps, full local battery + CI green — and the owner's sign-off. A gate for a future release only: none exists or is planned today, and no tag may be created for one without the owner. | — | S |
+| M-9 | **The release gate**: every MUST lands with its rigs in this repo's style (in-test compositors/WMs, pixel readbacks, protocol traces), CHANGELOG + EXTENDING.md + README updates, extension API v3 (bumped twice since), five-family packaging version bumps, full local battery + CI green — and the owner's sign-off. The gate (scripts/release-gate.sh) closed for the 2026-11-12 release; no tag is created without the owner. | — | S |
 
 ### SHOULD — the polish tier (land if the schedule holds after MUST)
 
@@ -575,7 +575,7 @@ the owner's two real desktops (labwc/Wayland, Openbox+NVIDIA/X11),
 the SHOULD tier is either green or explicitly cut by the owner, and
 the CHANGELOG reads like the audit above never had to say "missing"
 about anything a real application hits in daily use. Until then the
-version stays `1.0.0-rc2` (rcN bumps with the candidate's own
+version stayed `1.0.0-rc2` (the bar was met: 1.0.0 released 2026-11-12) (rcN bumps with the candidate's own
 history - docs/versioning.md), no tags, no releases.
 
 ## Part 2 — the GTK/Qt parity gap list

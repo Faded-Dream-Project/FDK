@@ -78,7 +78,7 @@ audit for:
 When a permissively-licensed third-party component is incorporated,
 its license text and copyright notice are preserved in
 `THIRD-PARTY-NOTICES.md` at the repository root (created when the
-first such dependency is actually added — none exist as of Phase 1).
+first such dependency landed — see third_party/ and THIRD-PARTY-NOTICES.md).
 
 ## When uncertain
 

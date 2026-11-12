@@ -1,6 +1,6 @@
 /* panel-layer-shell.c — P5(a): a layer-shell panel built ONLY on
  * FDK's public API (this is the FDK layer-shell example, NOT the
- * separate fdk-shell-overlay project). Anchors a BOTTOM panel with an
+ * separate FDK-Layer-Shell repository (formerly the in-tree fdk-shell-overlay)). Anchors a BOTTOM panel with an
  * exclusive zone, paints it, and exits after a few configured frames.
  * Requires a Wayland compositor with wlr-layer-shell (the sway rig).
  *

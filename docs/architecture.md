@@ -45,16 +45,16 @@ used by multiple layers rather than sitting in the stack themselves:
   docs/dbus.md is the module narrative).
 - **Theme** (`src/theme/`) — the theme API and the `.fdk`
   parser/loader (Phase 7). The built-in default theme is the Phase 6
-  v1 palette exactly; the widget catalog resolves its 9 color
-  accessors and 2 paint metrics against the current default theme at
+  v1 palette exactly; the widget catalog resolves its color accessors (23 today) and 9 paint metrics against the current default theme at
   paint time. Contains FDK's one deliberately documented internal
   cycle: widget paint hooks call up into the theme module for
   tokens, and `fdk_theme_set_default()` calls back into the widget
   core's root registry to invalidate every live tree (both
   directions are internal .c-level calls; no header gymnastics, and
   the cycle is confined to these two functions).
-- **Input** (`src/input/`) — unified keyboard/mouse/touch event
-  structures, independent of X11/Wayland specifics. Sits between
+- **Input** (`include/fdk/fdk_event.h`, `src/window/touch.c`) — the
+  unified keyboard/pointer/touch/tablet event structures and input
+  policy, independent of X11/Wayland specifics. Sits between
   platform and widgets. (Phase 2, extended through later phases)
 - **Text** (`src/text/`) — font loading, glyph rendering, text
   measurement/shaping. Consumed by rendering. (Phase 3)
@@ -68,7 +68,7 @@ supported, application doesn't need to care which" actually true
 rather than aspirational. See `src/platform/` (once it exists, Phase
 2) for where that boundary is enforced in code — the platform layer's
 job is specifically to translate backend-specific reality into the
-backend-agnostic types in `fdk_types.h` and the future `fdk_input.h`/
+backend-agnostic types in `fdk_types.h` and `fdk_event.h`/
 `fdk_window.h`.
 
 ## Public vs. internal headers
@@ -334,7 +334,7 @@ on both backends; applications can draw real pixels into a window's
 surface and present them — sending only what changed — on either
 backend (`examples/02_rendering.c`); and applications can now
 build widget trees that FDK itself hit-tests, focuses, repaints,
-and presents (`examples/03_widgets.c`).
+and presents (`examples/04_widgets.c`).
 See `ROADMAP.md`'s entries for the precise, honest lists of
 what is and isn't covered — in particular i18n (the whole second
 half of Phase 10), per-item a11y nodes for painted-row containers

@@ -1,4 +1,10 @@
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
+
+Released 2026-11-12 as `v1.0.0` — the first official release (tag
+`v1.0.0`, the GitHub release). The 2026-11-09 withdrawal recorded
+further down is history: rounds 28–75 closed the findings, the
+owner ordered the release, and the 2026-11-12 docs-vs-code audit
+(35 doc files) is folded into the release commit.
 ## The GLES audit round: five engine fixes, two hardware-free checkers, the EGL seam
 
 The 2026-11-11 audit round (the GL_LUMINANCE bug was desktop-only and
@@ -1313,7 +1319,7 @@ changes; the round-40 release-closing work below landed under the
 same release identity before the tag.
 
 
-## 1.0.0 (unreleased — the tag was withdrawn by the owner on 2026-11-09; back to development)
+## 1.0.0 (the 2026-11-09 withdrawal record — superseded by the 2026-11-12 release at the top)
 
 The packaging channel stays wired (.github/workflows/release.yml:
 the bundle plus the five distro families' native packages,
@@ -1540,7 +1546,7 @@ lived here. Comment- and doc-only; zero behavior change.
 FDK's public version moves only by a recorded project-owner decision
 (docs/versioning.md — the rule, the enforcement, the full history
 including the 2026-10-11 retraction of a premature 1.0.0). The
-project is **in development — no stable release yet**: the entries
+project released 1.0.0 on 2026-11-12 (tag `v1.0.0`): the entries
 below are the development tree's own change record (version-marked
 where the tree carried a numbered version), not a catalogue of
 published releases; the engineering narrative lives in

@@ -8,7 +8,7 @@ report.
 
 ## What the kit is
 
-- `tests/run-hardware.sh` — one POSIX-sh script, no arguments, no
+- `tests/run-hardware.sh` — one POSIX-sh script (`--asan` opts into sanitizer builds — they are off by default), no
   network, no tokens. Run it from the repo root on the GPU machine:
 
       sh tests/run-hardware.sh
@@ -18,8 +18,7 @@ report.
 
 ## What it runs
 
-1. **The build** — plain `make`. The default debug/sanitizer config is
-   fine; the report is about the driver, not the build config.
+1. **The build** — plain `make`. The default config is fine (add `--asan` for a sanitizer build — sanitizers are off by default); the report is about the driver, not the build config.
 2. **The GL facts** — `glxinfo -B` (renderer, vendor, version) and
    `eglinfo` (the extension list) when present. Without them the
    report says so and the tests' own verdicts carry the section —
