@@ -1400,8 +1400,17 @@ fdk_result fdk_x11_gl_window_fence_wait(struct fdk_x11_gl_window *gwin,
     unsigned r = gl->fn.glClientWaitSync((void *)(uintptr_t)fence, 0x1u,
                                          5000000000ull);
     gl->fn.glDeleteSync((void *)(uintptr_t)fence);
-    /* 0x911D = GL_ALREADY_SIGNALED, 0x911E = GL_CONDITION_SATISFIED */
-    return (r == 0x911D || r == 0x911E) ? FDK_OK : FDK_ERR_UNSUPPORTED;
+    /* The sync wait's success codes, from glcorearb.h (the 2026-11-12
+     * GTX run found this check ONE constant off in BOTH directions:
+     * it accepted 0x911D/0x911E — actually GL_WAIT_FAILED/GL_SIGNALED-
+     * territory — and rejected 0x911A, the real GL_ALREADY_SIGNALED
+     * every fast fence answers; both llvmpipe and NVIDIA "refused"
+     * fences that had succeeded. The registry values:
+     *   0x911A GL_ALREADY_SIGNALED   0x911B GL_TIMEOUT_EXPIRED
+     *   0x911C GL_CONDITION_SATISFIED 0x911D GL_WAIT_FAILED
+     * WAIT_FAILED must NOT read as success — it now falls through
+     * to the honest UNSUPPORTED. */
+    return (r == 0x911A || r == 0x911C) ? FDK_OK : FDK_ERR_UNSUPPORTED;
 }
 
 

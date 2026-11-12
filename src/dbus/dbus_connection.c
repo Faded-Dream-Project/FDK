@@ -177,7 +177,13 @@ void fdk__dbus_shutdown(fdk_context *ctx) {
                      "driver component, not FDK — FDK speaks the wire "
                      "protocol itself); its ~750-byte global state "
                      "frees only at dbus_shutdown(), which the driver "
-                     "never calls. Not an FDK leak — silence it on "
+                     "never calls. The driver's GL libraries leave "
+                     "larger process-lifetime state on the same "
+                     "sanitized runs (libnvidia-glcore ~1.9 MB of "
+                     "GPU-sized internal pools on a 1050 Ti, "
+                     "libEGL_nvidia's 256 B thread record) — the "
+                     "Mesa twin is libgallium's block, driver-normal "
+                     "both ways. None are FDK leaks — silence them on "
                      "sanitizer runs with LSAN_OPTIONS=suppressions="
                      "tests/data/lsan-gl.supp");
         }

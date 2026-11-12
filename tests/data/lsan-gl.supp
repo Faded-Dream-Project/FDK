@@ -160,3 +160,24 @@ leak:libdbus-1
 # always: any leak whose stack contains an FDK frame still fails
 # the run.
 leak:libEGL_nvidia
+
+# libnvidia-glcore.so.580.196.07 (added 2026-11-12, the Round 73
+# example's first GTX run): 1,884,897 B in 566 allocations, every
+# frame inside libnvidia-glcore at +0xa0c271 (malloc) and +0xa0c52d
+# (calloc) — the GLX twin's OWN allocations, distinct from the dbus
+# client block it pulls (libdbus entry above) and from
+# libEGL_nvidia's 256 B thread record. This is the proprietary
+# driver's process-lifetime GL state: shader/const-server pools and
+# internal caches sized by the GPU (1.6-1.9 MB on the 1050 Ti), the
+# same class Mesa holds in libgallium (suppressed above) — Mesa's
+# equivalent block is the direct evidence this is driver-normal,
+# not an FDK failure to free: the sandbox's llvmpipe lane leaves
+# its own multi-hundred-KB libgallium residue on the identical
+# canonical teardown ladder. FDK's GLX teardown runs the full
+# sequence (glXMakeCurrent(None) -> glXDestroyContext per window +
+# share root -> XCloseDisplay) and cannot call anything the library
+# does not export: libnvidia-glcore exports no teardown/terminate
+# entry for this state (its factory objects are freed only by the
+# driver's internal atexit ordering, which ASan's exit-time check
+# pre-empts). Suppressed by MODULE so FDK frames stay strict.
+leak:libnvidia-glcore

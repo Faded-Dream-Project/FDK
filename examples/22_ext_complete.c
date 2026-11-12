@@ -274,21 +274,26 @@ static int leg_gl(fdk_context *ctx, fdk_ext_surface *surface) {
     gl_finish_();
     /* 3. the fence pair: insert + wait on the lane context. */
     fdk_u64 fence = 0;
-    r = fdk_ext_gl_fence_insert(surface, &fence);
-    if (r == FDK_OK) {
-        r = fdk_ext_gl_fence_wait(surface, fence);
+    fdk_result ri = fdk_ext_gl_fence_insert(surface, &fence);
+    fdk_result rw = FDK_ERR_INVALID_ARGUMENT;
+    if (ri == FDK_OK) {
+        rw = fdk_ext_gl_fence_wait(surface, fence);
     }
     char fence_note[128];
-    if (fdk_ok(r)) {
+    if (fdk_ok(ri) && fdk_ok(rw)) {
         snprintf(fence_note, sizeof fence_note,
                  "clear via %s + fence pair waited", libname);
-    } else {
+    } else if (!fdk_ok(ri)) {
         /* The documented UNSUPPORTED: the driver lacks the sync
-         * extension. The clear itself still ran; the skip is at
-         * the fence, labeled. */
+         * extension. The clear itself still ran; the refusal is
+         * labeled with the failing half of the pair. */
         snprintf(fence_note, sizeof fence_note,
-                 "clear ok; fences refused (%s)",
-                 fdk_result_to_string(r));
+                 "clear ok; fence insert refused (%s)",
+                 fdk_result_to_string(ri));
+    } else {
+        snprintf(fence_note, sizeof fence_note,
+                 "clear ok; fence wait refused (%s)",
+                 fdk_result_to_string(rw));
     }
     /* 4. the add-on-owned present. */
     r = fdk_ext_gl_swap(surface);

@@ -4,6 +4,81 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
+## Round 74 (2026-11-12) — the GTX run's fence verdict: three constant bugs, all mine, all now dead
+
+The owner's real-hardware run of examples/22_ext_complete (GTX
+1050 Ti, X11, EWMH WM, sanitized): 3 pass / 1 skip / 0 fail — and
+two follow-ups. First, "GL quartet PASS — clear ok; fences refused
+(unsupported)" ON NVIDIA: Round 73 blamed llvmpipe for that
+refusal; a driver with ARB_sync core since GL 3.2 contradicting
+the blame meant the refusal was FDK's. Second, 1,884,897 B in 566
+allocations from libnvidia-glcore at exit — a third-party block
+the suppression file had no entry for (and the report itself
+proved the suppression was not active in that run: its own
+libdbus block, 184 B + 582 B, appeared as leaked — the file's
+documented numbers, unsuppressed).
+
+THE FENCE INVESTIGATION (a standalone GLX repro, then a minimal
+EGL probe): every layer answered correctly — glFenceSync minted a
+valid sync (glIsSync=1), make_current succeeded, no GL error. The
+waits' RETURN CODES were being misread. Three constant bugs:
+
+1. X11 (x11_gl.c): the wait's success check tested 0x911D/0x911E
+   "GL_ALREADY_SIGNALED / GL_CONDITION_SATISFIED" — but the
+   registry says 0x911A ALREADY_SIGNALED, 0x911B TIMEOUT_EXPIRED,
+   0x911C CONDITION_SATISFIED, 0x911D WAIT_FAILED. The check was
+   shifted one: real success (0x911A, what llvmpipe AND NVIDIA
+   answer for a completed fence) read as failure, and actual
+   WAIT_FAILED read as SUCCESS — an inverted branch that would
+   have told an add-on a broken fence was honored. Fixed to
+   0x911A/0x911C.
+
+2. Wayland (wayland_egl.c): the insert passed 0x30F0 as
+   EGL_SYNC_FENCE_KHR — the real constant is 0x30F9 (eglext.h;
+   0x30F0 is a context-profile bit). Every insert on every driver
+   answered EGL_BAD_ATTRIBUTE -> NULL -> UNSUPPORTED: Wayland
+   fences never inserted at all. Fixed; the insert now also binds
+   the window's context first (an EGLSync rides the bound context;
+   present arbitration may have unbound it since the add-on's
+   make_current).
+
+3. Wayland again: the wait's success check tested 0x3051/0x3053 —
+   EGL_NON_CONFORMANT_CONFIG and EGL_VENDOR, config/token
+   constants a wait can never return. The KHR contract returns
+   EGL_TRUE (1) or EGL_CONDITION_SATISFIED_KHR (0x30F6); the
+   NV-only EGL_ALREADY_SIGNALED (0x30EA) is not part of it. Fixed
+   to 1/0x30F6.
+
+Proof after the fixes: both lanes report "fence pair waited" —
+X11 through GLX on llvmpipe (and by the constant's correctness,
+on the NVIDIA box too — the owner's next run will confirm), and
+Wayland through EGL_KHR_fence_sync on sway. The example's fence
+note now names the failing HALF of the pair (insert vs wait) so
+the next driver report pinpoints the layer immediately.
+
+THE LEAK FOLLOW-UP: a libnvidia-glcore entry added to
+tests/data/lsan-gl.supp with the same evidence discipline as its
+neighbors (the 1.88 MB block is the GLX twin's own GPU-sized
+internal pools — the Mesa equivalent is the suppressed
+libgallium block, driver-normal both ways; no teardown entry
+point is exported). The shutdown note in the D-Bus log now names
+all three driver-state blocks (libdbus ~750 B, libEGL_nvidia
+256 B, libnvidia-glcore ~1.9 MB) so the next sanitized exit is
+self-explaining. AND THE OPERATIONAL FIND: on this ASan 8 stack,
+packing suppressions= inside ASAN_OPTIONS fails to parse ("failed
+to parse suppressions" even for a one-line file — reproduced with
+a minimal malloc test); the LSAN_OPTIONS=suppressions=... form
+parses and matches (verified: clean exit, footer printed). The
+FDK note always said LSAN_OPTIONS — the owner's runs simply did
+not set it. Both forms documented in the suppression file's
+header.
+
+Verification: unit suite green, all 36 examples build,
+verify-exports green (1114 public symbols unchanged), X11
+integration suite green, Wayland suite 48/48 sections ok with the
+known pre-existing teardown SEGV (Round 73's bisect: identical on
+the Round 72 baseline; the GTX box does not reproduce it).
+
 ## Round 73 (2026-11-12) — the extensibility audit: 4 code bugs the docs predicted, 13 unconsumed APIs given a consumer, the docs made honest
 
 The owner's ask: confirm GPU work is done (it is — the three-way

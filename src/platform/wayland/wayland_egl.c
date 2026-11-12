@@ -2749,8 +2749,23 @@ fdk_result fdk_wayland_egl_window_fence_insert(
         void *(*fn)(void *, unsigned, const void *);
     } u_create;
     u_create.obj = g_wl_sync.create_sync;
+    /* EGLSync on a GL context REQUIRES a current context (the sync
+     * rides the bound context's command stream). The add-on's
+     * make_current may have been followed by the lane binding
+     * another context since (present arbitration) — bind ours
+     * again, the same discipline the X11 twin follows. */
+    if (!egl->fn.eglMakeCurrent(egl->egl_display, ewin->surface,
+                                ewin->surface, ewin->ctx)) {
+        return FDK_ERR_UNSUPPORTED;
+    }
     void *sync = u_create.fn(egl->egl_display,
-                             0x30F0 /* EGL_SYNC_FENCE_KHR */, NULL);
+                             0x30F9 /* EGL_SYNC_FENCE_KHR, eglext.h —
+                                     * the 2026-11-12 GTX round: the old
+                                     * 0x30F0 was EGL_BAD_ATTRIBUTE on
+                                     * every driver (a context-profile
+                                     * bit, not a sync type); fences
+                                     * never inserted on Wayland. */,
+                             NULL);
     if (sync == NULL) {
         return FDK_ERR_UNSUPPORTED;
     }
@@ -2786,6 +2801,17 @@ fdk_result fdk_wayland_egl_window_fence_wait(
     } u_destroy;
     u_destroy.obj = g_wl_sync.destroy_sync;
     u_destroy.fn(egl->egl_display, (void *)(uintptr_t)fence);
-    /* 0x3051 = EGL_CONDITION_SATISFIED_KHR */
-    return r == 0x3051 ? FDK_OK : FDK_ERR_UNSUPPORTED;
+    /* The sync wait's result codes, from eglext.h's KHR_reusable_
+     * sync block (the 2026-11-12 fence round — the old check read
+     * 0x3051/0x3053, which are EGL_NON_CONFORMANT_CONFIG and
+     * EGL_VENDOR: config/token constants the wait can never return,
+     * so every wait read as failure):
+     *   1           EGL_TRUE (fence signaled within the wait)
+     *   0x30F6      EGL_CONDITION_SATISFIED_KHR
+     *   0x30F5      EGL_TIMEOUT_EXPIRED_KHR  — honest failure
+     *   0           EGL_FALSE                — honest failure
+     * EGL_ALREADY_SIGNALED (0x30EA) is NV-only and not part of the
+     * KHR contract; Mesa answers EGL_TRUE for an idle compositor's
+     * already-complete fence. */
+    return (r == 1u || r == 0x30F6u) ? FDK_OK : FDK_ERR_UNSUPPORTED;
 }
