@@ -4,6 +4,49 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
+## Round 68 (2026-11-12) — the proof gap closed: presentation is now observable
+
+The owner's second hardware report: error 4 is GONE (full clean
+teardown on the syncobj compositor), the lane engages and the
+verdict reads OK — but the log "opened and closed instantly, that
+doesn't prove vulkan works", and the libdbus 754-byte block is
+still reported. Three answers, one of them a correction:
+
+- **Presentation proof in the log**: the lane-up line said nothing
+  about frames (by design — the swapchain is deferred to first
+  present). A new INFO line lands exactly at that first present:
+  "Vulkan swapchain up (WxH, N images) — first present committed",
+  plus a DEBUG on every OUT_OF_DATE rebuild. A log reader can now
+  distinguish "lane loaded" from "frame carried" at a glance.
+- **gpu_strict proves the round-trip**: the present result is
+  CHECKED (a lane that answers vulkan while its presents fail is
+  refused with the fdk_result string), HOLD_MS=<n> keeps the
+  window repainting for a screen probe (grim / a camera on real
+  hardware — the visual proof logs can't give), and the OK line
+  now reads "(hardware, frame committed)". The window is 480x320
+  with a red rect on a dark bg — instantly recognizable.
+- **The libdbus call WITHDRAWN** (a correction to Round 67):
+  calling dbus_shutdown() from fdk__dbus_shutdown was wrong —
+  libdbus documents it as UB unless the caller is the process's
+  last libdbus user, and the driver's connections (the puller is
+  libnvidia-eglcore, named in lsan-gl.supp's forensic block) are
+  not FDK's to track. Freeing another component's globals to
+  quiet a sanitizer is the wrong trade. The leak is not FDK's
+  memory (FDK speaks the wire protocol itself; the suppression
+  file carries the full investigation). What remains is one INFO
+  note when libdbus is co-loaded (RTLD_NOLOAD probe, zero side
+  effects) pointing at the suppression. The 754 B is the driver's
+  exit-time state; suppress it with
+  LSAN_OPTIONS=suppressions=tests/data/lsan-gl.supp — that file's
+  "Suppressions used" footer is the per-run audit of exactly what
+  third-party state was retired.
+- Sandbox note: the environment was fully recycled this round
+  (repo re-cloned at 3b129aa; ~45 debs re-fetched into the
+  prefixes; sway + Xvfb restarted). Verification green: -Werror
+  builds, the full knob matrix (AUTO / forced-vulkan / forced-
+  opengl / FDK_NO_GL, with and without FDK_GL_FORCE), unit suite,
+  and the compositor pixel rig byte-exact.
+
 ## Round 67 (2026-11-11) — the GTX 1050 Ti report answered: three real bugs fixed, the zero-warning law enforced
 
 The owner ran the Vulkan lane on real hardware (GTX 1050 Ti +

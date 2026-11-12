@@ -38,6 +38,7 @@
 #include "fdk/fdk_window.h"
 
 #include <stdio.h>
+#include <stdlib.h> /* getenv, atoi — HOLD_MS */
 #include <string.h>
 
 /* The software-renderer hall of shame (the lanes' own policy list,
@@ -97,16 +98,39 @@ int main(void) {
     }
     fdk_window_show(win);
 
-    /* Carry ONE frame — the lane reports live only after it has. */
+    /* Carry ONE frame — the lane reports live only after it has.
+     * The present result is CHECKED, not assumed: a lane that
+     * answers "vulkan" while its presents silently fail would pass
+     * the old probe (the owner's 2026-11-12 report: "the window
+     * opened and closed instantly, that doesn't prove vulkan
+     * works"). fdk_surface_present returning OK is the frame
+     * actually committed to the lane's queue. */
+    fdk_result present_r = FDK_ERR_INVALID_STATE;
     fdk_surface *s = NULL;
     if (fdk_ok(fdk_window_get_surface(win, &s)) && s != NULL) {
         fdk_surface_fill(s, (fdk_color){ 0.08f, 0.10f, 0.14f, 1.0f });
         fdk_surface_fill_rect(s, (fdk_rect){ 40, 40, 400, 240 },
                               (fdk_color){ 0.95f, 0.35f, 0.15f, 1.0f });
-        (void)fdk_surface_present(s);
+        present_r = fdk_surface_present(s);
     }
     for (int i = 0; i < 8; i++) {
         fdk_pump_events(ctx, 16);
+    }
+
+    /* Optional hold (gpu_smoke's rig knob, mirrored here): HOLD_MS=n
+     * keeps the window alive repainting for n milliseconds so a
+     * screen probe (grim / a phone camera on real hardware) can
+     * capture a live frame — the visual proof the logs can't give.
+     * Repaints every ~33ms so damage tracking stays exercised. */
+    {
+        const char *hold = getenv("HOLD_MS");
+        int ms = hold != NULL ? atoi(hold) : 0;
+        for (int t = 0; ms > 0 && t < ms; t += 33) {
+            if (s != NULL) {
+                (void)fdk_surface_present(s);
+            }
+            fdk_pump_events(ctx, 33);
+        }
     }
 
     fdk_render_backend backend = FDK_RENDER_BACKEND_CPU;
@@ -116,6 +140,14 @@ int main(void) {
     fdk_window_destroy(win);
     fdk_shutdown(ctx);
 
+    if (!fdk_ok(present_r)) {
+        fprintf(stderr,
+                "gpu_strict: REFUSED — the frame never committed "
+                "(fdk_surface_present: %s); a backend answer without "
+                "a carried frame proves nothing.\n",
+                fdk_result_to_string(present_r));
+        return 1;
+    }
     if (backend == FDK_RENDER_BACKEND_CPU) {
         fprintf(stderr,
                 "gpu_strict: REFUSED — FDK fell back to the CPU "
@@ -134,7 +166,8 @@ int main(void) {
         return 1;
     }
 
-    printf("gpu_strict: OK — backend=%s device=\"%s\" (hardware)\n",
+    printf("gpu_strict: OK — backend=%s device=\"%s\" (hardware, "
+           "frame committed)\n",
            backend_name(backend), device);
     return 0;
 }

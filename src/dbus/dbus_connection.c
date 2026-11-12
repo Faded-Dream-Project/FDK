@@ -75,6 +75,11 @@ static void handshake_queue_advance(fdk_context *ctx,
  * owner's triple-startup-line report; see connect_common). */
 static int fdk__dbus_unavailable_logged = 0;
 
+/* The one-shot "libdbus is loaded but it's not ours" note (see
+ * fdk__dbus_shutdown's block comment — the withdrawn
+ * dbus_shutdown() call, 2026-11-12). */
+static int g_libdbus_note_logged = 0;
+
 void fdk__dbus_test_reset_unavailable_notice(void) {
     /* TEST SEAM: never called by the library itself. */
     fdk__dbus_unavailable_logged = 0;
@@ -147,26 +152,34 @@ void fdk__dbus_shutdown(fdk_context *ctx) {
     ctx->dbus_conns = NULL;
     ctx->dbus_conn_capacity = 0;
 
-    /* The libdbus exit-leak (the owner's GTX 1050 Ti report, LSan:
-     * 802 bytes in 3 allocations with stacks inside libdbus-1.so.3):
-     * FDK's D-Bus is its own implementation and never loads libdbus —
-     * but the GPU driver stack sometimes does (a vendor ICD linking
-     * it), and libdbus frees its process-global data ONLY at an
-     * explicit dbus_shutdown() the driver never calls. RTLD_NOLOAD
-     * probes WITHOUT loading: absent → nothing to do (the common
-     * case, zero side effects); present → one dbus_shutdown() after
-     * every FDK D-Bus connection is closed, the documented last-user
-     * call. POSIX dlsym returns void*; ISO C (pedantic) forbids
-     * direct object->function conversion — the dereference idiom. */
+    /* The libdbus exit-leak (the owner's hardware reports, LSan: ~750
+     * bytes in 3 allocations, every stack frame inside
+     * libdbus-1.so.3): FDK's D-Bus is its own implementation and
+     * never loads libdbus — the GPU driver stack does (a vendor ICD
+     * links it), and libdbus frees its process-global data ONLY at
+     * an explicit dbus_shutdown() the driver never calls.
+     *
+     * 2026-11-12 correction: this block USED to call dbus_shutdown()
+     * itself (RTLD_NOLOAD probe). That call is withdrawn — libdbus
+     * documents it as undefined unless the caller is the last libdbus
+     * user in the process, and the driver's own connections are not
+     * FDK's to track. FDK freeing ANOTHER component's globals to
+     * quiet its own sanitizer run is the wrong trade. The leak is
+     * not FDK's memory; the honest handling is documentation and a
+     * suppression for the rigs (tests/data/lsan-gl.supp), and
+     * one INFO line so a confused log reader lands here. */
     {
         void *lib = dlopen("libdbus-1.so.3", RTLD_NOW | RTLD_LOCAL |
                                               RTLD_NOLOAD);
-        if (lib != NULL) {
-            void (*dbus_shutdown)(void) = NULL;
-            *(void **)&dbus_shutdown = dlsym(lib, "dbus_shutdown");
-            if (dbus_shutdown != NULL) {
-                dbus_shutdown();
-            }
+        if (lib != NULL && !g_libdbus_note_logged) {
+            g_libdbus_note_logged = 1;
+            FDK_INFO("libdbus-1.so.3 is loaded in this process (a GPU "
+                     "driver component, not FDK — FDK speaks the wire "
+                     "protocol itself); its ~750-byte global state "
+                     "frees only at dbus_shutdown(), which the driver "
+                     "never calls. Not an FDK leak — silence it on "
+                     "sanitizer runs with LSAN_OPTIONS=suppressions="
+                     "tests/data/lsan-gl.supp");
         }
     }
 }

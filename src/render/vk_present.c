@@ -1071,11 +1071,17 @@ int fdk_vk_window_present(struct fdk_vk_window *vwin,
     /* The swapchain is born HERE (the deferred-create restructure):
      * first present, post-configure on Wayland, at a real size — the
      * ecosystem shape. From the second present on, this is also the
-     * resize/OUT_OF_DATE recreation point. */
+     * resize/OUT_OF_DATE recreation point. The INFO line is the
+     * PRESENTATION PROOF (the owner's 2026-11-12 report: a lane-up
+     * message alone cannot show the frame went out — the swapchain
+     * exists only once a present committed to it). */
     if (vwin->swapchain == VK_NULL_H) {
         if (vk_win_build_swapchain(vwin, w, h) != 0) {
             return -1; /* not dead: the next present retries */
         }
+        FDK_INFO("Vulkan swapchain up (%dx%d, %u images) — first "
+                 "present committed",
+                 w, h, vwin->image_count);
     }
     uint32_t idx = 0;
     VkResult_ r = lane->fn.vkAcquireNextImageKHR(
@@ -1086,6 +1092,9 @@ int fdk_vk_window_present(struct fdk_vk_window *vwin,
             vwin->dead = 1;
             return -1;
         }
+        FDK_DEBUG("Vulkan swapchain rebuilt (%dx%d, %u images) after "
+                  "OUT_OF_DATE",
+                  w, h, vwin->image_count);
         r = lane->fn.vkAcquireNextImageKHR(lane->device, vwin->swapchain,
                                            UINT64_MAX, vwin->sem_ready,
                                            VK_NULL_H, &idx);
