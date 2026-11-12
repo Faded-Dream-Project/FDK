@@ -340,13 +340,18 @@ int main(int argc, char **argv) {
     (void)fdk_widget_set_tooltip(
         adv, "The expander reveals its content with an animated door — "
              "click the header or press Space while focused");
+    /* The expander takes ONE content child (the class contract);
+     * the two advanced controls share a vertical box in that slot. */
+    fdk_widget *advcol = NULL;
+    (void)fdk_box_create(adv, FDK_VERTICAL, &advcol);
+    fdk_box_set_spacing(advcol, 6);
     fdk_widget *preload = NULL;
-    (void)fdk_checkbox_create(adv, font16, "Preload file metadata",
+    (void)fdk_checkbox_create(advcol, font16, "Preload file metadata",
                               &preload);
     fdk_checkbox_set_on_changed(preload, on_any_change,
                                (void *)"Preload metadata");
     fdk_widget *cache = NULL;
-    (void)fdk_entry_create(adv, font16, "", &cache);
+    (void)fdk_entry_create(advcol, font16, "", &cache);
     fdk_entry_set_placeholder(cache, "Custom cache path…");
 
     fdk_widget *split = NULL;
