@@ -4,6 +4,54 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
+## Round 69 (2026-11-12) — "is the GPU ACTUALLY doing it": answered, measured, and one honesty hole closed
+
+The owner's question cut deeper than the last round: light apps
+stress nothing, so a working window proves neither GPU engagement
+nor the DEGREE of it — "when I said hardware acceleration I meant
+FULL GPU: the entire rendering on the GPU, the CPU barely touching
+it." Three deliverables:
+
+- **The answer exists in FDK already, and now it's measurable**:
+  HYBRID mode rasterizes on the CPU and only PRESENTS on the GPU
+  lane; FDK_RENDER_GPU mode is the full-GPU contract — the window
+  gets a SIZE-ONLY framebuffer (no CPU pixels exist at all), every
+  draw call executes as an SDF-evaluated quad in the GLES paint
+  engine (gpaint.c: one shader, one vertex stream, batched), and
+  there is NO CPU fallback. What was missing was the numbers.
+- **fdk_window_gpu_paint_stats()** (public, fdk_window.h): the
+  engine's own counters — quads and GPU batches per frame and
+  lifetime, completed presents, atlas and texture uploads. The
+  lanes call the frame boundary at every swap AND readback (all
+  four sites: wayland_egl x2, x11_gl x2). "Thousands of quads,
+  near-zero CPU paint time" is now a checkable signature, not a
+  claim.
+- **gpu_load** (test-apps): the stress-and-measure app. An animated
+  scene (rounded rects, circles, gradients, strokes, text — 800
+  quads/frame default, LOAD_PRIMS to tune), RUN_MS timed run
+  reporting fps + CPU-ms/frame + the counters, HOLD_MS for screen
+  probes, and FDK_RENDER=cpu|hybrid to A/B the same scene on the
+  other path. Sandbox numbers (llvmpipe both sides, so the DELTA is
+  the story, not the absolute fps): GPU mode 50.8 fps / 18.9
+  CPU-ms/frame / 832 quads per frame; CPU mode 10.3 fps / 97.0
+  CPU-ms/frame — a 5x paint-time gap with identical pixels.
+- **A silent-fallback bug found by the app itself**: GPU mode with
+  a lane that will not engage (llvmpipe without FDK_GL_FORCE) used
+  to create the window, refuse the framebuffer fetch ONCE in the
+  log, then no-op every draw and return FDK_OK from every present
+  via the "nothing ever drawn" path — a silent CPU substitute in
+  the one mode whose contract forbids it. Fixed in
+  fdk__surface_acquire: a refused fetch in GPU mode marks the
+  surface gpu_failed, so presents report UNSUPPORTED stickily (the
+  same answer a dead engine gives). gpu_load checks the first
+  present and exits 1 with the reason; the refusal leg now passes
+  exactly that way on both backends (X11 shares the acquire path).
+- Verified: -Werror builds, unit suite green, Wayland + X11 legs
+  both directions, the refusal leg exits 1, and the compositor
+  pixel rig — byte-exact background color, 5124 distinct colors
+  from the AA blends, and 57% of pixels changed between two
+  captures (the scene demonstrably animates through the engine).
+
 ## Round 68 (2026-11-12) — the proof gap closed: presentation is now observable
 
 The owner's second hardware report: error 4 is GONE (full clean

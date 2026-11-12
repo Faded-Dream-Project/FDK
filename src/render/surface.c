@@ -174,6 +174,20 @@ fdk_result fdk__surface_acquire(fdk_surface *surface) {
     fdk_result r = surface->window->ops->window_get_framebuffer(
         surface->window->pwindow, &fb);
     if (!fdk_ok(r)) {
+        /* GPU MODE HONESTY (2026-11-12, the gpu_load refusal run):
+         * a refused framebuffer fetch in GPU mode must not decay
+         * into "nothing ever drawn" — that path's documented no-op
+         * present would return FDK_OK while nothing ever reached a
+         * lane, the exact silent fallback FDK_RENDER_GPU forbids
+         * (fdk_core.h: "a lane that dies mid-flight fails the
+         * present"). Mark gpu_failed: every later present reports
+         * UNSUPPORTED, sticky, the same answer a dead engine gives.
+         * (The lane refusal itself is already logged, loudly, by
+         * the backend.) */
+        if (surface->window->render_mode == FDK_RENDER_GPU &&
+            surface->gpu == NULL) {
+            surface->gpu_failed = 1;
+        }
         return r;
     }
 

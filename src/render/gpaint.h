@@ -86,6 +86,15 @@ int fdk__gpu_engine_readback(struct fdk_surface *s, fdk_u32 *out,
  * reports UNSUPPORTED by contract). */
 void fdk__gpu_simulate_context_loss(struct fdk_surface *s);
 
+/* Load diagnostics (2026-11-12): the engine's counters. The lanes
+ * call fdk__gpu_frame_boundary() at every present (GPU mode only);
+ * window.c's fdk_window_gpu_paint_stats() is the public read. The
+ * struct itself is PUBLIC (fdk_window.h owns the typedef — this
+ * header forward-declares it, not defines). */
+struct fdk_gpu_paint_stats;
+void fdk__gpu_frame_boundary(struct fdk_surface *s);
+void fdk__gpu_stats(struct fdk_surface *s, struct fdk_gpu_paint_stats *out);
+
 /* The present contract's query: nonzero when the engine is dead. */
 int fdk__gpu_engine_dead(struct fdk_surface *s);
 void fdk__gpu_simulate_context_loss(struct fdk_surface *s);

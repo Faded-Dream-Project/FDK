@@ -136,7 +136,14 @@ $(BUILD)/gpu_strict: gpu_strict/main.c $(FDK_LIB)
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(STD) $(WARN) $(FEATURE) -Werror -o $@ gpu_strict/main.c $(FDK_LIB) $(LIBS)
 
-GPU_BINS := $(BUILD)/gpu_smoke $(BUILD)/gpu_strict
+# gpu_load (2026-11-12): the "is the GPU actually rendering" stress
+# app — animated scene, fps + CPU-ms/frame, and the engine's own
+# counters (fdk_window_gpu_paint_stats). A/B: FDK_RENDER=gpu|cpu.
+$(BUILD)/gpu_load: gpu_load/main.c $(FDK_LIB)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(STD) $(WARN) $(FEATURE) -Werror -o $@ gpu_load/main.c $(FDK_LIB) $(LIBS)
+
+GPU_BINS := $(BUILD)/gpu_smoke $(BUILD)/gpu_strict $(BUILD)/gpu_load
 all: $(GPU_BINS)
 
 # Smoke: each app under a throwaway Xvfb (the repo Makefile's own

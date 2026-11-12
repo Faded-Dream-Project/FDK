@@ -1266,6 +1266,7 @@ fdk_result fdk_x11_gl_window_paint_flush(struct fdk_x11_gl_window *gwin,
     if (s->gpu == NULL) {
         return FDK_ERR_UNSUPPORTED;
     }
+    fdk__gpu_frame_boundary(s); /* the frame went out — retire its counters */
     gl->fn.glXSwapBuffers(gl->conn->display, gwin->xwindow);
     return FDK_OK;
 }
@@ -1292,6 +1293,7 @@ fdk_result fdk_x11_gl_window_readback(struct fdk_x11_gl_window *gwin,
      * read BEFORE any swap: this isolates rasterization from present
      * semantics (post-swap back-buffer content is driver-defined). */
     fdk__gpu_flush(s);
+    fdk__gpu_frame_boundary(s); /* readback IS a completed frame */
     int rc = fdk__gpu_engine_readback(s, out, width, height);
     if (rc != 0) {
         fprintf(stderr, "fdk-gpaint-seam: engine readback rc=%d\n", rc);

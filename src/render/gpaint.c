@@ -357,6 +357,25 @@ struct fdk_gpu_state {
      * the next flush, when the lane context is current. */
     struct gp_pend *pend;
     int pend_count;
+
+    /* Load diagnostics (2026-11-12, the "is the GPU really doing
+     * it" round): lifetime counters owned by the engine, read by
+     * fdk__gpu_stats() for the public fdk_window_gpu_paint_stats().
+     * quads = every SDF/textured quad emitted; batches = flushes
+     * that actually issued a DrawArrays (a mid-frame clip sync or
+     * atlas-full flush counts — it IS a GPU batch); frames = calls
+     * into fdk__gpu_frame_boundary() (the lanes call it at every
+     * present, GPU mode only); atlas_uploads counts glyph-mask
+     * shelf uploads, tex_uploads every texture realize/upload.
+     * fdk__gpu_stats' frame-scoped numbers (quads/batches THIS
+     * frame) reset at the boundary. */
+    unsigned long long stat_quads;
+    unsigned long long stat_batches;
+    unsigned long long stat_frames;
+    unsigned long long stat_atlas_uploads;
+    unsigned long long stat_tex_uploads;
+    unsigned frame_quads;
+    unsigned frame_batches;
 };
 
 /* The gpu state rides the surface struct as an opaque pointer
@@ -794,6 +813,8 @@ static void gp_quad(struct fdk_surface *s, float x, float y, float w,
         for (int j = 0; j < 4; j++) *v++ = g->clip[j];
     }
     g->vert_count += GP_QUAD_FLOATS * GP_QUAD_VERTS;
+    g->stat_quads++;
+    g->frame_quads++;
 }
 
 void fdk__gpu_fill(struct fdk_surface *s, fdk_color c) {
@@ -913,6 +934,7 @@ static int gp_atlas_put(struct fdk_surface *s, int w, int h,
     if (h > g->atlas_row_h) {
         g->atlas_row_h = h;
     }
+    g->stat_atlas_uploads++;
     g_gp.ActiveTexture(GL_TEXTURE0);
     g_gp.BindTexture(GL_TEXTURE_2D, g->atlas_tex);
     for (int row = 0; row < h; row++) {
@@ -1152,6 +1174,7 @@ unsigned fdk__gpu_texture_name(struct fdk_surface *s, void *key, int width,
         slot->h = height;
         slot->rgba = format_rgba;
         slot->gl_ok = 0; /* re-realize at the next flush/draw */
+        g->stat_tex_uploads++;
         if (created != NULL) {
             *created = 1;
         }
@@ -1710,6 +1733,8 @@ void fdk__gpu_flush(struct fdk_surface *s) {
     g_gp.DrawArrays(GL_TRIANGLES, 0, g->vert_count / GP_QUAD_FLOATS);
     FP_CHECK("batch draw");
 #undef FP_CHECK
+    g->stat_batches++;
+    g->frame_batches++;
     if (flush_trace) {
         fprintf(stderr,
                 "fdk-gpaint: flush done g=%p verts=%d\n", (void *)g,
@@ -1736,6 +1761,41 @@ void fdk__gpu_simulate_context_loss(struct fdk_surface *s) {
     if (g != NULL) {
         g->dead = 1;
     }
+}
+
+/* Frame boundary (the lanes call this at every present, GPU mode
+ * only): retires the frame-scoped counters so the next frame's
+ * quads/batches start from zero. Lifetime totals keep running. */
+void fdk__gpu_frame_boundary(struct fdk_surface *s) {
+    struct fdk_gpu_state *g = gp_state(s);
+    if (g == NULL) {
+        return;
+    }
+    g->stat_frames++;
+    g->frame_quads = 0;
+    g->frame_batches = 0;
+}
+
+/* The load diagnostics read: what the engine actually did. Zeroed
+ * when the surface has no engine (CPU path / init failed). */
+void fdk__gpu_stats(struct fdk_surface *s, struct fdk_gpu_paint_stats *out) {
+    if (out == NULL) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    struct fdk_gpu_state *g = gp_state(s);
+    if (g == NULL) {
+        return;
+    }
+    out->active = 1;
+    out->dead = (unsigned)g->dead;
+    out->frame_quads = g->frame_quads;
+    out->frame_batches = g->frame_batches;
+    out->total_quads = g->stat_quads;
+    out->total_batches = g->stat_batches;
+    out->total_frames = g->stat_frames;
+    out->atlas_uploads = g->stat_atlas_uploads;
+    out->texture_uploads = g->stat_tex_uploads;
 }
 
 /* Query for the present contract: a dead (context-lost) engine must

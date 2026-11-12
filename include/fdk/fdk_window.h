@@ -587,6 +587,42 @@ fdk_result fdk_window_get_render_backend(const fdk_window *window,
  * strict-app error messages, never an identity. */
 const char *fdk_window_render_device(const fdk_window *window);
 
+/* fdk_window_gpu_paint_stats() (2026-11-12): what the GPU paint
+ * engine ACTUALLY did — the "is the GPU really rendering, or did it
+ * fall back to CPU?" question answered with counters, not vibes.
+ *
+ * Meaningful in FDK_RENDER_GPU mode (fdk_window_render_mode()):
+ * there the whole draw stream executes as SDF-evaluated GPU quads
+ * (one shader, one vertex stream) — quads/batches are the GPU's
+ * actual draw work. In HYBRID/CPU modes every field reads zero:
+ * pixels are CPU-rasterized there and only the PRESENT rides the
+ * GPU lane (see fdk_render_path / fdk_window_get_render_backend
+ * for that side).
+ *
+ * Frame-scoped numbers (frame_quads, frame_batches) cover the frame
+ * in flight — they reset at every present; lifetime totals keep
+ * running. total_frames counts completed presents (the frame
+ * boundary the lanes call at swap time), so a live window's
+ * total_frames > 0 while frame_quads shows THIS frame's load.
+ *
+ * The read is a snapshot without locks: read it from the same
+ * thread that paints. Can fail with FDK_ERR_INVALID_ARGUMENT
+ * (window or out_stats NULL). */
+typedef struct fdk_gpu_paint_stats {
+    unsigned active;            /* engine attached to the window surface */
+    unsigned dead;              /* engine marked dead (lane downgrade)   */
+    unsigned frame_quads;       /* quads emitted since the last present  */
+    unsigned frame_batches;     /* GPU batches since the last present    */
+    unsigned long long total_quads;      /* lifetime quads               */
+    unsigned long long total_batches;    /* lifetime GPU batches         */
+    unsigned long long total_frames;     /* completed presents           */
+    unsigned long long atlas_uploads;    /* glyph-mask shelf uploads     */
+    unsigned long long texture_uploads;  /* texture realizes/uploads     */
+} fdk_gpu_paint_stats;
+
+fdk_result fdk_window_gpu_paint_stats(const fdk_window *window,
+                                      fdk_gpu_paint_stats *out_stats);
+
 /* Sets minimum/maximum size hints. Pass 0 for either dimension of
  * either struct to mean "no constraint" in that dimension. These are
  * hints handed to the platform (WM_NORMAL_HINTS on X11, xdg_toplevel

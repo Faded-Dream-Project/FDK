@@ -2115,6 +2115,7 @@ fdk_result fdk_wayland_egl_window_paint_flush(
     if (s->gpu == NULL) { /* flush marked the engine dead */
         return FDK_ERR_UNSUPPORTED;
     }
+    fdk__gpu_frame_boundary(s); /* the frame went out — retire its counters */
     EGLBoolean ok = egl->fn.eglSwapBuffers(egl->egl_display, ewin->surface);
     (void)wl_display_flush(egl->conn->display);
     {
@@ -2647,6 +2648,7 @@ fdk_result fdk_wayland_egl_window_readback(
      * "precheck" that names a dead engine the caller never killed. */
     (void)egl->fn.glGetError();
     fdk__gpu_flush(s);
+    fdk__gpu_frame_boundary(s); /* readback IS a completed frame */
     return fdk__gpu_engine_readback(s, out, width, height) == 0
                ? FDK_OK
                : FDK_ERR_UNSUPPORTED;

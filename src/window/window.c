@@ -8,6 +8,7 @@
 #include "core/context_internal.h"
 #include "core/log_internal.h"
 #include "render/surface_internal.h"
+#include "render/gpaint.h" /* fdk__gpu_stats — the paint counters */
 #include "theme/theme_internal.h"
 #include "widget/widget_internal.h"
 #include "widget/widgets_internal.h" /* window-root class, a11y name */
@@ -1470,6 +1471,19 @@ const char *fdk_window_render_device(const fdk_window *window) {
         return "<none>";
     }
     return device;
+}
+
+fdk_result fdk_window_gpu_paint_stats(const fdk_window *window,
+                                      fdk_gpu_paint_stats *out_stats) {
+    if (window == NULL || out_stats == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* surface_internal.h keeps ->gpu opaque; gpaint.h owns the
+     * counter read (the engine's own struct). The window surface
+     * is lazily created — a never-painted window reports zeros,
+     * which is exactly the truth. */
+    fdk__gpu_stats(window->surface, out_stats);
+    return FDK_OK;
 }
 
 void fdk_window_set_size_limits(fdk_window *window, fdk_size min_size, fdk_size max_size) {
