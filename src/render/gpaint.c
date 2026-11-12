@@ -278,10 +278,22 @@ static int gp_resolve_procs(void) {
  * 78 flushes for 51k quads). GP_BATCH_FLOATS is the true capacity.
  * GP_MAX_QUADS rose to 16384 with the fix: DrawArrays takes a plain
  * vertex count (no index buffer, no 16-bit ceiling), so the only
- * cost is staging memory — 9.4 MB per surface — and heavy frames
- * make 4x fewer BufferData/draw calls. */
+ * cost is staging memory — 9.4 MB per surface.
+ *
+ * The same day's second lesson (the follow-up sweep): ONE giant
+ * 16384-quad batch is not the win either. It serializes — the GPU
+ * idles until the whole frame is emitted, then drains as a tail
+ * after emission (rung 3: 41.5 fps vs the old code's accidental
+ * 48). The 682-quad chunks overlapped emission and rasterization by
+ * accident; 78 calls was too many, 1 was too few. GP_FLUSH_QUADS is
+ * the deliberate middle: the chunk the engine hands the GPU mid-
+ * frame so rasterization of chunk N overlaps emission of chunk N+1
+ * (4096 quads restarts the overlap at 6x fewer calls than the bug).
+ * Tunable per rung via FDK_GP_FLUSH_QUADS (clamped 256..GP_MAX_QUADS)
+ * — the right value is driver-dependent; sweep it on hardware. */
 #define GP_MAX_QUADS 16384
 #define GP_BATCH_FLOATS (GP_QUAD_FLOATS * GP_QUAD_VERTS * GP_MAX_QUADS)
+#define GP_FLUSH_QUADS 4096
 #define GP_ATLAS 1024
 #define GP_ATLAS_SLOTS 2048
 #define GP_TEX_SLOTS 256
@@ -318,6 +330,7 @@ struct fdk_gpu_state {
     gl_uint vbo;
     float *verts;
     int vert_count; /* floats used */
+    int flush_quads; /* quads per pipeline chunk (FDK_GP_FLUSH_QUADS) */
     int dead;
 
     int width, height;
@@ -654,6 +667,19 @@ int fdk__gpu_surface_init(struct fdk_surface *s, int width, int height) {
         return 0;
     }
     g->verts = malloc(sizeof(float) * GP_BATCH_FLOATS);
+    /* The pipeline chunk: FDK_GP_FLUSH_QUADS clamped to capacity and
+     * sanity. Read once at engine bring-up (getenv in the hot path
+     * would be its own tax). */
+    g->flush_quads = GP_FLUSH_QUADS;
+    {
+        const char *fq = getenv("FDK_GP_FLUSH_QUADS");
+        if (fq != NULL && *fq != '\0') {
+            int v = atoi(fq);
+            if (v >= 256 && v <= GP_MAX_QUADS) {
+                g->flush_quads = v;
+            }
+        }
+    }
     g->atlas_slots = calloc(GP_ATLAS_SLOTS, sizeof(*g->atlas_slots));
     g->tex = calloc(GP_TEX_SLOTS, sizeof(*g->tex));
     g->pend = calloc(GP_MAX_PEND, sizeof(*g->pend));
@@ -764,8 +790,13 @@ static void gp_quad(struct fdk_surface *s, float x, float y, float w,
     if (g->dead || w <= 0 || h <= 0) {
         return;
     }
-    if (g->vert_count + GP_QUAD_FLOATS * GP_QUAD_VERTS >
-        GP_BATCH_FLOATS) {
+    /* The pipeline chunk: hand the GPU a full chunk MID-FRAME so it
+     * rasterizes while emission continues. The chunk (not the 16384
+     * capacity) is what bounds latency here — the GTX 1050 Ti's
+     * follow-up sweep showed a full-frame batch serializes the GPU
+     * behind the emitter (rung 3 lost 6 fps to it). */
+    int flush_limit = g->flush_quads * GP_QUAD_FLOATS * GP_QUAD_VERTS;
+    if (g->vert_count + GP_QUAD_FLOATS * GP_QUAD_VERTS > flush_limit) {
         fdk__gpu_flush(s);
     }
     if (g->dead || g->vert_count + GP_QUAD_FLOATS * GP_QUAD_VERTS >

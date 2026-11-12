@@ -4,6 +4,60 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
+## Round 72 (2026-11-12) — the confirmation sweep, and one giant batch was NOT the answer: pipeline chunking
+
+The owner's follow-up sweep on the GTX 1050 Ti (the first with
+Round 71's honest columns) confirmed the design AND caught a
+regression in the same table:
+
+CONFIRMED (the observations, now with numbers behind them):
+- Rungs 1-2 hold 144.2/143.0 fps at 54%/36% idle — the thread
+  sleeps in vblank exactly as a vsync-capped UI toolkit should.
+- Batch counts are now honest: 1.00/1.00/1.01/4.18 per frame =
+  ceil(quads/16384) at every rung. The 78-flush multiplication
+  from the units bug is dead.
+- "CPU usage grows to ~90% while GPU sits at 30%, one core busy,
+  others idle, fps sinks": thread-CPU-ms shows rung 4 spending
+  74.14 of 84.60 wall-ms emitting vertices on ONE core. That is
+  the intended single-emitter design; the GPU at 30% is STARVED,
+  not strained. Other cores idle = the device is the worker.
+
+THE CATCH (the owner's data, before/after the units fix):
+- rung 3: 48 fps (old, 682-quad chunks) -> 41.5 fps (new, one
+  16384-quad batch). rung 4: 13 -> 11.8.
+- Same emission cost both times (17.24/74.14 thread-ms) — the
+  regression is pipelining. The old 682-quad chunks, wasteful in
+  call count, overlapped by accident: the GPU rasterized chunk N
+  while the CPU emitted chunk N+1. One full-frame batch
+  serializes: the GPU idles during emission, then drains ~7-10 ms
+  as a tail AFTER it. Overlap beat call-count by more than the
+  ~0.17 ms/call the 78 flushes cost. (llvmpipe never showed this:
+  it rasterizes on the CPU anyway, so overlap has nothing to
+  overlap — the sandbox A/B'd clean while hardware regressed.
+  The reminder in the ledger: llvmpipe validates correctness and
+  CPU-lane numbers; only hardware validates GPU-side pipelining.)
+
+THE FIX: pipeline chunking. Capacity stays 16384 (the malloc, the
+overflow checks, the 9.4 MB staging); a NEW boundary —
+GP_FLUSH_QUADS, default 4096 — flushes mid-frame so rasterization
+of chunk N overlaps emission of chunk N+1, at 6x fewer calls than
+the bug and 4x better overlap than the full-frame batch. Read
+once at engine bring-up; FDK_GP_FLUSH_QUADS (256..16384, clamped)
+sweeps it per run on real drivers — the right value is
+driver-dependent (the NVIDIA-vs-llvmpipe split above is the
+exhibit).
+
+Also this round: the sandbox recycled between rounds (sway and
+Xvfb die with it; the repo and /home/z/apt prefix survived, the
+Round 71 push was HEAD). Restarted sway from the existing prefix
+with the restored config — no re-download needed.
+
+Verification: 4-rung sandbox sweep (rung 2 = 1.1 batches/frame,
+rung 4 = ~7 + sync flushes), FDK_GP_FLUSH_QUADS=16384 A/B (rung-2
+batches 22 -> 12), CPU leg (wall == thread-CPU, 0% idle),
+refusal rc=1, unit suite green, hold capture byte-exact background
++ 7638 colors with mid-frame chunk splits active.
+
 ## Round 71 (2026-11-12) — the hardware sweep's own numbers exposed a batch-units bug; the honest CPU column
 
 The owner's hardware sweep (GTX 1050 Ti) arrived with three
