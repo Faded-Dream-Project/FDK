@@ -69,7 +69,7 @@ The rule behind the split: anything every FDK app needs to *behave
 like a native app* (theme, dialogs, accessibility) is core; anything
 a shell or panel *provides to other apps* (tray, notifications,
 media) is add-on territory — exactly the add-on surface
-`fdk/extend.h` exists for.
+`fdk/fdk_extend.h` exists for.
 
 ## Where the truth is pinned
 

@@ -433,6 +433,26 @@ fdk_result fdk_ext_surface_create(fdk_ext_surface_kind *kind,
     window->ext = ext;
     ext->window = window;
 
+    /* Render-mode resolution for ADOPTED surfaces (the 2026-11-12
+     * audit's second catch, found live by the GL-quartet example
+     * leg): fdk_window_create resolves the window's effective mode
+     * ONCE (per-window override > context mode) and hands it to the
+     * backend through the options copy — but the adopt path takes
+     * no options, and the backend's adopt leaves the field zeroed,
+     * so every adopted surface ran FDK_RENDER_AUTO (0) regardless
+     * of the context's GPU/HYBRID mode. The X11 lane's
+     * GPU-eligibility and small-window gates both read the
+     * PWINDOW's mode, so a GPU context's ext surfaces silently
+     * stayed off the lane (make_current UNSUPPORTED — gl_win never
+     * engaged). Resolve here — the same ONCE discipline, through
+     * the backend's stamp op (the struct is opaque at this layer).
+     * An ext surface has no per-window override: the context's mode
+     * IS the effective mode. */
+    window->render_mode = ctx->render_mode;
+    if (ctx->ops->window_set_render_mode != NULL) {
+        ctx->ops->window_set_render_mode(pwindow, ctx->render_mode);
+    }
+
     /* Route events + teardown through the trampolines. */
     window->event_callback = ext_event_trampoline;
     window->event_callback_user_data = ext;

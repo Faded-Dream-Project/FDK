@@ -3600,6 +3600,21 @@ fdk_result fdk_wayland_window_gpu_readback(fdk_platform_window *pwindow,
 }
 
 /* ---- P2: GL for add-ons (fdk_ext_gl_* routing) ------------------------- */
+/* The adopt-path render-mode stamp (2026-11-12; see
+ * platform_internal.h's window_set_render_mode comment). Wayland's
+ * lane gates read the pwindow's mode at the EGL-window try-init
+ * during the first present — the same one-shot window as X11. */
+void fdk_wayland_window_set_render_mode(fdk_platform_window *pw,
+                                        int render_mode) {
+    if (pw == NULL || pw->rendered_ever) {
+        return; /* engaged or dead: the one-shot discipline holds */
+    }
+    if (pw->egl_win != NULL || pw->egl_downgraded || pw->vk_win != NULL) {
+        return; /* the lane already decided this window */
+    }
+    pw->render_mode = render_mode;
+}
+
 fdk_result fdk_wayland_window_gl_make_current(fdk_platform_window *pw) {
     if (pw == NULL || pw->egl_win == NULL) {
         return FDK_ERR_UNSUPPORTED;

@@ -35,7 +35,7 @@ set (`docs/dependencies.md`).
 > "green on main" means "not broken", not "released".
 
 **Status:** **in development — no stable release yet.** The public
-**extension API** (`fdk/extend.h`, `docs/EXTENDING.md`) is the
+**extension API** (`fdk/fdk_extend.h`, `docs/EXTENDING.md`) is the
 landmark of the current tree: a small, documented, stable, versioned
 surface that add-on packages build on so FDK stays simple and becomes
 the root other libraries grow from (`examples/19_extension_surfaces.c`
@@ -241,8 +241,9 @@ of this — it needs a reachable X11 or Wayland display to run.
 
 ## Examples
 
-Twelve example programs build with `make examples` (run from the
-repository root):
+Thirty-seven example programs build with `make examples` (run from
+the repository root; the table lists the highlights, `ls examples/`
+has the rest):
 
 | Example | Shows |
 |---|---|
@@ -258,6 +259,10 @@ repository root):
 | `10_file_manager` | FDK Files — a real small file manager |
 | `11_animation` | the animation engine: an easing-curve race |
 | `12_settings` | a complete settings application from the catalog |
+| `19_extension_surfaces` | the extension API reference consumer — a custom surface kind, popups, the present gate |
+| `22_ext_complete` | the extension API's uncovered quarter live — modal trio, GL quartet, layer setters, the X11 door |
+| `custom-widget` | public widget subclassing — the D1 embed pattern |
+| `panel-layer-shell` | a layer-shell panel through the first-class layer API |
 
 ## Themes
 

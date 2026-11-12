@@ -1075,6 +1075,23 @@ fdk_result fdk_x11_window_gpu_readback(fdk_platform_window *pwindow,
 }
 
 /* ---- P2: GL for add-ons (fdk_ext_gl_* routing) ------------------------- */
+/* The adopt-path render-mode stamp (2026-11-12; see
+ * platform_internal.h's window_set_render_mode comment). Only legal
+ * BEFORE the first framebuffer acquisition — gl_downgraded/gl_win
+ * decisions are one-shot by design; a stamp after engagement would
+ * have to tear down a live lane context, which is destroy-and-
+ * recreate territory, not a field write. */
+void fdk_x11_window_set_render_mode(fdk_platform_window *pw,
+                                    int render_mode) {
+    if (pw == NULL || pw->presented_ever) {
+        return; /* engaged or dead: the one-shot discipline holds */
+    }
+    if (pw->gl_win != NULL || pw->gl_downgraded) {
+        return; /* the lane already decided this window */
+    }
+    pw->render_mode = render_mode;
+}
+
 fdk_result fdk_x11_window_gl_make_current(fdk_platform_window *pw) {
     if (pw == NULL || pw->gl_win == NULL) {
         return FDK_ERR_UNSUPPORTED;

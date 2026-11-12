@@ -39,8 +39,8 @@ make test-x11   # build and run the X11 integration test suite
                 # (uses $DISPLAY if set, otherwise auto-starts/stops a
                 # throwaway Xvfb — requires Xvfb to be installed)
 make examples   # build example programs, linked against libfdk.a
-make tools      # build the command-line tools (fdk-theme, fdk-prefs);
-                # also part of plain `make` — see docs/cli.md
+make tools      # build the command-line tools (fdk-theme, fdk-prefs,
+                # fdk-set); also part of plain `make` — see docs/cli.md
 make bench      # build and run the performance baseline harness
                 # (release objects, no sanitizers; see docs/performance.md)
 make install    # install headers + both libraries + fdk.pc + the

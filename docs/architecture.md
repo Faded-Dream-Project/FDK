@@ -332,7 +332,7 @@ the last top-level window closes; windows can be created, shown,
 resized, and receive real translated input/configure/close events
 on both backends; applications can draw real pixels into a window's
 surface and present them — sending only what changed — on either
-backend (`examples/02_software_render.c`); and applications can now
+backend (`examples/02_rendering.c`); and applications can now
 build widget trees that FDK itself hit-tests, focuses, repaints,
 and presents (`examples/03_widgets.c`).
 See `ROADMAP.md`'s entries for the precise, honest lists of
@@ -368,11 +368,17 @@ it on expose, routes input events through
 callback (widget-consumed events don't re-deliver — documented in
 `fdk_widget.h`), and `fdk_window_paint` wraps tree-paint + present.
 
-One deliberate boundary: the public `fdk_widget` type is opaque, so
-the embed-fdk_widget-as-first-member subclassing pattern is internal
-to `src/` (via `widget_internal.h`); applications extend widgets via
-callbacks, user data, and the base style setters until the ABI
-freeze (see `docs/abi-policy.md`).
+One deliberate boundary, and its published bridge: the public
+`fdk_widget` type is opaque, but widget SUBCLASSING is a first-class
+public pattern since decision D1 (docs/abi-policy.md) — a subclass
+embeds the fixed 1024-byte `fdk_widget_embed` as its first member
+(`fdk_widget.h`, `FDK_WIDGET_EMBED_U64`), declares its class with
+`struct_size` + `instance_init`/`instance_finalize`, and reaches its
+per-instance state through `fdk_widget_instance()` /
+`FDK_WIDGET_INSTANCE()`. The internal widget struct is
+static-asserted to fit the budget so library growth never changes
+the public embed (`make sizes` prints the measured headroom);
+`examples/custom-widget.c` is the worked reference.
 
 ## Drag and drop (1.0.0)
 

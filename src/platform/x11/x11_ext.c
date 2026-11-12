@@ -442,18 +442,44 @@ fdk_result fdk_x11_subsurface_place(fdk_platform_window *pwindow,
 #include "window/window_internal.h"  /* the opaque types open inside the library */
 #include "core/context_internal.h"
 
+/* The backend gate the whole door owes its callers (the 2026-11-12
+ * extensibility audit's third catch, found live by the example's
+ * Wayland leg segfaulting inside XInternAtom): on a Wayland
+ * context ctx->conn is the WAYLAND connection struct, and reading
+ * c->display through the X11 lens hands Xlib a reinterpreted
+ * wl_display* — a garbage Display* and a segfault in the first
+ * atom call. The header promises "NULL when the context runs on
+ * Wayland"; the identity comparison against the backend factories
+ * (fdk_ext_active_backend's own idiom) is the honest check. */
+static int ctx_is_x11(const fdk_context *ctx) {
+    return ctx != NULL && ctx->conn != NULL &&
+           ctx->ops == fdk_platform_x11_ops();
+}
+
 Display *fdk_ext_x11_display(fdk_context *ctx) {
-    fdk_platform_connection *c = (ctx != NULL) ? ctx->conn : NULL;
-    return (c != NULL) ? c->display : NULL;
+    if (!ctx_is_x11(ctx)) {
+        return NULL; /* the documented NULL: not an X11 connection */
+    }
+    return ctx->conn->display;
 }
 
 unsigned long fdk_ext_x11_window_handle(fdk_window *window) {
     if (window == NULL || window->pwindow == NULL) {
         return 0;
     }
-    /* The X11 pwindow's first member IS the Window (x11_platform.h);
-     * the tagged-native contract makes the XID the documented read. */
-    return (unsigned long)*(const unsigned long *)window->pwindow;
+    if (!ctx_is_x11(window->ctx)) {
+        return 0; /* the documented 0: not an X11 window */
+    }
+    /* The X11 pwindow's SECOND member is the Window (x11_platform.h:
+     * conn first, xwindow second). The 2026-11-12 audit's fourth
+     * catch: the old "first member" read returned the CONNECTION
+     * POINTER as the XID (0x51d000000080-shaped values — heap
+     * addresses), so XChangeProperty wrote properties onto a bogus
+     * window (BadWindow swallowed by Xlib's error handler) and
+     * XGetWindowProperty answered BadAtom through the garbage. The
+     * honest read is the pwindow's own xwindow field. */
+    struct fdk_platform_window *xw = window->pwindow;
+    return (unsigned long)xw->xwindow;
 }
 
 static Atom ext_x11_atom(Display *dpy, const char *name) {
@@ -462,13 +488,16 @@ static Atom ext_x11_atom(Display *dpy, const char *name) {
 
 fdk_result fdk_ext_x11_set_window_type(fdk_window *window,
                                        const char *type_atom) {
-    fdk_platform_connection *c =
-        (window != NULL && window->ctx != NULL) ? window->ctx->conn : NULL;
-    if (c == NULL || window->pwindow == NULL || type_atom == NULL) {
+    if (!ctx_is_x11(window != NULL ? window->ctx : NULL)) {
+        return FDK_ERR_UNSUPPORTED; /* not an X11 connection */
+    }
+    fdk_platform_connection *c = window->ctx->conn;
+    if (window->pwindow == NULL || type_atom == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     Display *dpy = c->display;
-    Window w = (Window) * (const unsigned long *)window->pwindow;
+    struct fdk_platform_window *xw = window->pwindow;
+    Window w = xw->xwindow; /* the SECOND member (see window_handle) */
     Atom prop = ext_x11_atom(dpy, "_NET_WM_WINDOW_TYPE");
     Atom data = ext_x11_atom(dpy, type_atom);
     XChangeProperty(dpy, w, prop, XA_ATOM, 32, PropModeReplace,
@@ -478,13 +507,16 @@ fdk_result fdk_ext_x11_set_window_type(fdk_window *window,
 
 fdk_result fdk_ext_x11_set_struts(fdk_window *window,
                                   unsigned long struts[12]) {
-    fdk_platform_connection *c =
-        (window != NULL && window->ctx != NULL) ? window->ctx->conn : NULL;
-    if (c == NULL || window->pwindow == NULL || struts == NULL) {
+    if (!ctx_is_x11(window != NULL ? window->ctx : NULL)) {
+        return FDK_ERR_UNSUPPORTED; /* not an X11 connection */
+    }
+    fdk_platform_connection *c = window->ctx->conn;
+    if (window->pwindow == NULL || struts == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     Display *dpy = c->display;
-    Window w = (Window) * (const unsigned long *)window->pwindow;
+    struct fdk_platform_window *xw = window->pwindow;
+    Window w = xw->xwindow; /* the SECOND member (see window_handle) */
     Atom prop = ext_x11_atom(dpy, "_NET_WM_STRUT_PARTIAL");
     XChangeProperty(dpy, w, prop, XA_CARDINAL, 32, PropModeReplace,
                     (unsigned char *)struts, 12);

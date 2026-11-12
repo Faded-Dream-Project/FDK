@@ -130,7 +130,7 @@ D-Bus client — anything every FDK app needs to behave like a native
 app. The tray host (A-11/S-1), notification display (A-12/S-2), and
 media controls (MPRIS) belong in shell/panel add-on packages —
 anything a shell or panel provides TO other apps, which is exactly
-the add-on surface fdk/extend.h exists for. docs/dbus.md carries
+the add-on surface fdk/fdk_extend.h exists for. docs/dbus.md carries
 the split table; the roadmap's A-07/B-09 notes are annotated
  accordingly.
 

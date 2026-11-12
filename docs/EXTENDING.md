@@ -1,4 +1,4 @@
-# Extending FDK — the extension API (fdk/extend.h)
+# Extending FDK — the extension API (fdk/fdk_extend.h)
 
 FDK stays small and stays the ROOT: the core and the fdk tools ship
 together as one package, and everything else — panel layers,
@@ -427,16 +427,54 @@ On Wayland, bind your own globals through your OWN
 roundtrip collects them; FDK's listeners are dispatch-safe so the
 trip is harmless at any time.
 
-For TYPED native access there are now the opt-in headers —
+For TYPED native access there are the opt-in doors —
 `fdk/ext/wayland.h` and `fdk/ext/x11.h` (1.0.0): including one IS the
 opt-in (they pull the native headers themselves; the core public
-headers stay clean). Wayland: `wl_display`, `wl_registry`, the seats,
-`wl_data_device_manager`, FDK's `xkb_context`. X11: `Display*`, the
-window XID, EWMH dock helpers (`_NET_WM_WINDOW_TYPE`,
-`_NET_WM_STRUT_PARTIAL`). Coexistence rules are in the headers: bind
-your own globals (dispatch-safe), integrate your own event queue
-through the fd-source API, and treat raw input objects as read-only
-truth — synthetic input goes through FDK's public APIs.
+headers stay clean). The complete list, by name:
+
+**`fdk/ext/wayland.h`** (all `NULL`/0 when the context is not
+Wayland or has no live connection):
+
+| Accessor | Returns |
+|---|---|
+| `fdk_ext_wl_display(ctx)` | the `struct wl_display*` FDK drives |
+| `fdk_ext_wl_registry(ctx)` | FDK's own `wl_registry` (binding on it is dispatch-safe) |
+| `fdk_ext_wl_seat_count(ctx)` / `fdk_ext_wl_seat(ctx, i)` | the seats FDK bound (fixed after connect, stable order) |
+| `fdk_ext_wl_output_count(ctx)` / `fdk_ext_wl_output(ctx, i)` | the bound `wl_output`s (v3; zombies kept — a dead output's role is the compositor's refusal, not FDK's) |
+| `fdk_ext_wl_data_device_manager(ctx)` | the data-device manager, `NULL` when absent |
+| `fdk_ext_wl_xkb_context(ctx)` | FDK's `xkb_context` (compile your own keymaps; do not free) |
+
+**`fdk/ext/x11.h`** (all `NULL`/0/`FDK_ERR_UNSUPPORTED` when the
+context is not X11 — the backend gate is enforced since the
+2026-11-12 audit; before it, a Wayland context segfaulted inside
+`XInternAtom` through a reinterpreted connection pointer):
+
+| Accessor | Returns |
+|---|---|
+| `fdk_ext_x11_display(ctx)` | the `Display*` FDK drives |
+| `fdk_ext_x11_window_handle(win)` | the window's `Window` XID (0 when not an X11 window) |
+| `fdk_ext_x11_set_window_type(win, atom)` | sets `_NET_WM_WINDOW_TYPE` (pass `"_NET_WM_WINDOW_TYPE_DOCK"` for the dock role) |
+| `fdk_ext_x11_set_struts(win, struts[12])` | sets `_NET_WM_STRUT_PARTIAL` (12 longs) + the legacy `_NET_WM_STRUT` (4) |
+
+`examples/22_ext_complete.c` is the worked consumer of the X11 door
+(properties set, then read back through a second Xlib connection —
+the server as the truth) and of `fdk_ext_wl_display` + a private
+registry roundtrip on the Wayland side. Coexistence rules are in the
+headers: bind your own globals (dispatch-safe), integrate your own
+event queue through the fd-source API, and treat raw input objects
+as read-only truth — synthetic input goes through FDK's public APIs.
+
+**The unstable tier** (`fdk/unstable.h`): deeper access exported
+under the `FDK_UNSTABLE` version node — compile with
+`-DFDK_UNSTABLE=1` to reach it. It currently carries exactly two
+introspection functions, `fdk_unstable_api_level()` (returns
+`FDK_UNSTABLE_API_LEVEL`) and `fdk_unstable_tier_name()` (returns
+`"unstable"`); residents may change or vanish any release, and
+graduates move into the public headers. Per-glyph shaping, raw
+framebuffer access, and image-frame decode are the queued first
+candidates. Check the level at runtime the same way
+`FDK_EXT_API_VERSION` is checked — a mismatch is a refusal, never a
+guess.
 
 ## 11. The quality gates an add-on inherits
 
@@ -977,9 +1015,9 @@ the chooser widgets below.
 
 ---
 
-## The reference consumer: examples/19_extension_surfaces.c (in-tree)
+## The reference consumers (in-tree)
 
-The model this document describes has its proof in the tree:
+The model this document describes has its proofs in the tree:
 `examples/19_extension_surfaces.c` registers its OWN surface kind
 and exercises exactly the API above and nothing else — create and
 adopt, configure reporting, the present gate, popups, input, the
@@ -997,7 +1035,19 @@ The intended path for every future add-on author is this document
 plus the example: dispatch plus two backend files (wl/, x11/), and
 it never touches an FDK private struct.
 
-## 12. Compositor reality — what each cap reports where (v3)
+`examples/22_ext_complete.c` is the second reference consumer — the
+API's previously-uncovered quarter, found by the 2026-11-12
+extensibility audit: the modal trio (`fdk_ext_modal_run`/`quit`/
+`depth` composed with a timer), the GL quartet
+(`fdk_ext_gl_make_current` + a dlopen'd `glClear` + the fence pair +
+`fdk_ext_gl_swap`), the three layer setters with their documented
+post-configure refusal, and the X11 door (EWMH properties set and
+read back through a second server connection). Every leg reports
+PASS / SKIP (capability-gated, the reason named) / FAIL; the two
+companion examples together consume every function this header
+exposes.
+
+## 20. Compositor reality — what each cap reports where (v3)
 
 The caps are HONEST per connection: they bind the manager global and
 report whether the protocol actually negotiated. This table is what

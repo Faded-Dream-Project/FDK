@@ -44,6 +44,14 @@ typedef struct layer_state {
     struct wl_surface *wls;        /* setter key (the pwindow's) */
     struct zwlr_layer_surface_v1 *role;
     struct wl_output *output; /* borrowed (an FDK output object) */
+    int configured; /* the role's first configure arrived — the
+                     * setters' documented INVALID_STATE gate (the
+                     * 2026-11-12 docs-vs-code audit: the header
+                     * promised the refusal, the code never gated).
+                     * Set in layer_surface_configure BEFORE the
+                     * notify — the add-on's redraw runs inside the
+                     * notify's dispatch, so the flag must already
+                     * be the truth by then. */
     struct layer_state *next;
 } layer_state;
 
@@ -97,6 +105,9 @@ static void layer_surface_configure(void *data,
      * handshake; FDK acks HERE so the add-on's next present carries a
      * legal state (the same discipline the toplevel path follows). */
     zwlr_layer_surface_v1_ack_configure(role, serial);
+    st->configured = 1; /* the setters' gate turns on HERE, before
+                         * the notify dispatches the add-on's redraw
+                         * (see the struct comment). */
     /* A layer surface may be sized in only ONE dimension (the other
      * comes from its anchors and arrives as 0) — notify whenever the
      * configure carries at least one real dimension. */
@@ -273,6 +284,16 @@ fdk_result fdk_wayland_layer_surface_set(fdk_platform_window *pwindow,
         layer_state_find_by_wls(pwindow->surface);
     if (st == NULL) {
         return FDK_ERR_INVALID_ARGUMENT; /* not a layer surface */
+    }
+    if (st->configured) {
+        /* The documented contract (fdk_extend.h): the post-
+         * first-configure setters answer INVALID_STATE — layer
+         * state applies with the initial handshake; a re-map is
+         * destroy-and-recreate, the compositor's move. The
+         * 2026-11-12 audit found this gate missing (the setters
+         * happily mutated a configured role); the example's
+         * post-configure probe caught it live on sway. */
+        return FDK_ERR_INVALID_STATE;
     }
     switch (what) {
         case FDK_WL_LAYER_SET_LAYER:

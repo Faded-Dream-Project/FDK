@@ -1109,6 +1109,11 @@ fdk_result fdk_x11_window_gl_fence_insert(fdk_platform_window *pwindow,
                                           fdk_u64 *out_fence);
 fdk_result fdk_x11_window_gl_fence_wait(fdk_platform_window *pwindow,
                                         fdk_u64 fence);
+/* The adopt-path render-mode stamp (2026-11-12): platform_internal.h's
+ * window_set_render_mode comment is the contract. One-shot — a no-op
+ * once the lane decided or the first present happened. */
+void fdk_x11_window_set_render_mode(fdk_platform_window *pwindow,
+                                    int render_mode);
 fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
                                   const fdk_platform_damage *damage);
 

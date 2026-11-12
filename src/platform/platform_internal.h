@@ -655,6 +655,16 @@ typedef struct fdk_platform_ops {
                                          fdk_u64 *out_fence);
     fdk_result (*window_gl_fence_wait)(fdk_platform_window *pwindow,
                                        fdk_u64 fence);
+    /* OPTIONAL (the 2026-11-12 adopt-path render-mode fix): stamp
+     * the resolved effective mode onto an ADOPTED platform window
+     * after the fact — the wrapper layer (src/window/extend.c)
+     * resolves the context-mode inheritance that window_create does
+     * via its options copy but the adopt path never had, and the
+     * backend's gates (GPU eligibility, small-window policy) read
+     * the pwindow field before the first present. NULL = the
+     * backend has no mode-sensitive state (nothing to stamp). */
+    void (*window_set_render_mode)(fdk_platform_window *pwindow,
+                                   int render_mode);
     /* The CPU-vs-GPU readback seam (the per-region stats lane):
      * backend-agnostic routing so a Wayland session on a real GPU
      * produces the same stats the X11 lane does — the 2026-11-11

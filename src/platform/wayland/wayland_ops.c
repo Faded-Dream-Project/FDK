@@ -64,6 +64,7 @@ static const fdk_platform_ops g_wayland_ops = {
     .window_gl_set_frame_cb = fdk_wayland_window_gl_set_frame_cb,
     .window_gl_fence_insert = fdk_wayland_window_gl_fence_insert,
     .window_gl_fence_wait = fdk_wayland_window_gl_fence_wait,
+    .window_set_render_mode = fdk_wayland_window_set_render_mode,
     .window_gpu_readback = fdk_wayland_window_gpu_readback,
     .window_frame_ready = fdk_wayland_window_frame_ready,
     .window_ever_presented = fdk_wayland_window_ever_presented,

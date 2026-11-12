@@ -4,6 +4,95 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
+## Round 73 (2026-11-12) — the extensibility audit: 4 code bugs the docs predicted, 13 unconsumed APIs given a consumer, the docs made honest
+
+The owner's ask: confirm GPU work is done (it is — the three-way
+chunk sweep: 4096 and 2048 tie at rung 3, 16384 confirms the
+serialization loss; default stays 4096), then audit the extension
+API for addon-developer obstacles and reconcile docs with code.
+
+THE AUDIT (an agent pass + own verification): the extension API is
+sound — 66 functions, honest caps, append-only discipline. The
+real findings:
+- 13 ext functions with ZERO consumers anywhere: the modal trio,
+  the GL quartet (minus the frame callback), 3 layer setters —
+  plus the whole fdk/ext/x11.h door and half of ext/wayland.h.
+- 10 docs-vs-code drift points, worst: architecture.md's widget
+  section CONTRADICTING the shipped D1 embed API; README naming
+  the wrong header path in 3 places; two sections numbered 12.
+- The sandbox recycled HARD this round: /home/z/fdk-repo and the
+  whole /home/z/apt prefix died. Recovery: clone from GitHub (the
+  Round 72 push), restore_wayland_toolchain.sh, sway config
+  recreated (now written by setup-sandbox.sh — the config was the
+  one piece the restore script missed; sway segfaulted on its
+  absence, leaving the `core` file in my-project).
+
+THE 4 CODE BUGS (every one found by the new example's legs, every
+one the DOCS had already promised correctly — the code was the
+liar):
+1. Wayland layer setters never gated post-configure: the header
+   promises FDK_ERR_INVALID_STATE after the first configure;
+   wayland_layer.c had no check at all. Fixed: `configured` flag
+   set in the configure listener before the notify dispatch, gated
+   in fdk_wayland_layer_surface_set.
+2. Adopted ext surfaces never inherited the context's render mode:
+   window_create resolves effective mode once via its options
+   copy, but the adopt path took no options — every adopted
+   surface ran FDK_RENDER_AUTO (0). A GPU context's ext surfaces
+   silently stayed off the lane (make_current UNSUPPORTED). Fixed:
+   the wrapper layer (window/extend.c) stamps the context mode
+   through a new ops entry window_set_render_mode (both backends;
+   one-shot: no-op once the lane decided or the first present
+   happened).
+3. The X11 door had NO backend gate: on a Wayland context its
+   helpers read the WAYLAND conn struct through the X11 lens and
+   segfaulted inside XInternAtom (found live: the example's
+   Wayland leg died in the first atom call). Fixed: ctx_is_x11()
+   (the fdk_ext_active_backend identity idiom) gates every door
+   entry — display/handle answer the documented NULL/0, setters
+   answer FDK_ERR_UNSUPPORTED.
+4. The door's window_handle read the WRONG STRUCT MEMBER: "the X11
+   pwindow's first member IS the Window" — it is the SECOND (conn
+   first). The accessor returned a heap pointer as the XID
+   (0x51d000000080-shaped values); XChangeProperty wrote onto a
+   bogus window, BadWindow swallowed by Xlib. Fixed: read
+   xwindow through the typed struct (x11_ext.c sees it).
+
+THE NEW EXAMPLE: examples/22_ext_complete.c — the reference
+consumer for the uncovered quarter. Four legs, each PASS/SKIP(cap
+named)/FAIL: the modal trio (run/quit/depth composed with a
+repeating timer — a one-shot frees itself when it fires, the
+documented contract my first draft violated: my own UAF, the docs
+were right), the GL quartet (make_current, a dlopen'd glClear, the
+fence pair, swap — after one present to lazily engage the lane;
+FDK_GL_FORCE set for llvmpipe), the layer setters (with the
+post-configure refusal probe), and the X11 door (EWMH properties
+set then read back through a second server connection). Both lanes
+green: X11 3 PASS + 1 honest SKIP (no layer shell), Wayland 3 PASS
++ 1 honest SKIP (not X11). The Wayland kind branch uses the
+ext/wayland.h door + a private registry roundtrip (the
+12_vulkan_surface.c pattern).
+
+THE DOCS: architecture.md's widget section rewritten to the
+shipped D1 reality (embed + FDk_WIDGET_INSTANCE, custom-widget.c
+as the reference); the 02_software_render.c path fixed; README —
+correct header path (fdk/fdk_extend.h, 3 files), 37 examples, the
+table grown by the reference consumers; build.md names all three
+tools (fdk-set was missing); EXTENDING.md — the duplicate section
+12 renumbered to 20, the doors documented BY NAME (two tables:
+every ext/wayland.h and ext/x11.h accessor), the unstable tier
+documented (its two functions, the queue), and the second
+reference consumer section.
+
+Verification: unit suite green, all 36 examples build, X11
+integration suite green, Wayland integration suite — every section
+[ok] on my build; the final-teardown SEGV in
+fdk_wayland_disconnect is PRE-EXISTING (bisected: identical crash
+on the unmodified Round 72 baseline; an llvmpipe/EGL dlclose-
+adjacent teardown quirk of this sandbox, queued for a real
+compositor rig). verify-exports: 1114 symbols, ABI unchanged (the
+ops addition is internal; no public symbol touched).
+
 ## Round 72 (2026-11-12) — the confirmation sweep, and one giant batch was NOT the answer: pipeline chunking
 
 The owner's follow-up sweep on the GTX 1050 Ti (the first with
