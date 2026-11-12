@@ -187,7 +187,14 @@ CONFIG_STAMP := $(BUILD_DIR)/.config-$(FDK_CONFIG)-wl$(BUILD_WAYLAND)
 ENV_CFLAGS  := $(CFLAGS)
 ENV_LDFLAGS := $(LDFLAGS)
 CFLAGS  := $(STD) $(WARN) $(FEATURE) $(CONFIG_FLAGS) $(ENV_CFLAGS)
-CPPFLAGS:= -Iinclude -Isrc
+# FDK_EXAMPLE_LSAN_SUPP: the ABSOLUTE path of the repo's LSan
+# suppression list, baked into the sanitized examples through
+# examples/example_lsan.h (__lsan_default_options returns it as the
+# leak-check default; LSAN_OPTIONS still overrides). $(CURDIR)
+# expands at parse time to the make invocation directory — the
+# repo root — so the examples carry the tree's own list wherever
+# they run from.
+CPPFLAGS:= -Iinclude -Isrc -DFDK_EXAMPLE_LSAN_SUPP='"$(CURDIR)/tests/data/lsan-gl.supp"'
 # -ldl: the text layer dlopen()s fontconfig at run time (optional
 # system font discovery, see src/text/fontscan.c). No-op stub on
 # glibc >= 2.34 where dlopen lives in libc; required for static

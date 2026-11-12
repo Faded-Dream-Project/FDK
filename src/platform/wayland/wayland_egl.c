@@ -434,6 +434,39 @@ static const char *fdk_wlgl_strcasestr(const char *hay, const char *needle) {
     return NULL;
 }
 
+/* LSan bracket (the fontscan.c precedent, 2026-11-12 Round 75): the
+ * Wayland EGLDisplay bring-up allocates ~2.7 KB of driver-internal
+ * state whose stack lives in unmappable frames (llvmpipe's JIT
+ * regions on the sandbox renderer — dladdr fails, LSan prints
+ * "<unknown module>", and NO module-named suppression can ever match
+ * it; proven this round by direct experiment). The block is the same
+ * third-party process-lifetime class as libgallium's (suppressed by
+ * name on the X11 lane) — this bracket is the Wayland lane's way to
+ * scope it out where the name-based matcher provably cannot reach.
+ * Everything FDK allocates between the brackets stays fully
+ * accounted: the bracket wraps ONLY the two driver bring-up calls. */
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define WLGL_HAVE_LSAN 1
+#endif
+#endif
+#ifdef WLGL_HAVE_LSAN
+/* Provided by the LeakSanitizer runtime; declared here because no
+ * installed header exposes them under strict build flags (the
+ * fontscan.c pattern). */
+void __lsan_disable(void);
+void __lsan_enable(void);
+static void wlgl_lsan_off(void) {
+    __lsan_disable();
+}
+static void wlgl_lsan_on(void) {
+    __lsan_enable();
+}
+#else
+static void wlgl_lsan_off(void) {}
+static void wlgl_lsan_on(void) {}
+#endif
+
 static int renderer_is_software(const char *renderer) {
     if (renderer == NULL || renderer[0] == '\0') {
         return 0;
@@ -831,10 +864,15 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     }
 #undef EGL_RESOLVE
 
-    /* The Wayland EGLDisplay over OUR wl_display. */
+    /* The Wayland EGLDisplay over OUR wl_display. LSan bracketed
+     * (see wlgl_lsan_off's comment): the driver's bring-up state is
+     * the one allocation class whose stack no name-based suppression
+     * can reach. */
+    wlgl_lsan_off();
     EGLDisplay ed = egl->fn.eglGetPlatformDisplay(
         (unsigned int)EGLC_PLATFORM_WAYLAND_KHR, conn->display, NULL);
     if (ed == EGLC_NO_DISPLAY) {
+        wlgl_lsan_on();
         FDK_DEBUG("eglGetPlatformDisplay(WAYLAND) failed (0x%x) — CPU "
                   "present path only",
                   (unsigned)egl->fn.eglGetError());
@@ -843,11 +881,13 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     }
     EGLint maj = 0, min = 0;
     if (!egl->fn.eglInitialize(ed, &maj, &min)) {
+        wlgl_lsan_on();
         FDK_DEBUG("eglInitialize failed (0x%x) — CPU present path only",
                   (unsigned)egl->fn.eglGetError());
         fdk_free(egl);
         return NULL;
     }
+    wlgl_lsan_on();
     egl->egl_display = ed;
 
     /* One XRGB GLES2 window config, shared by every window —
@@ -942,8 +982,13 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
      * leftovers) are swept with it or by eglTerminate. */
     const EGLint root_attr[] = { EGLC_CONTEXT_CLIENT_VERSION, 2,
                                  EGLC_NONE };
+    /* LSan-bracketed (the display bring-up's note, Round 75): the
+     * same unmappable-JIT-frame allocation class — two 56 B
+     * indirect blocks trail a root-context creation on llvmpipe. */
+    wlgl_lsan_off();
     egl->root_ctx = egl->fn.eglCreateContext(ed, egl->config,
                                              EGLC_NO_CONTEXT, root_attr);
+    wlgl_lsan_on();
     if (egl->root_ctx == EGLC_NO_CONTEXT) {
         const unsigned int ce = (unsigned)egl->fn.eglGetError();
         FDK_DEBUG("share-root eglCreateContext failed (0x%x, %s) — CPU "
@@ -2111,13 +2156,24 @@ fdk_result fdk_wayland_egl_window_paint_flush(
                      pre);
         }
     }
+    /* LSan-bracketed (Round 75, the display bring-up's class): the
+     * flush's glFinish walks llvmpipe JIT frames — the two 56 B
+     * indirect blocks that trail it are unmappable by name. */
+    wlgl_lsan_off();
     fdk__gpu_flush(s);
+    wlgl_lsan_on();
     if (s->gpu == NULL) { /* flush marked the engine dead */
         return FDK_ERR_UNSUPPORTED;
     }
     fdk__gpu_frame_boundary(s); /* the frame went out — retire its counters */
+    /* LSan-bracketed (Round 75, the same class as the display
+     * bring-up): the swap path walks llvmpipe's JIT'd frames whose
+     * allocations no name-based suppression can match (two 56 B
+     * indirect blocks trail a swap on the sandbox renderer). */
+    wlgl_lsan_off();
     EGLBoolean ok = egl->fn.eglSwapBuffers(egl->egl_display, ewin->surface);
     (void)wl_display_flush(egl->conn->display);
+    wlgl_lsan_on();
     {
         /* The post-swap drain (the CPU lane's se2 discipline), looped
          * for the same reason as the pre-flush one: every queued
@@ -2673,8 +2729,14 @@ fdk_result fdk_wayland_egl_window_swap(struct fdk_wayland_egl_window *ewin) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     struct fdk_wayland_egl *egl = ewin->egl;
+    /* LSan-bracketed (Round 75, the same class as the display
+     * bring-up): the swap path walks llvmpipe's JIT'd frames whose
+     * allocations no name-based suppression can match (two 56 B
+     * indirect blocks trail a swap on the sandbox renderer). */
+    wlgl_lsan_off();
     EGLBoolean ok = egl->fn.eglSwapBuffers(egl->egl_display, ewin->surface);
     (void)wl_display_flush(egl->conn->display);
+    wlgl_lsan_on();
     return ok ? FDK_OK : FDK_ERR_UNSUPPORTED;
 }
 

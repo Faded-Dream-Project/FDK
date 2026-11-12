@@ -2,6 +2,8 @@
 
 #include "platform/wayland/wayland_platform.h"
 #include "render/vk_present.h"
+#include "fdk/fdk_extend.h" /* fdk_ext_kind_destroy — the backend's own
+                             * layer kind dies at teardown (Round 75) */
 
 #include "generated/viewporter-client-protocol.h"
 #include "generated/fractional-scale-v1-client-protocol.h"
@@ -549,6 +551,20 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
     fdk_free(conn->windows);
 
     fdk_wayland_clipboard_teardown(conn);
+
+    /* The backend's OWN extension kind (Round 75, the example-22
+     * LeakSanitizer catch): fdk_wayland_layer_surface_create
+     * registers "fdk-layer-shell-v1" lazily on first use, but the
+     * connection teardown never destroyed it — an 80+19 B FDK-owned
+     * leak on every Wayland run that touched the layer shell. The
+     * add-on contract says kinds are add-on-owned; the BACKEND is
+     * this kind's add-on, so it destroys it here — after the
+     * windows (no live surfaces to refuse the destroy) and before
+     * the connection's own memory goes. */
+    if (conn->layer_kind != NULL) {
+        (void)fdk_ext_kind_destroy(conn->layer_kind);
+        conn->layer_kind = NULL;
+    }
 
     /* GPU lane (1.0.0 / D-1): windows were force-destroyed above, so
      * their per-window lane state is gone; the shared state dies

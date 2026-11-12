@@ -181,3 +181,41 @@ leak:libEGL_nvidia
 # driver's internal atexit ordering, which ASan's exit-time check
 # pre-empts). Suppressed by MODULE so FDK frames stay strict.
 leak:libnvidia-glcore
+
+# OPERATIONAL NOTES (Round 75, 2026-11-12 — the "it still crashes"
+# report). Three findings, all verified on this stack:
+#
+# 1. THE FLAG'S CHANNEL: 'leak:<...>' entries are LSan-channel
+#    syntax. Packing suppressions= inside ASAN_OPTIONS fails at
+#    parse time ("AddressSanitizer: failed to parse suppressions",
+#    reproducible with a one-line file and a 100-byte malloc). The
+#    flag must travel in LSAN_OPTIONS=suppressions=<this file> —
+#    the form every Makefile sanitized target already uses.
+#
+# 2. THE BARE-RUN BIND: sanitized EXAMPLES now carry the list
+#    themselves (examples/example_lsan.h — __lsan_default_options
+#    returns suppressions=<make-baked absolute path>, and
+#    LSAN_OPTIONS in the environment still overrides). The
+#    implementation lesson, bought with a core dump and a ~15-program
+#    bisect: default_options runs BEFORE main while ASan init is
+#    still in flight — ANY libc call from it (read, readlink,
+#    snprintf, even raw syscall) re-enters the interceptor layer and
+#    dies (SIGSEGV, or the interceptor's own CHECK failed:
+#    asan_interceptors.cpp:509 "!AsanInitIsRunning()"). The function
+#    must be a pure compile-time string. scripts/s28_lsan_strictness_
+#    probe.c proves engagement AND strictness (an FDK/exe-frame leak
+#    still fails the run with the bind active).
+#
+# 3. THE UNMATCHABLE CLASS: llvmpipe's JIT-compiled frames map to no
+#    module, so LSan prints "<unknown module>" and NO name-based
+#    entry here can ever match them (proven by direct experiment:
+#    neither leak:libEGL_mesa nor a function-name entry reached
+#    through three unknown frames). The Wayland lane's driver-
+#    interaction seams are therefore __lsan_disable/__lsan_enable
+#    BRACKETS in source (the fontscan.c precedent): the EGL display
+#    bring-up, the share-root context creation, the swap, and the
+#    flush — src/platform/wayland/wayland_egl.c, wlgl_lsan_off/on.
+#    FDK-owned allocations between brackets stay fully accounted;
+#    the Round 75 catch that proved it: 80+19 B in
+#    fdk_ext_register_kind frames from conn->layer_kind, a REAL
+#    leak, fixed in the connection teardown the same round.

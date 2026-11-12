@@ -4,6 +4,82 @@
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.
 
+## Round 75 (2026-11-12) — "it still crashes": the leak report was never a crash; the bind, the early-init law, and a real FDK leak
+
+The owner's GTX re-run of examples/22_ext_complete: 'fence pair
+waited' ON NVIDIA (Round 74's fix confirmed on real silicon) — and
+the same 1,884,897 B / 566-allocation libnvidia-glcore exit report,
+byte-identical, because the run carried no LSAN_OPTIONS: the
+suppression list never engaged. Expecting every bare run to remember
+an env prefix is a footgun; this round removes it.
+
+THE BIND (examples/example_lsan.h): sanitized examples now define
+__lsan_default_options(), returning suppressions=<absolute path to
+tests/data/lsan-gl.supp> baked in at make time (CPPFLAGS'
+FDK_EXAMPLE_LSAN_SUPP = $(CURDIR)/tests/data/lsan-gl.supp). LSan
+merges those as DEFAULTS before applying LSAN_OPTIONS — an exported
+LSAN_OPTIONS always wins; a bare run gets the list; a hand-rolled
+cc line (no define) compiles to the empty string, today's exact
+behavior. Verified: bare X11 run exits 0 with the Suppressions-used
+footer (481 / 108124 B / libGLX_mesa), cwd-independent, and
+LSAN_OPTIONS= (empty) overrides back to the full report.
+
+THE EARLY-INIT LAW (the hard-won lesson): the first cut of the
+header probed candidate paths at call time and SEGFAULTED before
+the first line of output. A ~15-program bisect isolated the rule:
+__lsan_default_options runs during libasan's flag init, BEFORE
+main, while AsanInitIsRunning() is true — ANY libc call from it
+(read, readlink, readlinkat, snprintf, even raw syscall()) re-
+enters the interceptor layer before its TLS guards exist and dies;
+access() got further and tripped the interceptor's own CHECK
+failed: asan_interceptors.cpp:509 "!AsanInitIsRunning()" the moment
+a probe hit. There is NO safe libc subset. The function must be a
+pure compile-time string. (The mis-diagnosis path is documented in
+the header so nobody retraces it; scripts/core_rip.py survives as
+the hand-rolled NT_PRSTATUS parser that pulled RIP/RSP out of the
+core when gdb was absent.)
+
+THE STRICTNESS PROOF (scripts/s28_lsan_strictness_probe.c): the
+bind engages (probe run 1, exit 0) and stays strict (run 2's
+deliberate exe-frame 31337 B malloc still reports and exits 1).
+The proof became REAL mid-round: the Wayland bare run caught an
+80+19 B FDK-owned leak — fdk_ext_register_kind frames from
+conn->layer_kind, registered lazily by the backend's own layer-
+surface path and never destroyed at teardown. Fixed: the Wayland
+connection teardown now destroys the kind (the backend IS this
+kind's add-on; the destroy sits after the windows so nothing is
+live to refuse it).
+
+THE UNMATCHABLE CLASS: llvmpipe's JIT-compiled frames map to no
+module — LSan prints "<unknown module>" and NO name-based
+suppression entry can ever match them (proven by direct
+experiment: neither leak:libEGL_mesa nor a function-name entry
+reached through three unknown frames). The Wayland lane's four
+driver-interaction seams are therefore __lsan_disable/__lsan_enable
+brackets in source (the fontscan.c precedent, wlgl_lsan_off/on):
+the EGL display bring-up (eglGetPlatformDisplay + eglInitialize,
+~2.7 KB), the share-root eglCreateContext, the eglSwapBuffers, and
+the engine's glFinish flush — together scoping out the 2.7 KB +
+112 B driver state the matcher provably cannot reach, while every
+FDK allocation between brackets stays fully accounted (the
+layer_kind catch above proves the accounting was live).
+
+OPERATIONAL NOTES added to tests/data/lsan-gl.supp's header: the
+flag's channel (LSAN_OPTIONS, never ASAN_OPTIONS), the bind, the
+early-init law, and the unmatchable class. The shutdown note in
+the D-Bus log names all three driver-state blocks as of Round 74.
+
+Sandbox: fully recycled between rounds (repo re-cloned at 1cf76a1,
+toolchain rebuilt via scripts/setup-sandbox.sh, sway config
+recreated at /home/z/apt/sway-conf — floats FDK windows at a known
+position per docs/testing.md).
+
+Verification: unit suite green, all examples build, verify-exports
+green, X11 integration suite green, Wayland suite 48/48 sections
+with the known pre-existing teardown SEGV (Round 73's bisect),
+both lanes' bare 22_ext_complete runs exit 0 with zero leak
+report, s28 probe both directions.
+
 ## Round 74 (2026-11-12) — the GTX run's fence verdict: three constant bugs, all mine, all now dead
 
 The owner's real-hardware run of examples/22_ext_complete (GTX

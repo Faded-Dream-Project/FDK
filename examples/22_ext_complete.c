@@ -59,6 +59,13 @@
  * directly — including it IS the opt-in (docs/EXTENDING.md §10). */
 #include "fdk/ext/x11.h"
 #include "fdk/ext/wayland.h"
+
+/* The sanitized run's leak-strictness bind (examples/example_lsan.h):
+ * on ASan builds this seeds LSan's defaults with the repo's
+ * third-party suppression list — resolved from /proc/self/exe so a
+ * bare ./build/examples/22_ext_complete from any cwd exits clean,
+ * with LSAN_OPTIONS still overriding. Non-ASan builds: nothing. */
+#include "example_lsan.h"
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
