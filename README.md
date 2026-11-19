@@ -14,7 +14,7 @@ developed as part of the
 [![Built with C](https://img.shields.io/badge/built%20with-C-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Standard: C17](https://img.shields.io/badge/standard-C17-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Backends: X11 and Wayland](https://img.shields.io/badge/backends-X11%20%7C%20Wayland-blueviolet?style=flat-square)](docs/architecture.md)
-[![Release: 1.0.0](https://img.shields.io/badge/release-1.0.0-brightgreen?style=flat-square)](https://github.com/Faded-Dream-Project/FDK/releases/tag/v1.0.0)
+[![Development](https://img.shields.io/badge/status-development-orange?style=flat-square)](https://github.com/Faded-Dream-Project/FDK/releases)
 [![Part of Faded Dream](https://img.shields.io/badge/part%20of-Faded%20Dream-purple?style=flat-square)](https://github.com/Faded-Dream-Project/Faded-Dream-dotfiles)
 
 </div>
@@ -29,13 +29,18 @@ layout, text, and theme engines, and FDK-drawn window decorations —
 with no GTK/Qt dependency and a minimal, always-justified dependency
 set (`docs/dependencies.md`).
 
-> **FDK 1.0.0 is released** — re-cut 2026-11-18 with app-owned GL
-  (`fdk_gl.h`); tag [`v1.0.0`](https://github.com/Faded-Dream-Project/FDK/releases/tag/v1.0.0),
-> the first official release. `main` remains the only branch and the
-> one to build from: every push is CI-gated — "green on main" means
-> "not broken"; the releases page is what "released" means.
+> **The 1.0.0 re-release is WITHDRAWN (2026-11-19)** — the release
+> and its tag are gone: the GL stack it shipped carried six defects
+> found by the first downstream integrator (Halcyon), among them a
+> deterministic SEGV on every GPU-mode Wayland window and a GL
+> viewport widget that was never visible. All six are fixed on
+> `main` (CHANGELOG's 2026-11-19 withdrawal section); the project is
+> a **development version** again — build from `main`, where every
+> push is CI-gated. The packaging channel stays wired and will re-cut
+> a release when the owner says so.
 
-**Status:** **1.0.0 — the first official release** (2026-11-12, tag `v1.0.0`). The public
+**Status:** **development version** (1.0.0 withdrawn twice:
+2026-11-09 and 2026-11-19 — see CHANGELOG). The public
 **extension API** (`fdk/fdk_extend.h`, `docs/EXTENDING.md`) is the
 landmark of the current tree: a small, documented, stable, versioned
 surface that add-on packages build on so FDK stays simple and becomes
@@ -46,8 +51,7 @@ versioning policy and the SONAME scheme (`libfdk.so.1`, ABI
 append-only) are development-time policy — they govern how the tree
 evolves through the 1.0.0 release and beyond. A cross-distribution packaging
 + CI pipeline is built and kept green on every push as a validation
-check (`docs/packaging.md`); the v1.0.0 source is published on the
-[releases page](https://github.com/Faded-Dream-Project/FDK/releases). The
+check (`docs/packaging.md`). The
 phase-by-phase account of what is and isn't covered lives in
 `ROADMAP.md` and `PROGRESS.md`.
 
@@ -178,7 +182,9 @@ suite (`docs/testing.md`).
 
 FDK **1.0.0** is released — the first official release ships as
 native distro packages for five families, built and verified by the
-release pipeline (`docs/packaging.md`):
+release pipeline (`docs/packaging.md`). No release is currently
+published (the 1.0.0 re-release was withdrawn 2026-11-19); the table
+shows what the channel produces on the next `v*` tag:
 
 | Family | Runtime package | Development package |
 |---|---|---|
@@ -188,8 +194,8 @@ release pipeline (`docs/packaging.md`):
 | Void Linux (`.xbps`) | `fdk-libs-1.0.0_1.x86_64.xbps` | `fdk-devel-1.0.0_1.x86_64.xbps` |
 | Alpine (`.apk`, musl) | `fdk-1.0.0-r0-x86_64.apk` | `fdk-dev-1.0.0-r0-x86_64.apk` |
 
-All are on the
-[`v1.0.0` releases page](https://github.com/Faded-Dream-Project/FDK/releases/tag/v1.0.0),
+Each release publishes them on the
+[releases page](https://github.com/Faded-Dream-Project/FDK/releases),
 built for `x86_64` against glibc (Alpine: musl). Install with your
 package manager (`apt install ./libfdk1_*.deb`, `dnf install
 ./libfdk1-*.rpm`, `pacman -U fdk-*.pkg.tar.zst`, `xbps-install

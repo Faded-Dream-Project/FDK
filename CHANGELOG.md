@@ -1,4 +1,59 @@
-## [1.0.0] — 2026-11-18 — THE RE-RELEASE (app-owned GL)
+## 1.0.0 — 2026-11-19 — WITHDRAWN AGAIN (back to development)
+
+The 2026-11-18 re-release is withdrawn: its GL stack shipped six
+defects found by Halcyon's integrations (the downstream AI
+developer's spike, docs/FDK-REQUESTS.md sessions 7-8) — a
+deterministic SEGV on every GPU-mode Wayland window, swapped frame
+callback arguments, an ext-GL lane that never attached on X11, a
+GL viewport widget that was never visible, an undocumented
+llvmpipe byte-index failure mode, and an X11-only installed build.
+All six are fixed on main (see the session's entries below), but a
+release cut with the defects stays withdrawn: the release channel
+stays wired (.github/workflows/release.yml: the bundle plus the
+five distro families' packages, built on a v* tag) and no tag
+exists — the project is a development version again until the
+owner says otherwise.
+
+The fixed GL stack on main, summarized:
+
+- **R-006 (the crash):** the Wayland EGL loader called
+  `eglGetProcAddress` before resolving it — `call 0x0`, SEGV at
+  pc=0 on the first `fdk_window_create` of any GPU-mode process.
+  The resolve order is fixed (`eglGetProcAddress` first, with a
+  dlsym fallback for `eglBindAPI`).
+- **R-002 (the argument order):** the ext GL frame callback was
+  invoked as `fn(user, surface)` at four sites while the header
+  declares `(surface, user)` — swap-symmetric draws hid it until a
+  counting callback proved the order. All four call sites fixed.
+- **R-001 (ext GL on X11):** an adopted extension window never
+  attached the GL lane (nothing acquires a framebuffer on the
+  add-on's behalf), so `fdk_ext_gl_make_current` /
+  `set_frame_callback` answered `FDK_ERR_UNSUPPORTED` with
+  `FDK_EXT_CAP_GL` true. Both backends now attach the lane on
+  demand through the normal engage machinery.
+- **R-003 (the invisible viewport):** the GL viewport widget drew
+  into the back buffer and the present's fullscreen CPU quad
+  covered it — the region was NEVER visible (pixel-proven twice by
+  the integrator). The widget now reads the region back after the
+  render callback (new `window_gl_read_region` lane op, both
+  backends) and composites it into the CPU surface in paint order;
+  the test suite grows an Xvfb+llvmpipe pixel proof.
+- **R-004 (llvmpipe byte indices):**
+  `glDrawElements(GL_UNSIGNED_BYTE)` rasterizes nothing and reports
+  no error on llvmpipe's core profile — driver-side, unfixable in
+  FDK. Documented in fdk_gl.h's app-context contract (use
+  SHORT/INT indices).
+- **R-002 (text rasterization, the API request):**
+  `fdk_font_rasterize_utf8` — the shaped placement walk of
+  `fdk_surface_draw_utf8` blended into caller-owned ARGB8888
+  memory. No surface, no display: cached label textures, atlas
+  pages, overlay sprites. Twelve-leg test included.
+- **R-005 (Wayland in the channel):** the release bundle now
+  GATES on the Wayland backend — the release fails if
+  `libfdk.so.1` does not NEEDED-link `libwayland-client` (the
+  installed build Halcyon tested was X11-only).
+
+## [1.0.0] — 2026-11-18 — THE RE-RELEASE (withdrawn 2026-11-19)
 
 The owner's 2026-11-18 directive, closed on both backends and
 re-cut under the same 1.0.0 (the first-release number kept by the
