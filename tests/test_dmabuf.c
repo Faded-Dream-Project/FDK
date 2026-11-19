@@ -119,9 +119,10 @@ int main(void) {
         uint8_t buf[W * H * 4];
         for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
-                uint8_t *px = buf + (size_t)y * W * 4 + (size_t)x * 4;
+                uint8_t *px = buf + (size_t)y * (size_t)W * 4u +
+                            (size_t)x * 4u;
                 /* RA24 = RGBA8888: the bytes are R,G,B,A in memory */
-                px[0] = (uint8_t)(y * 30);  /* R: the vertical ramp */
+                px[0] = (uint8_t)((unsigned)y * 30u); /* R: the ramp */
                 px[1] = 10;                 /* G */
                 px[2] = (uint8_t)(x * 30);  /* B */
                 px[3] = 0xEE;               /* A */
@@ -137,7 +138,7 @@ int main(void) {
         lp.height = H;
         lp.fourcc = FOURCC('R', 'A', '2', '4');
         lp.planes[0].fd = mfd;
-        lp.planes[0].stride = W * 4;
+        lp.planes[0].stride = (fdk_u32)W * 4u;
         lp.planes[0].modifier = 0; /* LINEAR */
         fdk_texture *lt = NULL;
         fdk_result lr = fdk_texture_import_dmabuf(&lp, &lt);
@@ -313,16 +314,16 @@ int main(void) {
         fdk_i32 impl_only = -1;
         /* max_modifiers=0 with a NULL out array: the documented
          * "tell me the count" call — *out_n is ALWAYS the true count */
-        fdk_result qr = fdk_texture_dmabuf_query(g_ctx_dbg,
-                                                 FOURCC('R', 'A', '2', '4'),
-                                                 NULL, 0, &n_only,
-                                                 &impl_only);
+        fdk_result qr2 = fdk_texture_dmabuf_query(g_ctx_dbg,
+                                                  FOURCC('R', 'A', '2', '4'),
+                                                  NULL, 0, &n_only,
+                                                  &impl_only);
         printf("[info] count-only query: result=%d n=%d implicit=%d\n",
-               (int)qr, (int)n_only, (int)impl_only);
+               (int)qr2, (int)n_only, (int)impl_only);
         /* No lane here: the honest UNSUPPORTED (out_n untouched — the
          * contract promises the true count only on success). On a DRM
          * box this returns OK with the real count. */
-        CHECK(qr == FDK_ERR_UNSUPPORTED,
+        CHECK(qr2 == FDK_ERR_UNSUPPORTED,
               "count-only query without the lane: honest UNSUPPORTED");
     }
 
@@ -348,21 +349,25 @@ int main(void) {
 
     /* GBM: allocate a linear ARGB8888 bo, map it, paint a pattern,
      * export the dmabuf fd, import through FDK, verify the pixels */
-    struct gbm_dev *(*gbm_create_device)(int) =
-        dlsym(gbm, "gbm_create_device");
+    struct gbm_dev *(*gbm_create_device)(int);
     struct gbm_bo *(*gbm_bo_create)(struct gbm_dev *, uint32_t, uint32_t,
-                                    uint32_t, uint32_t) =
+                                    uint32_t, uint32_t);
+    *(void **)&gbm_bo_create = dlsym(gbm, "gbm_bo_create");
+    /* POSIX void** store: direct dlsym->function-ptr init trips
+     * -Wpedantic on newer compilers. */
+    *(void **)&gbm_create_device = dlsym(gbm, "gbm_create_device");
         dlsym(gbm, "gbm_bo_create");
     void *(*gbm_bo_map)(struct gbm_bo *, uint32_t, uint32_t, uint32_t,
-                        uint32_t, uint32_t, uint32_t *, void **) =
-        dlsym(gbm, "gbm_bo_map");
-    void (*gbm_bo_unmap)(struct gbm_bo *, void *) =
-        dlsym(gbm, "gbm_bo_unmap");
-    int (*gbm_bo_get_fd)(struct gbm_bo *) = dlsym(gbm, "gbm_bo_get_fd");
-    uint32_t (*gbm_bo_get_stride)(struct gbm_bo *) =
-        dlsym(gbm, "gbm_bo_get_stride");
-    void (*gbm_device_destroy)(struct gbm_dev *) =
-        dlsym(gbm, "gbm_device_destroy");
+                        uint32_t, uint32_t, uint32_t *, void **);
+    void (*gbm_bo_unmap)(struct gbm_bo *, void *);
+    *(void **)&gbm_bo_map = dlsym(gbm, "gbm_bo_map");
+    *(void **)&gbm_bo_unmap = dlsym(gbm, "gbm_bo_unmap");
+    int (*gbm_bo_get_fd)(struct gbm_bo *);
+    *(void **)&gbm_bo_get_fd = dlsym(gbm, "gbm_bo_get_fd");
+    uint32_t (*gbm_bo_get_stride)(struct gbm_bo *);
+    void (*gbm_device_destroy)(struct gbm_dev *);
+    *(void **)&gbm_bo_get_stride = dlsym(gbm, "gbm_bo_get_stride");
+    *(void **)&gbm_device_destroy = dlsym(gbm, "gbm_device_destroy");
     if (!gbm_create_device || !gbm_bo_create || !gbm_bo_map ||
         !gbm_bo_unmap || !gbm_bo_get_fd || !gbm_bo_get_stride ||
         !gbm_device_destroy) {
@@ -393,9 +398,10 @@ int main(void) {
     for (int y = 0; y < 8; y++) {
         for (int x = 0; x < 8; x++) {
             /* bytes B,G,R,A in ARGB8888-LE: red ramp + full alpha */
-            uint32_t v = (0xFFu << 24) | ((uint32_t)(x * 28) << 16) |
-                         (uint32_t)(y * 28);
-            px[y * (stride / 4) + x] = v;
+            uint32_t v = (0xFFu << 24) |
+                         ((unsigned)x * 28u << 16) |
+                         ((unsigned)y * 28u);
+            px[(size_t)y * (size_t)(stride / 4) + (size_t)x] = v;
         }
     }
     gbm_bo_unmap(bo, map_data);
