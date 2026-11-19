@@ -71,9 +71,14 @@ jobs:
           # The release notes: the tagged version's section, cut from
           # the changelog the gate's claim-discipline check already
           # vets.
+          # The changelog's headings are "## [x.y.z] — date …" (the
+          # bracketed keep-a-changelog form): match the bracketed
+          # name exactly. A bare "^## ver " would never match and
+          # silently fall into the fallback below (exactly what
+          # shipped the wrong notes on the first re-release cut).
           awk -v ver="${VER}" '
             /^## /{ if (found) exit; }
-            $0 ~ "^## "ver" " { found=1 }
+            $0 ~ "^## \\["ver"\\]" { found=1 }
             found { print }
           ' CHANGELOG.md > /tmp/release-notes.md
           [ -s /tmp/release-notes.md ] || \
