@@ -613,7 +613,11 @@ static fdk_result handle_line(parse_state *st, const char *v, size_t len,
         p++;
     }
 
-    fdk_result r;
+    fdk_result r = FDK_ERR_THEME_PARSE; /* every section writes it;
+                                          * the default silences
+                                          * -Wmaybe-uninitialized on
+                                          * compilers that cannot see
+                                          * the full enum coverage */
     switch (st->section) {
     case SEC_THEME:
         r = handle_theme_entry(st, key, key_len, v, len, &p, line);

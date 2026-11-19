@@ -1182,8 +1182,12 @@ static void read_socket(fdk_dbus_connection *c) {
                  cm = CMSG_NXTHDR(&msg, cm)) {
                 if (cm->cmsg_level == SOL_SOCKET &&
                     cm->cmsg_type == SCM_RIGHTS) {
+                    /* CMSG_LEN(0) is a size_t; the whole arithmetic
+                     * stays unsigned (alpine's gcc flags the signed
+                     * intermediate under -Wsign-conversion). */
                     int nf =
-                        (int)((cm->cmsg_len - CMSG_LEN(0)) / sizeof(int));
+                        (int)((cm->cmsg_len - (size_t)CMSG_LEN(0)) /
+                              sizeof(int));
                     int *fds = (int *)CMSG_DATA(cm);
                     for (int k = 0; k < nf; k++) {
                         close(fds[k]);
