@@ -628,7 +628,8 @@ static void test_parse_errors(void) {
 
 static void test_load_files(void) {
     const char *dir = "/tmp/fdk-theme-test";
-    (void)system("rm -rf /tmp/fdk-theme-test && mkdir -p /tmp/fdk-theme-test");
+    int sys_rc_ = system("rm -rf /tmp/fdk-theme-test && mkdir -p /tmp/fdk-theme-test");
+    (void)sys_rc_;
 
     char path[256];
 
@@ -676,7 +677,8 @@ static void test_load_files(void) {
     assert(r == FDK_ERR_INVALID_ARGUMENT);
     assert(fdk_theme_load(NULL, NULL) == NULL);
 
-    (void)system("rm -rf /tmp/fdk-theme-test");
+    int sys_rc_end_ = system("rm -rf /tmp/fdk-theme-test");
+    (void)sys_rc_end_;
     printf("[ok] file loading: valid/missing/empty/bad-version/bad-"
            "grammar/null-path\n");
 }
