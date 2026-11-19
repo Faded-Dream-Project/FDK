@@ -596,9 +596,13 @@ static void open_external(const char *path) {
         return;
     }
     if (pid == 0) {
-        /* child: quiet, detached handler attempt */
-        (void)freopen("/dev/null", "w", stdout);
-        (void)freopen("/dev/null", "w", stderr);
+        /* child: quiet, detached handler attempt. The freopen
+         * results are consumed for -Werror=unused-result (ubuntu's
+         * release gcc) — in the child after exec they are moot. */
+        FILE *so_ = freopen("/dev/null", "w", stdout);
+        FILE *se_ = freopen("/dev/null", "w", stderr);
+        (void)so_;
+        (void)se_;
         execlp("xdg-open", "xdg-open", path, (char *)NULL);
         _exit(127); /* no xdg-open: the parent reports it honestly */
     }

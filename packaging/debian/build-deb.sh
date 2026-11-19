@@ -60,7 +60,11 @@ if command -v Xvfb >/dev/null 2>&1; then
 # zero FDK frames in the stacks) do not fail the container run. The
 # STRICT leak gate (exit-on-any-leak) runs in CI's ubuntu job and on
 # every development machine.
-    LSAN_OPTIONS=exitcode=0 make test-x11
+    # Same bookworm-ASan posture as the headless suite above: the
+    # X11 integration rig builds sanitized by default and the
+    # container's libasan8 cannot run it. Unsanitized here; ubuntu
+    # CI runs the strict sanitized version.
+    LSAN_OPTIONS=exitcode=0 make FDK_SANITIZE=0 test-x11
 else
     echo "XVFB-SKIP: Xvfb not present; the X11 integration suite was not run for this build (disclosed)"
 fi
