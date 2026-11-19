@@ -65,6 +65,17 @@ struct fdk_x11_gl_window;
  * STICKY: the caller caches "tried" so windows never retry. */
 struct fdk_x11_gl *fdk_x11_gl_try_load(fdk_platform_connection *conn);
 
+/* 1.0.0 (the re-release): identity accessors + the refused query —
+ * the backing store behind fdk_window_gl_info() and the engage
+ * path. Zero/NULL-safe on an un-engaged lane. */
+int fdk_x11_gl_flavor(const struct fdk_x11_gl *gl);
+int fdk_x11_gl_refused(const struct fdk_x11_gl *gl);
+void fdk_x11_gl_version(const struct fdk_x11_gl *gl, int *out_major,
+                        int *out_minor);
+const char *fdk_x11_gl_vendor(const struct fdk_x11_gl *gl);
+const char *fdk_x11_gl_renderer_string(const struct fdk_x11_gl *gl);
+const char *fdk_x11_gl_version_string(const struct fdk_x11_gl *gl);
+
 /* Connection teardown. Destroys the state; deliberately does NOT
  * dlclose libGL — see the pinning note in x11_gl.c's header comment. */
 void fdk_x11_gl_shutdown(struct fdk_x11_gl *gl);

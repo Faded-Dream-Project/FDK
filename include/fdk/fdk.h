@@ -33,6 +33,7 @@
 #include "fdk_prefs.h"
 #include "fdk_animation.h"
 #include "fdk_extend.h"
+#include "fdk_gl.h"
 #include "fdk_dbus.h"
 #include "fdk_notify.h"
 #include "fdk_tray.h"

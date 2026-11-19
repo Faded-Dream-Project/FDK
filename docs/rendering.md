@@ -439,6 +439,44 @@ drawing), so it is copied into freshly created classic slots and the
 whole image goes out through the SHM path immediately — the window
 never shows a stale or torn frame because of the downgrade itself.
 
+## Application-owned GL: fdk_gl.h (1.0.0, the 2026-11-18 re-release)
+
+The 2026-11-18 directive closed the last GL gap: applications render
+with their OWN OpenGL into an ordinary `fdk_window` — or a rectangular
+region of one — through `include/fdk/fdk_gl.h`:
+
+- `fdk_window_gl_engage(window)` engages the lane BEFORE any present
+  (no throwaway-present dance) and overrides the small-surface gate
+  (the application asked).
+- `fdk_gl_status(window, ...)` answers WHY on every refusal:
+  `FDK_GL_REASON_NOT_YET` (nothing asked yet), `SIZE_GATE`,
+  `CPU_MODE`, `DRIVER`, `BACKEND`, `DOWNGRADED` — plus a log line.
+  The old single `FDK_ERR_UNSUPPORTED` could not distinguish "not
+  yet" from "never".
+- `fdk_window_gl_info(window, ...)` reports the actual context:
+  flavor (`core` / `compat` / `gles2`), version, vendor, renderer.
+- The GL viewport widget (`fdk_gl_viewport_create`, the canvas
+  pattern carried to GL) owns a rectangular region, calls the
+  application's render callback with the context current and the
+  logical viewport size and scale handed in, and composites in paint
+  order — menus, popups and tooltips overlapping the region draw
+  OVER it, and pointer events keep reaching the right widget.
+  Frames are on-demand (`fdk_gl_viewport_request_frame` from the
+  application's timer; no forced continuous redraw); context loss
+  reports through the reason enum and a one-shot callback.
+
+CONTEXT FLAVOR: where the driver offers it, app-owned GL runs on a
+CORE-PROFILE desktop GL 3.3+ context — a separate per-window context
+on X11 (`glXCreateContextAttribsARB`) and Wayland
+(`EGL_KHR_create_context`), sharing the lane's root on X11. The
+PRESENTATION contexts stay exactly as they were (legacy compat /
+GLES2 — the lane's composite quad is fixed-function), so lane
+presentation never regresses; `flavor` reports which context the app
+actually got. `examples/gl_viewport_3d.c` is the reference consumer
+(animated depth-tested scene + an overlapping menu dropdown);
+`tests/test_gl_viewport.c` pins the reason enum's ABI and the
+engage/identity contracts.
+
 ## The Vulkan present lane + the backend priority (2026-11-11)
 
 The GL lanes have a third sibling: **the Vulkan present lane**

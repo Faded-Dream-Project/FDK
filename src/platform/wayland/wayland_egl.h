@@ -173,6 +173,23 @@ fdk_result fdk_wayland_egl_window_fence_insert(
     struct fdk_wayland_egl_window *ewin, fdk_u64 *out_fence);
 fdk_result fdk_wayland_egl_window_fence_wait(
     struct fdk_wayland_egl_window *ewin, fdk_u64 fence);
+
+/* ---- 1.0.0 (fdk_gl.h, the re-release): identity accessors + the
+ * per-window app-context step. */
+int fdk_wayland_egl_flavor(const struct fdk_wayland_egl *egl);
+int fdk_wayland_egl_refused(const struct fdk_wayland_egl *egl);
+void fdk_wayland_egl_version(const struct fdk_wayland_egl *egl,
+                             int *out_major, int *out_minor);
+const char *fdk_wayland_egl_vendor(const struct fdk_wayland_egl *egl);
+const char *fdk_wayland_egl_renderer_string(
+    const struct fdk_wayland_egl *egl);
+const char *fdk_wayland_egl_version_string(
+    const struct fdk_wayland_egl *egl);
+/* Ensures the window has a desktop-GL core app context when the
+ * driver offered one (the engagement probe's per-window step).
+ * Nonzero = the window's make_current will prefer the app context. */
+int fdk_wayland_egl_window_app_ctx_ensure(
+    struct fdk_wayland_egl_window *ewin);
 #endif /* FDK_WAYLAND_EGL_H */
 
 /* Extension-API v3, cap 19: the connection's zero-copy dma-buf

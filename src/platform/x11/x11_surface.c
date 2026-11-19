@@ -1136,3 +1136,205 @@ fdk_result fdk_x11_window_gl_fence_wait(fdk_platform_window *pw,
     }
     return fdk_x11_gl_window_fence_wait(pw->gl_win, fence);
 }
+
+/* ---- 1.0.0 (fdk_gl.h, the 2026-11-18 re-release): engage/status/id ----
+ *
+ * The STEP-2 pair: an application can ask the lane to serve a plain
+ * window BEFORE any present (the documented replacement for the
+ * throwaway-present dance examples/22_ext_complete.c did), and every
+ * refusal names its reason — the "not yet" that used to be
+ * indistinguishable from "never" (the 2026-11-18 directive's item 2).
+ */
+static void x11_gl_reason(fdk_platform_window *pw, int *out_reason,
+                          int *out_aux) {
+    /* out_aux layout (fdk_gl_status): [0] pixel_area_lo, [1]
+     * pixel_area_hi, [2] size_gate, [3] force_override, [4] cpu_mode.
+     * (int pairs keep the op signature backend-portable.) */
+    if (out_reason != NULL) {
+        *out_reason = FDK_PLATFORM_GL_REASON_BACKEND;
+    }
+    if (pw == NULL || pw->conn == NULL) {
+        return;
+    }
+    fdk_i64 area = (fdk_i64)pw->render_size.width *
+                   (fdk_i64)pw->render_size.height;
+    if (pw->render_size.width == 0 || pw->render_size.height == 0) {
+        /* No framebuffer yet: use the window's current geometry. */
+        XWindowAttributes wa;
+        if (XGetWindowAttributes(pw->conn->display, pw->xwindow, &wa) !=
+            0) {
+            area = (fdk_i64)wa.width * (fdk_i64)wa.height;
+        }
+    }
+    const int forced = getenv("FDK_GL_FORCE") != NULL;
+    const int cpu_mode = pw->render_mode == FDK_RENDER_CPU;
+    if (out_aux != NULL) {
+        out_aux[0] = (int)(area & 0xffffffff);
+        out_aux[1] = (int)((fdk_u64)area >> 32);
+        out_aux[2] = FDK_GL_MIN_PIXELS;
+        out_aux[3] = forced;
+        out_aux[4] = cpu_mode;
+    }
+    if (out_reason == NULL) {
+        return;
+    }
+    if (pw->gl_win != NULL) {
+        *out_reason = FDK_PLATFORM_GL_REASON_OK;
+        return;
+    }
+    if (pw->gl_downgraded) {
+        /* Downgrade-before-engage: a mid-session present failure
+         * (DOWNGRADED) or a pre-engagement verdict. The size gate
+         * and CPU mode are distinguishable pre-engage because they
+         * set gl_downgraded at the gate itself; the residue below
+         * is the driver's refusal. */
+        if (cpu_mode) {
+            *out_reason = FDK_PLATFORM_GL_REASON_CPU_MODE;
+        } else if (area <= FDK_GL_MIN_PIXELS && !forced &&
+                   pw->conn->gl == NULL && !pw->conn->gl_tried) {
+            /* The gate ran (downgraded before any lane attempt) and
+             * the lane never even loaded: the small-window policy. */
+            *out_reason = FDK_PLATFORM_GL_REASON_SIZE_GATE;
+        } else if (pw->conn->gl == NULL && pw->conn->gl_tried) {
+            *out_reason = FDK_PLATFORM_GL_REASON_DRIVER;
+        } else {
+            *out_reason = FDK_PLATFORM_GL_REASON_DOWNGRADED;
+        }
+        return;
+    }
+    /* Not downgraded, not engaged: NOT_YET (the lane is willing;
+     * nothing asked it to serve this window yet). */
+    *out_reason = FDK_PLATFORM_GL_REASON_NOT_YET;
+}
+
+fdk_result fdk_x11_window_gl_engage(fdk_platform_window *pw,
+                                    int *out_reason) {
+    if (out_reason != NULL) {
+        *out_reason = FDK_PLATFORM_GL_REASON_BACKEND;
+    }
+    if (pw == NULL || pw->conn == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* Idempotent. */
+    if (pw->gl_win != NULL) {
+        if (out_reason != NULL) {
+            *out_reason = FDK_PLATFORM_GL_REASON_OK;
+        }
+        return FDK_OK;
+    }
+    /* Terminal verdicts first — the same gates get_framebuffer
+     * applies, minus the size gate (an explicit engage IS the
+     * application asking; the gate exists to protect the popups,
+     * and a window the app explicitly engages is not one). */
+    if (pw->render_mode == FDK_RENDER_CPU) {
+        FDK_INFO("fdk_window_gl_engage: window is pinned to the CPU "
+                 "render mode — engage refused (FDK_GL_REASON_CPU_MODE)");
+        if (out_reason != NULL) {
+            *out_reason = FDK_PLATFORM_GL_REASON_CPU_MODE;
+        }
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (pw->gl_downgraded && fdk_x11_gl_refused(pw->conn->gl)) {
+        FDK_INFO("fdk_window_gl_engage: the GL lane refused this "
+                 "connection (driver verdict) — engage refused "
+                 "(FDK_GL_REASON_DRIVER)");
+        if (out_reason != NULL) {
+            *out_reason = FDK_PLATFORM_GL_REASON_DRIVER;
+        }
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (pw->gl_downgraded && !(pw->conn->gl == NULL &&
+                               !pw->conn->gl_tried)) {
+        /* Downgraded AFTER the lane loaded and did not refuse:
+         * a per-window present failure. Permanent. */
+        FDK_INFO("fdk_window_gl_engage: this window's lane downgraded "
+                 "earlier — engage refused (FDK_GL_REASON_DOWNGRADED)");
+        if (out_reason != NULL) {
+            *out_reason = FDK_PLATFORM_GL_REASON_DOWNGRADED;
+        }
+        return FDK_ERR_UNSUPPORTED;
+    }
+    /* The size-gate downgrade is LIFTABLE by an explicit engage:
+     * clear the sticky bit the gate set (the lane attempt below
+     * re-decides honestly; if the driver then refuses, the verdict
+     * lands as DRIVER on the connection). */
+    pw->gl_downgraded = 0;
+    if (pw->conn->gl == NULL && !pw->conn->gl_tried) {
+        pw->conn->gl = fdk_x11_gl_try_load(pw->conn);
+        pw->conn->gl_tried = 1;
+    }
+    if (pw->conn->gl == NULL || fdk_x11_gl_refused(pw->conn->gl)) {
+        FDK_INFO("fdk_window_gl_engage: the GL lane refused this "
+                 "connection — engage refused (FDK_GL_REASON_DRIVER)");
+        pw->gl_downgraded = 1;
+        if (out_reason != NULL) {
+            *out_reason = FDK_PLATFORM_GL_REASON_DRIVER;
+        }
+        return FDK_ERR_UNSUPPORTED;
+    }
+    pw->gl_win = fdk_x11_gl_window_try_init(pw->conn->gl, pw);
+    if (pw->gl_win == NULL) {
+        FDK_INFO("fdk_window_gl_engage: the GLX context could not be "
+                 "created for this window — engage refused "
+                 "(FDK_GL_REASON_DRIVER)");
+        pw->gl_downgraded = 1;
+        if (out_reason != NULL) {
+            *out_reason = FDK_PLATFORM_GL_REASON_DRIVER;
+        }
+        return FDK_ERR_UNSUPPORTED;
+    }
+    FDK_INFO("fdk_window_gl_engage: GLX lane engaged for window 0x%lx "
+             "(explicit; the size gate was overridden)",
+             (unsigned long)pw->xwindow);
+    if (out_reason != NULL) {
+        *out_reason = FDK_PLATFORM_GL_REASON_OK;
+    }
+    return FDK_OK;
+}
+
+void fdk_x11_window_gl_status(fdk_platform_window *pw, int *out_reason,
+                              int *out_aux) {
+    x11_gl_reason(pw, out_reason, out_aux);
+}
+
+void fdk_x11_window_gl_info(fdk_platform_window *pw, int *out_major,
+                            int *out_minor, char *flavor_out,
+                            const char **out_vendor,
+                            const char **out_renderer,
+                            const char **out_version) {
+    if (out_major != NULL) *out_major = 0;
+    if (out_minor != NULL) *out_minor = 0;
+    if (flavor_out != NULL) {
+        flavor_out[0] = 'n'; flavor_out[1] = 'o'; flavor_out[2] = 'n';
+        flavor_out[3] = 'e'; flavor_out[4] = '\0';
+    }
+    const char *unk = "<unknown>";
+    if (out_vendor != NULL) *out_vendor = unk;
+    if (out_renderer != NULL) *out_renderer = unk;
+    if (out_version != NULL) *out_version = unk;
+    if (pw == NULL || pw->conn == NULL || pw->conn->gl == NULL ||
+        pw->gl_win == NULL) {
+        return;
+    }
+    const struct fdk_x11_gl *gl = pw->conn->gl;
+    if (out_major != NULL || out_minor != NULL) {
+        fdk_x11_gl_version(gl, out_major, out_minor);
+    }
+    if (flavor_out != NULL) {
+        const char *f = fdk_x11_gl_flavor(gl) ? "core" : "compat";
+        size_t i = 0;
+        for (; i < 7 && f[i] != '\0'; i++) {
+            flavor_out[i] = f[i];
+        }
+        flavor_out[i] = '\0';
+    }
+    if (out_vendor != NULL) {
+        *out_vendor = fdk_x11_gl_vendor(gl);
+    }
+    if (out_renderer != NULL) {
+        *out_renderer = fdk_x11_gl_renderer_string(gl);
+    }
+    if (out_version != NULL) {
+        *out_version = fdk_x11_gl_version_string(gl);
+    }
+}

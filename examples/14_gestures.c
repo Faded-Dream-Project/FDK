@@ -197,7 +197,11 @@ int main(void) {
     }
     (void)fdk_window_set_decorated(app.window, true);
     fdk_widget *root = NULL;
-    assert(fdk_ok(fdk_window_get_root(app.window, &root)));
+    {
+        fdk_result r_rt = fdk_window_get_root(app.window, &root);
+        assert(fdk_ok(r_rt));
+        (void)r_rt;
+    }
 
     g.font = fdk_font_load_system_default(13);
     g.ball_x = 320;
@@ -224,8 +228,12 @@ int main(void) {
     fdk_window_set_event_callback(app.window, window_event, NULL);
 
     /* The canvas: the paint-callback widget, full-window. */
-    assert(fdk_ok(fdk_canvas_create(root, canvas_paint, NULL,
-                                    &g.canvas)));
+    {
+        fdk_result r_c = fdk_canvas_create(root, canvas_paint, NULL,
+                                           &g.canvas);
+        assert(fdk_ok(r_c));
+        (void)r_c;
+    }
     fdk_widget_arrange(g.canvas, (fdk_rect){0, 0, 640, 480});
 
     log_line("drag the ball; double-click hops; hold 500ms grows;");

@@ -29,7 +29,8 @@ layout, text, and theme engines, and FDK-drawn window decorations —
 with no GTK/Qt dependency and a minimal, always-justified dependency
 set (`docs/dependencies.md`).
 
-> **FDK 1.0.0 is released** — 2026-11-12, tag [`v1.0.0`](https://github.com/Faded-Dream-Project/FDK/releases/tag/v1.0.0),
+> **FDK 1.0.0 is released** — re-cut 2026-11-18 with app-owned GL
+  (`fdk_gl.h`); tag [`v1.0.0`](https://github.com/Faded-Dream-Project/FDK/releases/tag/v1.0.0),
 > the first official release. `main` remains the only branch and the
 > one to build from: every push is CI-gated — "green on main" means
 > "not broken"; the releases page is what "released" means.
@@ -68,11 +69,20 @@ suite (`docs/testing.md`).
   poll()-based event loop you can either own or hand to `fdk_run()`.
 - **Rendering** — a damage-tracked software rasterizer (gradients,
   antialiased shapes, alpha compositing, transforms, image decode and
-  PNG encode), plus a hybrid GPU present lane (X11/GLX since 1.0.0,
-  Wayland/EGL since 1.0.0): where a hardware GL renderer exists,
-  frames reach the screen through GLX or EGL — byte-identical to the
-  CPU path, with a guaranteed mid-frame fallback (`FDK_NO_GL` /
-  `FDK_GL_FORCE` knobs, `docs/rendering.md`).
+  PNG encode), plus a hybrid GPU present lane (X11/GLX, Wayland/EGL):
+  where a hardware GL renderer exists, frames reach the screen
+  through GLX or EGL — byte-identical to the CPU path, with a
+  guaranteed mid-frame fallback (`FDK_NO_GL` / `FDK_GL_FORCE`
+  knobs, `docs/rendering.md`). On top of the lane, **applications
+  render with their OWN OpenGL inside ordinary windows**
+  (`include/fdk/fdk_gl.h`): engage the lane explicitly before the
+  first present, get a core-profile 3.3+ context where the driver
+  offers one (flavor/version/vendor/renderer reported through
+  `fdk_window_gl_info`), draw into a rectangular GL viewport widget
+  that composites with the widget tree (menus and tooltips draw over
+  it), on-demand frames only — and every refusal names its reason
+  (`FDK_GL_REASON_NOT_YET` / `SIZE_GATE` / `CPU_MODE` / `DRIVER` /
+  `BACKEND` / `DOWNGRADED`), never a bare "unsupported".
 - **Widgets** — a full catalog: buttons (with role vocabulary),
   entries (password / read-only / max-length), TextView editor, List,
   Tree, IconView, Notebook with drag-reorderable tabs, menus and

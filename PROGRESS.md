@@ -1,5 +1,29 @@
 # FDK — PROGRESS (the one ledger: current state, open bugs, dated log)
 
+## 2026-11-18: app-owned GL (fdk_gl.h) — implemented; the 1.0.0
+## re-release
+
+The 2026-11-18 directive (verified live first: the gap was real —
+`fdk_ext_gl_*` took only ext surfaces, and pre-engage answered the
+same bare UNSUPPORTED as never-capable) is closed on BOTH backends:
+window-level engage/status/info, the GL viewport widget, the reason
+enum, core-profile app contexts where offered (X11
+glXCreateContextAttribsARB; Wayland EGL_KHR_create_context —
+presentation contexts untouched, so lane presentation cannot
+regress), the 3D example with an overlapping menu, and the test.
+
+HONEST SCOPE of the sandbox's verification: llvmpipe under Xvfb
+(FDK_GL_FORCE=1) proves CORRECTNESS — engage succeeds on a small
+window (size gate overridden), the core-3.3 app context is real
+(flavor=core 4.5 on this Mesa), the reason enum answers honestly,
+the full existing suite stays green, and both build configs (Wayland
+on, X11-only) compile. It does NOT prove: real-GPU performance, the
+GTX 1050 Ti's NVIDIA strictness on the GLX attribs path, and the
+Wayland leg end-to-end (no compositor in the sandbox — the EGL code
+compiles and follows the lane's probe patterns; the owner's PC is
+the rig for that). The number stays 1.0.0 per the owner's decision;
+the tag was re-cut from this tree.
+
 > Merged 2026-11-07: the round log from `test-apps/CONTINUATION.md`
 > and the bug/gap ledger from `test-apps/FINDINGS.md` (both deleted
 > by the merge) now live in this file, below the ledger.

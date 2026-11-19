@@ -102,7 +102,8 @@ enum {
     GLC_UNPACK_ROW_LENGTH = 0x0CF2,
     GLC_UNPACK_ALIGNMENT = 0x0CF5,
     GLC_VENDOR = 0x1F00,
-    GLC_RENDERER = 0x1F01
+    GLC_RENDERER = 0x1F01,
+    GLC_VERSION = 0x1F02
 };
 
 /* GLX constants. (Values verified against the system's
@@ -124,7 +125,21 @@ enum {
      * default config is linear, so the box difference is invisible
      * locally). Logged once per lane so a hardware report carries the
      * answer, not a guess. */
-    GLXC_FRAMEBUFFER_SRGB_CAPABLE = 0x20B0
+    GLXC_FRAMEBUFFER_SRGB_CAPABLE = 0x20B0,
+    /* GLX_ARB_create_context attributes (the core-profile attempt):
+     * the token values from GLX_ARB_create_context as registered
+     * with the Khronos registry. */
+    GLXCA_MAJOR_VERSION = 0x2091,
+    GLXCA_MINOR_VERSION = 0x2092,
+    GLXCA_PROFILE_MASK = 0x9126,
+    GLXCA_CORE_PROFILE_BIT = 0x00000001,
+    GLXCA_FLAGS = 0x2094,
+    /* The attribute-array terminator glXCreateContextAttribsARB
+     * reads is 0 (plain zero — the GLX spec's "attributes are
+     * terminated by 0"; GLX_NONE's 0x8000 is an fbconfig-attribute
+     * token that ALSO terminates in practice, but 0 is the
+     * documented form every driver accepts). */
+    GLXCA_NONE = 0
 };
 
 struct fdk_gl_fns {
@@ -134,6 +149,12 @@ struct fdk_gl_fns {
     int (*glXGetFBConfigAttrib)(Display *, GLXFBConfig, int, int *);
     GLXContext (*glXCreateNewContext)(Display *, GLXFBConfig, int,
                                       GLXContext, int);
+    /* 1.0.0 (the re-release): GLX_ARB_create_context — OPTIONAL
+     * (NULL without the extension; the lane then keeps its legacy
+     * compat context). */
+    GLXContext (*glXCreateContextAttribsARB)(Display *, GLXFBConfig,
+                                             GLXContext, int,
+                                             const int *);
     int (*glXMakeCurrent)(Display *, unsigned long, GLXContext);
     void (*glXSwapBuffers)(Display *, unsigned long);
     void (*glXDestroyContext)(Display *, GLXContext);
@@ -183,6 +204,14 @@ struct fdk_x11_gl {
                                     * connection (software renderer, no
                                     * usable context/visual, or a REAL
                                     * self-check failure — see below) */
+    /* 1.0.0 (the re-release): the core-profile attempt's outcome
+     * (see try_init's app-context block). flavor feeds
+     * fdk_window_gl_info(). */
+    int flavor;                    /* 0 = compat legacy, 1 = core 3.3+ */
+    int ver_major, ver_minor;      /* the actual context version      */
+    const char *str_vendor;        /* GL_VENDOR   (lane storage)      */
+    const char *str_renderer;      /* GL_RENDERER (lane storage)      */
+    const char *str_version;       /* GL_VERSION  (lane storage)      */
     int selfcheck;                 /* first-frame verification verdict
                                     * for the WHOLE connection (the
                                     * driver-wide truth), so it is
@@ -224,7 +253,9 @@ enum {
 struct fdk_x11_gl_window {
     struct fdk_x11_gl *gl;   /* owning lane state (never NULL)     */
     Window xwindow;          /* the GLX drawable this lane serves  */
-    GLXContext ctx;          /* per-window GLX context            */
+    GLXContext ctx;          /* per-window GLX context (present)   */
+    GLXContext app_ctx;      /* 1.0.0: core-profile app context
+                              * (NULL = share the present ctx)     */
     GLuint tex;              /* window-sized texture (the retained
                               * "what the screen shows" copy)      */
     int w, h;                /* staging/texture size               */
@@ -414,6 +445,11 @@ struct fdk_x11_gl *fdk_x11_gl_try_load(fdk_platform_connection *conn) {
     GLX_RESOLVE(glXGetFBConfigs, "glXGetFBConfigs");
     GLX_RESOLVE(glXGetFBConfigAttrib, "glXGetFBConfigAttrib");
     GLX_RESOLVE(glXCreateNewContext, "glXCreateNewContext");
+    /* 1.0.0 (the re-release): optional — GLX_ARB_create_context.
+     * Resolved through the same getproc; NULL is fine (the legacy
+     * path is what the lane used its whole life). */
+    FDK_GL_STORE_FN(gl->fn.glXCreateContextAttribsARB,
+                    getproc("glXCreateContextAttribsARB"));
     GLX_RESOLVE(glXMakeCurrent, "glXMakeCurrent");
     GLX_RESOLVE(glXSwapBuffers, "glXSwapBuffers");
     GLX_RESOLVE(glXDestroyContext, "glXDestroyContext");
@@ -476,6 +512,37 @@ struct fdk_x11_gl *fdk_x11_gl_try_load(fdk_platform_connection *conn) {
 
 const char *fdk_x11_gl_renderer(const struct fdk_x11_gl *gl) {
     return (gl != NULL && gl->renderer[0] != '\0') ? gl->renderer : NULL;
+}
+
+/* 1.0.0 (the re-release): the identity accessors behind
+ * fdk_window_gl_info(), plus the engage path's refused query. */
+int fdk_x11_gl_flavor(const struct fdk_x11_gl *gl) {
+    return (gl != NULL) ? gl->flavor : 0;
+}
+
+int fdk_x11_gl_refused(const struct fdk_x11_gl *gl) {
+    return (gl != NULL) ? gl->refused : 0;
+}
+
+void fdk_x11_gl_version(const struct fdk_x11_gl *gl, int *out_major,
+                        int *out_minor) {
+    if (out_major != NULL) *out_major = (gl != NULL) ? gl->ver_major : 0;
+    if (out_minor != NULL) *out_minor = (gl != NULL) ? gl->ver_minor : 0;
+}
+
+const char *fdk_x11_gl_vendor(const struct fdk_x11_gl *gl) {
+    return (gl != NULL && gl->str_vendor != NULL) ? gl->str_vendor
+                                                  : "<unknown>";
+}
+
+const char *fdk_x11_gl_renderer_string(const struct fdk_x11_gl *gl) {
+    return (gl != NULL && gl->str_renderer != NULL) ? gl->str_renderer
+                                                    : "<unknown>";
+}
+
+const char *fdk_x11_gl_version_string(const struct fdk_x11_gl *gl) {
+    return (gl != NULL && gl->str_version != NULL) ? gl->str_version
+                                                   : "<unknown>";
 }
 
 void fdk_x11_gl_shutdown(struct fdk_x11_gl *gl) {
@@ -654,7 +721,17 @@ struct fdk_x11_gl_window *fdk_x11_gl_window_try_init(
         }
     }
     /* Direct first (local: DRI or client-side swrast); indirect second
-     * (remote X, the only option there). Both failing = no context. */
+     * (remote X, the only option there). Both failing = no context.
+     *
+     * This is the PRESENTATION context: it must stay legacy compat —
+     * the lane's present path draws one fixed-function quad
+     * (draw_fullscreen_quad: glBegin/glTexCoord2f/...), and the
+     * compatibility profile is what still carries fixed-function
+     * GL. The 1.0.0-re-release core-profile context for
+     * APPLICATION-owned GL is a SEPARATE per-window context
+     * (app_ctx, below) sharing the same root — desktop GL sharing
+     * is legal across profiles, so the app's objects and the
+     * lane's texture coexist. */
     GLXContext ctx = gl->fn.glXCreateNewContext(gl->conn->display, cfg,
                                                 GLXC_RGBA_TYPE,
                                                 gl->root_ctx, True);
@@ -710,6 +787,41 @@ struct fdk_x11_gl_window *fdk_x11_gl_window_try_init(
     if (renderer != NULL && gl->renderer[0] == '\0') {
         (void)snprintf(gl->renderer, sizeof(gl->renderer), "%s", renderer);
     }
+    /* 1.0.0 (the re-release): the full identity read
+     * (fdk_window_gl_info's source). GLC_VERSION needs parsing
+     * ("4.5 (Compatibility Profile) Mesa ..."): leading
+     * major.minor, anything unparsable leaves 0.0 and the raw
+     * string still carries the truth. Vendor/renderer are copied
+     * into the lane's static buffers — glGetString's storage is
+     * only guaranteed while a context is current. */
+    if (gl->str_renderer == NULL && renderer != NULL) {
+        static char vendor_buf[80];
+        static char renderer_buf[80];
+        static char version_buf[160];
+        const char *vendor = gl->fn.glGetString(GLC_VENDOR);
+        const char *version = gl->fn.glGetString(GLC_VERSION);
+        if (vendor != NULL) {
+            (void)snprintf(vendor_buf, sizeof vendor_buf, "%s", vendor);
+            gl->str_vendor = vendor_buf;
+        }
+        if (renderer != NULL) {
+            (void)snprintf(renderer_buf, sizeof renderer_buf, "%s",
+                           renderer);
+            gl->str_renderer = renderer_buf;
+        }
+        if (version != NULL) {
+            (void)snprintf(version_buf, sizeof version_buf, "%s", version);
+            gl->str_version = version_buf;
+            int vmaj = 0, vmin = 0;
+            if (sscanf(version, "%d.%d", &vmaj, &vmin) >= 1) {
+                gl->ver_major = vmaj;
+                gl->ver_minor = vmin;
+            }
+        }
+        if (gl->str_vendor == NULL) gl->str_vendor = "<unknown>";
+        if (gl->str_renderer == NULL) gl->str_renderer = "<unknown>";
+        if (gl->str_version == NULL) gl->str_version = "<unknown>";
+    }
     const int forced = getenv("FDK_GL_FORCE") != NULL;
     if (renderer_is_software(gl->renderer) && !forced) {
         FDK_INFO("GL renderer is software (\"%s\") — staying on the CPU "
@@ -734,6 +846,40 @@ struct fdk_x11_gl_window *fdk_x11_gl_window_try_init(
     gwin->gl = gl;
     gwin->xwindow = pwindow->xwindow;
     gwin->ctx = ctx;
+
+    /* 1.0.0 (the re-release) — the APPLICATION context: where the
+     * driver offers GLX_ARB_create_context, a core-profile 3.3+
+     * context SHARING the same root, made current by
+     * fdk_window_gl_make_current instead of the presentation
+     * context. The presentation context stays legacy (the
+     * fixed-function quad above); the app context serves
+     * fdk_ext_gl_* / fdk_window_gl_* callers whose render
+     * callbacks bring their own shaders. Any failure here is NOT a
+     * lane failure — app_ctx falls back to the presentation
+     * context (flavor "compat") and everything still works. */
+    gwin->app_ctx = NULL;
+    if (gl->fn.glXCreateContextAttribsARB != NULL) {
+        const int core33[] = {
+            GLXCA_MAJOR_VERSION, 3,
+            GLXCA_MINOR_VERSION, 3,
+            GLXCA_PROFILE_MASK, GLXCA_CORE_PROFILE_BIT,
+            GLXCA_NONE
+        };
+        GLXContext app_ctx = gl->fn.glXCreateContextAttribsARB(
+            gl->conn->display, cfg, gl->root_ctx, True, core33);
+        if (app_ctx == NULL) {
+            /* indirect core, then give up quietly */
+            app_ctx = gl->fn.glXCreateContextAttribsARB(
+                gl->conn->display, cfg, gl->root_ctx, False, core33);
+        }
+        if (app_ctx != NULL) {
+            gwin->app_ctx = app_ctx;
+            gl->flavor = 1;
+            FDK_DEBUG("GLX core-profile 3.3 app context created for "
+                      "window 0x%lx (fdk_window_gl_* / fdk_ext_gl_*)",
+                      (unsigned long)pwindow->xwindow);
+        }
+    }
     gwin->tex = 0;
     gwin->w = 0;
     gwin->h = 0;
@@ -784,6 +930,12 @@ void fdk_x11_gl_window_destroy(struct fdk_x11_gl *gl,
          * hold it). */
         gl->fn.glXMakeCurrent(gl->conn->display, None, NULL);
         gl->fn.glXDestroyContext(gl->conn->display, gwin->ctx);
+        if (gwin->app_ctx != NULL) {
+            /* 1.0.0: the core-profile app context dies with the
+             * window's lane state (the unbind above released it too —
+             * whichever of the two was current). */
+            gl->fn.glXDestroyContext(gl->conn->display, gwin->app_ctx);
+        }
     }
     if (gl != NULL && gl->selfcheck_gwin == gwin) {
         /* The probe subject is dying: drop the reference (the verdict
@@ -1302,14 +1454,23 @@ fdk_result fdk_x11_gl_window_readback(struct fdk_x11_gl_window *gwin,
 }
 
 /* P2: makeCurrent / swap without the engine (add-on GL), plus the
- * callback-flush entry the frame-scheduling path uses. */
+ * callback-flush entry the frame-scheduling path uses.
+ *
+ * 1.0.0 (the re-release): make_current prefers the CORE-PROFILE app
+ * context when one exists (fdk_window_gl_* / fdk_ext_gl_* callers
+ * bring their own shaders; the fixed-function presentation context
+ * is the fallback and the honest flavor answer covers which one
+ * this is). The callback-flush path (cb_flush/cb_readback) keeps
+ * the PRESENT context — the frame callback's content still
+ * composites through the lane's own quad machinery where FDK owns
+ * the draw. */
 fdk_result fdk_x11_gl_window_make_current(struct fdk_x11_gl_window *gwin) {
     if (gwin == NULL || gwin->ctx == 0) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     struct fdk_x11_gl *gl = gwin->gl;
-    if (!gl->fn.glXMakeCurrent(gl->conn->display, gwin->xwindow,
-                               gwin->ctx)) {
+    GLXContext use = (gwin->app_ctx != NULL) ? gwin->app_ctx : gwin->ctx;
+    if (!gl->fn.glXMakeCurrent(gl->conn->display, gwin->xwindow, use)) {
         return FDK_ERR_UNSUPPORTED;
     }
     return FDK_OK;

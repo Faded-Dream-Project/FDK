@@ -1241,6 +1241,16 @@ fdk_result fdk_wayland_window_gl_set_frame_cb(fdk_platform_window *pwindow,
                                               void *user, void *surface);
 fdk_result fdk_wayland_window_gl_fence_insert(fdk_platform_window *pwindow,
                                               fdk_u64 *out_fence);
+fdk_result fdk_wayland_window_gl_engage(fdk_platform_window *pwindow,
+                                        int *out_reason);
+void fdk_wayland_window_gl_status(fdk_platform_window *pwindow,
+                                  int *out_reason, int *out_aux);
+void fdk_wayland_window_gl_info(fdk_platform_window *pwindow,
+                                int *out_major, int *out_minor,
+                                char *flavor_out,
+                                const char **out_vendor,
+                                const char **out_renderer,
+                                const char **out_version);
 fdk_result fdk_wayland_window_gl_fence_wait(fdk_platform_window *pwindow,
                                             fdk_u64 fence);
 /* The adopt-path render-mode stamp (2026-11-12): platform_internal.h's

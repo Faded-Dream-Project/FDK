@@ -1,3 +1,39 @@
+## [1.0.0] — 2026-11-18 — THE RE-RELEASE (app-owned GL)
+
+The owner's 2026-11-18 directive, closed on both backends and
+re-cut under the same 1.0.0 (the first-release number kept by the
+owner's decision):
+
+- **fdk_gl.h (new public header): application-owned OpenGL inside
+  ordinary FDK windows.** `fdk_window_gl_engage` engages the GL lane
+  for a plain window BEFORE any present (replacing the
+  throwaway-present dance), overriding the small-surface size gate
+  by design. The GL viewport widget (`fdk_gl_viewport_create`)
+  renders a rectangular region with the application's own GL code
+  and composites with the widget tree in paint order — menus,
+  popups and tooltips draw OVER the GL region. On-demand frames
+  (`fdk_gl_viewport_request_frame`), context-loss reporting, and
+  honest status everywhere.
+- **Diagnosable GL failures (the reason enum):** every refusal
+  names WHY — `FDK_GL_REASON_NOT_YET` / `SIZE_GATE` / `CPU_MODE` /
+  `DRIVER` / `BACKEND` / `DOWNGRADED` — through `fdk_gl_status` and
+  `fdk_gl_viewport_status`, plus a log line. The old single
+  `FDK_ERR_UNSUPPORTED` could not tell "not yet" from "never".
+- **Core-profile contexts where offered:** the X11 lane resolves
+  `glXCreateContextAttribsARB` and creates a core-profile 3.3 app
+  context (sharing the lane root) for app-owned GL; the Wayland
+  lane probes `EGL_KHR_create_context` the same way. The
+  PRESENTATION contexts stay legacy/GLES2 (the lane's quad is
+  fixed-function) — two contexts, one lane, no presentation
+  regression. `fdk_window_gl_info` reports flavor (core / compat /
+  gles2), version, vendor, renderer.
+- New example `examples/gl_viewport_3d.c` (animated depth-tested
+  scene next to ordinary widgets, a menu overlapping the region)
+  and `tests/test_gl_viewport.c` (reason-enum ABI pin, engage,
+  identity; headless-safe, Xvfb+FDK_GL_FORCE verified).
+- ABI: append-only (new header, new functions, appended ops and
+  enum values); the SONAME stays `libfdk.so.1`.
+
 ## [1.0.0] — 2026-11-08 — THE FIRST RELEASE
 
 Released 2026-11-12 as `v1.0.0` — the first official release (tag

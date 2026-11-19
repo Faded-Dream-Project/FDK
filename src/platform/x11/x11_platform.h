@@ -1109,6 +1109,17 @@ fdk_result fdk_x11_window_gl_fence_insert(fdk_platform_window *pwindow,
                                           fdk_u64 *out_fence);
 fdk_result fdk_x11_window_gl_fence_wait(fdk_platform_window *pwindow,
                                         fdk_u64 fence);
+/* 1.0.0 (fdk_gl.h, the re-release): explicit engage + status +
+ * identity. */
+fdk_result fdk_x11_window_gl_engage(fdk_platform_window *pwindow,
+                                    int *out_reason);
+void fdk_x11_window_gl_status(fdk_platform_window *pwindow,
+                              int *out_reason, int *out_aux);
+void fdk_x11_window_gl_info(fdk_platform_window *pwindow,
+                            int *out_major, int *out_minor,
+                            char *flavor_out, const char **out_vendor,
+                            const char **out_renderer,
+                            const char **out_version);
 /* The adopt-path render-mode stamp (2026-11-12): platform_internal.h's
  * window_set_render_mode comment is the contract. One-shot — a no-op
  * once the lane decided or the first present happened. */

@@ -698,6 +698,34 @@ typedef struct fdk_platform_ops {
      * answer to "is this window actually on screen yet". */
     int (*window_ever_presented)(fdk_platform_window *pwindow);
 
+    /* ---- 1.0.0 (fdk_gl.h, the 2026-11-18 re-release): application-
+     * owned GL on plain windows. All OPTIONAL: NULL = the backend
+     * has no lane answer (the frontend reports FDK_GL_REASON_BACKEND
+     * and FDK_ERR_UNSUPPORTED respectively). See include/fdk/fdk_gl.h
+     * for the public contracts these implement. */
+    /* Engage the lane for this window NOW (before any present).
+     * Overrides the small-surface size gate — the application
+     * asked. Respects CPU render mode, driver refusals, FDK_NO_GL.
+     * Idempotent. Writes the refusal reason to *out_reason when
+     * non-NULL (FDK_GL_REASON_OK on success). */
+    fdk_result (*window_gl_engage)(fdk_platform_window *pwindow,
+                                   int *out_reason);
+    /* The live why-not/why-yes answer for this window: writes the
+     * fdk_gl_reason to *out_reason, and when out_aux is non-NULL
+     * the backend fills the auxiliary status facts (pixel_area,
+     * size_gate, force_override, cpu_mode — see fdk_gl_status). */
+    void (*window_gl_status)(fdk_platform_window *pwindow,
+                             int *out_reason, int *out_aux);
+    /* The engaged context's identity: version/flavor/vendor/
+     * renderer. Zeroes + flavor "none" when not engaged. The
+     * strings point into lane storage; NULL member = "<unknown>".
+     * flavor_out receives at most 8 bytes including the NUL. */
+    void (*window_gl_info)(fdk_platform_window *pwindow,
+                           int *out_major, int *out_minor,
+                           char *flavor_out, const char **out_vendor,
+                           const char **out_renderer,
+                           const char **out_version);
+
     /* OPTIONAL render-path introspection (1.0.0) behind
      * fdk_window_get_render_path(): returns the presentation path
      * this window actually uses RIGHT NOW — 0 = the CPU/software
@@ -1192,6 +1220,24 @@ enum {
     FDK_POPUP_CLOSE_ESCAPE = 2,        /* window.c: the universal key */
     FDK_POPUP_CLOSE_COMPOSITOR = 3,    /* Wayland: xdg_popup_done */
     FDK_POPUP_CLOSE_PARENT = 4,        /* the parent's destroy sweep */
+};
+
+/* ---- 1.0.0 (the 2026-11-18 re-release): the GL reason values ------------
+ *
+ * MIRRORED here because the platform layer may not include public
+ * headers (the layering rule); the values are the ABI contract and
+ * are pinned equal by tests/test_gl_viewport.c at build time (an
+ * include of fdk_gl.h in the test TU + these constants in the
+ * backend TU compile against one numbering).
+ * APPEND-ONLY, exactly like the public enum. */
+enum {
+    FDK_PLATFORM_GL_REASON_OK = 0,
+    FDK_PLATFORM_GL_REASON_NOT_YET = 1,
+    FDK_PLATFORM_GL_REASON_SIZE_GATE = 2,
+    FDK_PLATFORM_GL_REASON_CPU_MODE = 3,
+    FDK_PLATFORM_GL_REASON_DRIVER = 4,
+    FDK_PLATFORM_GL_REASON_BACKEND = 5,
+    FDK_PLATFORM_GL_REASON_DOWNGRADED = 6
 };
 
 /* ---- Per-position drag acceptance (1.0.0, S-9 / B-13) ---------------------

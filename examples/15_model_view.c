@@ -191,7 +191,7 @@ int main(void) {
     }
     (void)fdk_window_set_decorated(app.window, true);
     fdk_widget *root = NULL;
-    assert(fdk_ok(fdk_window_get_root(app.window, &root)));
+    { fdk_result r_h = fdk_window_get_root(app.window, &root); assert(fdk_ok(r_h)); (void)r_h; }
 
     /* the model + proxy chain */
     fdk_model_value_type types[1] = {FDK_MODEL_TEXT};
@@ -209,7 +209,7 @@ int main(void) {
 
     /* the toolbar */
     fdk_widget *bar = NULL;
-    assert(fdk_ok(fdk_box_create(root, FDK_HORIZONTAL, &bar)));
+    { fdk_result r_h = fdk_box_create(root, FDK_HORIZONTAL, &bar); assert(fdk_ok(r_h)); (void)r_h; }
     fdk_widget *b_asc = NULL;
     assert(fdk_ok(fdk_button_create(bar, g.font, "Sort A-Z",
                                     &b_asc)));
@@ -226,7 +226,7 @@ int main(void) {
     fdk_button_set_on_activate(b_ins, set_sort_wrapper_ins,
                               NULL);
     fdk_widget *b_add = NULL;
-    assert(fdk_ok(fdk_button_create(bar, g.font, "Add", &b_add)));
+    { fdk_result r_h = fdk_button_create(bar, g.font, "Add", &b_add); assert(fdk_ok(r_h)); (void)r_h; }
     fdk_button_set_on_activate(b_add, add_row, NULL);
     fdk_widget *b_del = NULL;
     assert(fdk_ok(fdk_button_create(bar, g.font, "Remove selected",
@@ -248,11 +248,11 @@ int main(void) {
     /* the two bound views (the same model, the same proxy face —
      * the split-view shape) */
     g.list = NULL;
-    assert(fdk_ok(fdk_list_create(root, g.font, &g.list)));
+    { fdk_result r_h = fdk_list_create(root, g.font, &g.list); assert(fdk_ok(r_h)); (void)r_h; }
     fdk_list_set_selection_mode(g.list, FDK_LIST_SELECTION_MULTIPLE);
     fdk_list_set_on_selection_changed(g.list, on_selection, NULL);
     g.list2 = NULL;
-    assert(fdk_ok(fdk_list_create(root, g.font, &g.list2)));
+    { fdk_result r_h = fdk_list_create(root, g.font, &g.list2); assert(fdk_ok(r_h)); (void)r_h; }
     fdk_list_set_selection_mode(g.list2, FDK_LIST_SELECTION_MULTIPLE);
     fdk_widget_set_expand(g.list2, true, true);
     refresh_binding();

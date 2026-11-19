@@ -269,6 +269,10 @@ static void window_event(fdk_window *window, const fdk_event_data *ev,
 /* ---- menus ---- */
 
 static void build_menus(fdk_widget *parent) {
+    /* The menus attach to the (module-static) menubar widget below;
+     * `parent` names the tree the bar itself lands in at the caller —
+     * kept for readability. */
+    (void)parent;
     assert(fdk_ok(fdk_menu_create(font15, &file_menu)));
     assert(fdk_ok(fdk_menu_create(font15, &edit_menu)));
     assert(fdk_ok(fdk_menu_create(font15, &help_menu)));
@@ -355,9 +359,16 @@ int main(void) {
     (void)fdk_window_set_decorated(app.window, true);
     fdk_widget *root = NULL;
     assert(fdk_ok(fdk_window_get_root(app.window, &root)));
-    /* F1 -> About (the help-key convention). */
-    assert(fdk_window_add_shortcut(app.window, "F1",
-                                   help_shortcut, NULL) >= 1);
+    /* F1 -> About (the help-key convention). (The call sits OUTSIDE
+     * assert: with NDEBUG (the release config) assert compiles away
+     * and the registration would vanish with it — the ubuntu release
+     * leg's unused-function error.) */
+    {
+        int id = fdk_window_add_shortcut(app.window, "F1",
+                                         help_shortcut, NULL);
+        assert(id >= 1);
+        (void)id;
+    }
 
     /* The vertical layout: menubar (fixed height), toolbar (fixed),
      * notebook (expands), status (fixed). Simple manual bounds —
@@ -368,11 +379,18 @@ int main(void) {
     assert(fdk_ok(fdk_toolbar_create(root, font15, &toolbar)));
     g_toolbar = toolbar;
     fdk_widget *new_btn = NULL;
-    assert(fdk_ok(fdk_toolbar_add_button(toolbar, "New", toolbar_action,
-                                         (void *)"New", &new_btn)));
-    (void)new_btn;
-    assert(fdk_ok(fdk_toolbar_add_button(toolbar, "Save", toolbar_action,
-                                         (void *)"Save", NULL)));
+    {
+        fdk_result r_tb = fdk_toolbar_add_button(toolbar, "New",
+                                                 toolbar_action,
+                                                 (void *)"New", &new_btn);
+        assert(fdk_ok(r_tb));
+        (void)new_btn;
+        (void)r_tb;
+        r_tb = fdk_toolbar_add_button(toolbar, "Save", toolbar_action,
+                                      (void *)"Save", NULL);
+        assert(fdk_ok(r_tb));
+        (void)r_tb;
+    }
     assert(fdk_ok(fdk_toolbar_add_separator(toolbar)));
     assert(fdk_ok(fdk_toolbar_add_button(toolbar, "Print", toolbar_action,
                                          (void *)"Print", NULL)));
@@ -453,12 +471,12 @@ int main(void) {
     assert(fdk_ok(fdk_tree_create(page2, font15, &tree)));
     fdk_tree_node src = FDK_TREE_NODE_NONE;
     fdk_tree_node include = FDK_TREE_NODE_NONE;
-    assert(fdk_ok(fdk_tree_node_add(tree, src, "src", &src)));
-    assert(fdk_ok(fdk_tree_node_add(tree, src, "widget.c", NULL)));
-    assert(fdk_ok(fdk_tree_node_add(tree, src, "window.c", NULL)));
+    { fdk_result r_x = fdk_tree_node_add(tree, src, "src", &src); assert(fdk_ok(r_x)); (void)r_x; }
+    { fdk_result r_x = fdk_tree_node_add(tree, src, "widget.c", NULL); assert(fdk_ok(r_x)); (void)r_x; }
+    { fdk_result r_x = fdk_tree_node_add(tree, src, "window.c", NULL); assert(fdk_ok(r_x)); (void)r_x; }
     assert(fdk_ok(fdk_tree_node_add(tree, FDK_TREE_NODE_NONE,
                                     "include", &include)));
-    assert(fdk_ok(fdk_tree_node_add(tree, include, "fdk.h", NULL)));
+    { fdk_result r_x = fdk_tree_node_add(tree, include, "fdk.h", NULL); assert(fdk_ok(r_x)); (void)r_x; }
     assert(fdk_ok(fdk_tree_node_add(tree, FDK_TREE_NODE_NONE,
                                     "tests", NULL)));
     fdk_widget_arrange(tree, (fdk_rect){330, 12, 300, 300});
@@ -469,8 +487,12 @@ int main(void) {
                                     (fdk_rect){0, 0, 10, 10}, &page3)));
     (void)fdk_notebook_append_page(notebook, page3, "Canvas");
     fdk_widget *canvas = NULL;
-    assert(fdk_ok(fdk_canvas_create(page3, canvas_paint, NULL,
-                                    &canvas)));
+    {
+        fdk_result r_cv = fdk_canvas_create(page3, canvas_paint, NULL,
+                                            &canvas);
+        assert(fdk_ok(r_cv));
+        (void)r_cv;
+    }
     fdk_widget_arrange(canvas, (fdk_rect){16, 12, 620, 300});
 
     /* The status line. */

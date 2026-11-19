@@ -3659,3 +3659,183 @@ fdk_result fdk_wayland_window_gl_fence_wait(fdk_platform_window *pw,
     }
     return fdk_wayland_egl_window_fence_wait(pw->egl_win, fence);
 }
+
+/* ---- 1.0.0 (fdk_gl.h, the 2026-11-18 re-release): engage/status/id -- */
+
+static void wl_gl_reason(fdk_platform_window *pw, int *out_reason,
+                         int *out_aux) {
+    if (out_reason != NULL) {
+        *out_reason = FDK_PLATFORM_GL_REASON_BACKEND;
+    }
+    if (pw == NULL || pw->conn == NULL) {
+        return;
+    }
+    fdk_i64 area = (fdk_i64)pw->render_size.width *
+                   (fdk_i64)pw->render_size.height;
+    const int forced = getenv("FDK_GL_FORCE") != NULL;
+    const int cpu_mode = pw->render_mode == FDK_RENDER_CPU;
+    if (out_aux != NULL) {
+        out_aux[0] = (int)(area & 0xffffffff);
+        out_aux[1] = (int)((fdk_u64)area >> 32);
+        out_aux[2] = FDK_WL_GL_MIN_PIXELS;
+        out_aux[3] = forced;
+        out_aux[4] = cpu_mode;
+    }
+    if (out_reason == NULL) {
+        return;
+    }
+    if (pw->egl_win != NULL) {
+        *out_reason = FDK_PLATFORM_GL_REASON_OK;
+        return;
+    }
+    if (pw->egl_downgraded) {
+        if (cpu_mode) {
+            *out_reason = FDK_PLATFORM_GL_REASON_CPU_MODE;
+        } else if (area <= FDK_WL_GL_MIN_PIXELS && !forced &&
+                   pw->conn->egl == NULL && !pw->conn->egl_tried) {
+            *out_reason = FDK_PLATFORM_GL_REASON_SIZE_GATE;
+        } else if (pw->conn->egl == NULL && pw->conn->egl_tried) {
+            *out_reason = FDK_PLATFORM_GL_REASON_DRIVER;
+        } else {
+            *out_reason = FDK_PLATFORM_GL_REASON_DOWNGRADED;
+        }
+        return;
+    }
+    *out_reason = FDK_PLATFORM_GL_REASON_NOT_YET;
+}
+
+fdk_result fdk_wayland_window_gl_engage(fdk_platform_window *pw,
+                                        int *out_reason) {
+    if (out_reason != NULL) {
+        *out_reason = FDK_PLATFORM_GL_REASON_BACKEND;
+    }
+    if (pw == NULL || pw->conn == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (pw->egl_win != NULL) {
+        (void)fdk_wayland_egl_window_app_ctx_ensure(pw->egl_win);
+        if (out_reason != NULL) {
+            *out_reason = FDK_PLATFORM_GL_REASON_OK;
+        }
+        return FDK_OK;
+    }
+    if (pw->render_mode == FDK_RENDER_CPU) {
+        FDK_INFO("fdk_window_gl_engage: window is pinned to the CPU "
+                 "render mode — engage refused (CPU_MODE)");
+        if (out_reason != NULL) {
+            *out_reason = FDK_PLATFORM_GL_REASON_CPU_MODE;
+        }
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (pw->egl_downgraded &&
+        !(pw->conn->egl == NULL && !pw->conn->egl_tried)) {
+        if (pw->conn->egl != NULL &&
+            fdk_wayland_egl_refused(pw->conn->egl)) {
+            FDK_INFO("fdk_window_gl_engage: the EGL lane refused this "
+                     "connection (driver verdict) — engage refused "
+                     "(DRIVER)");
+            if (out_reason != NULL) {
+                *out_reason = FDK_PLATFORM_GL_REASON_DRIVER;
+            }
+        } else {
+            FDK_INFO("fdk_window_gl_engage: this window's lane "
+                     "downgraded earlier — engage refused (DOWNGRADED)");
+            if (out_reason != NULL) {
+                *out_reason = FDK_PLATFORM_GL_REASON_DOWNGRADED;
+            }
+        }
+        return FDK_ERR_UNSUPPORTED;
+    }
+    /* An explicit engage overrides the small-surface gate (the
+     * application asked). The lane attempt needs a size — the
+     * wl_egl_window is created at render_size; a pre-configure window
+     * (0x0) cannot engage yet and reports NOT_YET honestly (the
+     * configure handler's own lane attempt re-runs this). */
+    pw->egl_downgraded = 0;
+    if (pw->render_size.width < 1 || pw->render_size.height < 1) {
+        if (out_reason != NULL) {
+            *out_reason = FDK_PLATFORM_GL_REASON_NOT_YET;
+        }
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (pw->conn->egl == NULL && !pw->conn->egl_tried) {
+        pw->conn->egl = fdk_wayland_egl_try_load(pw->conn);
+        pw->conn->egl_tried = 1;
+    }
+    if (pw->conn->egl == NULL ||
+        fdk_wayland_egl_refused(pw->conn->egl)) {
+        FDK_INFO("fdk_window_gl_engage: the EGL lane refused this "
+                 "connection — engage refused (DRIVER)");
+        pw->egl_downgraded = 1;
+        if (out_reason != NULL) {
+            *out_reason = FDK_PLATFORM_GL_REASON_DRIVER;
+        }
+        return FDK_ERR_UNSUPPORTED;
+    }
+    pw->egl_win = fdk_wayland_egl_window_try_init(pw->conn->egl, pw);
+    if (pw->egl_win == NULL) {
+        FDK_INFO("fdk_window_gl_engage: the EGL context could not be "
+                 "created for this window — engage refused (DRIVER)");
+        pw->egl_downgraded = 1;
+        if (out_reason != NULL) {
+            *out_reason = FDK_PLATFORM_GL_REASON_DRIVER;
+        }
+        return FDK_ERR_UNSUPPORTED;
+    }
+    (void)fdk_wayland_egl_window_app_ctx_ensure(pw->egl_win);
+    FDK_INFO("fdk_window_gl_engage: EGL lane engaged for this window "
+             "(explicit; the size gate was overridden)");
+    if (out_reason != NULL) {
+        *out_reason = FDK_PLATFORM_GL_REASON_OK;
+    }
+    return FDK_OK;
+}
+
+void fdk_wayland_window_gl_status(fdk_platform_window *pw,
+                                  int *out_reason, int *out_aux) {
+    wl_gl_reason(pw, out_reason, out_aux);
+}
+
+void fdk_wayland_window_gl_info(fdk_platform_window *pw,
+                                int *out_major, int *out_minor,
+                                char *flavor_out,
+                                const char **out_vendor,
+                                const char **out_renderer,
+                                const char **out_version) {
+    if (out_major != NULL) *out_major = 0;
+    if (out_minor != NULL) *out_minor = 0;
+    if (flavor_out != NULL) {
+        flavor_out[0] = 'n'; flavor_out[1] = 'o';
+        flavor_out[2] = 'n'; flavor_out[3] = 'e';
+        flavor_out[4] = '\0';
+    }
+    const char *unk = "<unknown>";
+    if (out_vendor != NULL) *out_vendor = unk;
+    if (out_renderer != NULL) *out_renderer = unk;
+    if (out_version != NULL) *out_version = unk;
+    if (pw == NULL || pw->conn == NULL || pw->conn->egl == NULL ||
+        pw->egl_win == NULL) {
+        return;
+    }
+    const struct fdk_wayland_egl *egl = pw->conn->egl;
+    if (out_major != NULL || out_minor != NULL) {
+        fdk_wayland_egl_version(egl, out_major, out_minor);
+    }
+    if (flavor_out != NULL) {
+        const char *f = fdk_wayland_egl_flavor(egl) ? "core" : "gles2";
+        size_t i = 0;
+        for (; i < 7 && f[i] != '\0'; i++) {
+            flavor_out[i] = f[i];
+        }
+        flavor_out[i] = '\0';
+    }
+    if (out_vendor != NULL) {
+        *out_vendor = fdk_wayland_egl_vendor(egl);
+    }
+    if (out_renderer != NULL) {
+        *out_renderer = fdk_wayland_egl_renderer_string(egl);
+    }
+    if (out_version != NULL) {
+        *out_version = fdk_wayland_egl_version_string(egl);
+    }
+}

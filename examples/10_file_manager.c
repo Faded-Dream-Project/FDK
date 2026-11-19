@@ -195,7 +195,11 @@ static void history_push(history_t *h, const char *path) {
         memmove(h->path[0], h->path[1], sizeof(h->path[0]) * 127);
         h->count--;
     }
-    snprintf(h->path[h->count], sizeof(h->path[0]), "%s", path);
+    /* Bounded copy: a longer path truncates (the history entry is
+     * a display/recall convenience, not a protocol value), and the
+     * explicit precision is what silences -Wformat-truncation under
+     * the release optimizers that see the 4095-byte PATH_MAX source. */
+    snprintf(h->path[h->count], sizeof(h->path[0]), "%.127s", path);
     h->count++;
 }
 

@@ -103,7 +103,14 @@ static void wake_write(struct fdk_thread_state *ts) {
             char sink[64];
             while (read(ts->wake_read_fd, sink, sizeof sink) > 0) {
             }
-            (void)write(ts->wake_fd, &c, 1);
+            /* The retry's result is deliberately unobservable: if it
+             * fails again the pipe is full, which by construction
+             * means a byte is already pending. Assign-and-discard is
+             * the form _FORTIFY_SOURCE's warn_unused_result accepts
+             * (the plain (void) cast is NOT — gcc 15 + _FORTIFY=3
+             * escalated it to an error on the distro CI legs). */
+            ssize_t retried = write(ts->wake_fd, &c, 1);
+            (void)retried;
         }
     } else {
         uint64_t one = 1;
@@ -167,7 +174,11 @@ int fdk__thread_drain(fdk_context *ctx) {
         }
     } else {
         uint64_t count = 0;
-        (void)read(ts->wake_fd, &count, sizeof count);
+        /* Same form as wake_write's retry: the drained count is
+         * irrelevant (any read drains an eventfd to zero), but the
+         * attribute must see the result consumed. */
+        ssize_t drained = read(ts->wake_fd, &count, sizeof count);
+        (void)drained;
     }
 
     /* swap the whole list out under the lock, run it free */

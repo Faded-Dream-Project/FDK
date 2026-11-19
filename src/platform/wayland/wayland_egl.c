@@ -121,7 +121,17 @@ enum {
     EGLC_STENCIL_SIZE = 0x3026,
     EGLC_GL_COLORSPACE = 0x309D,
     EGLC_GL_COLORSPACE_LINEAR = 0x3089,
-    EGLC_GL_COLORSPACE_SRGB = 0x308B
+    EGLC_GL_COLORSPACE_SRGB = 0x308B,
+    /* EGL_KHR_create_context / EGL 1.5 (the desktop-GL app context):
+     * attribute tokens + the desktop GL API bit. */
+    EGLC_CONTEXT_MAJOR_VERSION_KHR = 0x3098, /* == CLIENT_VERSION   */
+    EGLC_CONTEXT_MINOR_VERSION_KHR = 0x30FB,
+    EGLC_CONTEXT_OPENGL_PROFILE_MASK = 0x30FD,
+    EGLC_CONTEXT_OPENGL_CORE_PROFILE_BIT = 0x00000001,
+    EGLC_OPENGL_API = 0x30A2,
+    EGLC_OPENGL_ES_API = 0x30A0,
+    EGLC_OPENGL_BIT = 0x0008,
+    EGLC_NONE_KHR = 0x3038
 };
 
 /* GL/GLES constants (values from the GLES2 specification). */
@@ -190,6 +200,9 @@ struct fdk_wl_gl_fns {
                                   EGLint, EGLint *);
     EGLContext (*eglCreateContext)(EGLDisplay, EGLConfig, EGLContext,
                                    const EGLint *);
+    /* 1.0.0 (the re-release): desktop-GL app contexts need the API
+     * bound first. Optional — NULL without it. */
+    EGLBoolean (*eglBindAPI)(unsigned int);
     EGLBoolean (*eglDestroyContext)(EGLDisplay, EGLContext);
     EGLSurface (*eglCreateWindowSurface)(EGLDisplay, EGLConfig,
                                          void *, const EGLint *);
@@ -368,6 +381,17 @@ struct fdk_wayland_egl {
     int engaged_dumped;            /* FDK_GL_TRACE: the engagement dump
                                     * fired once per connection          */
     char renderer[80];
+    /* 1.0.0 (the re-release): the identity fdk_window_gl_info()
+     * reports. flavor: 0 = gles2 (the presentation context serves
+     * app GL too), 1 = core (a desktop-GL 3.3+ app context exists).
+     * app_ctx_template_ok: the engagement probe proved desktop-GL
+     * core 3.3 contexts CAN be created on this display. */
+    int flavor;
+    int app_ctx_template_ok;
+    int ver_major, ver_minor;
+    const char *str_vendor;
+    const char *str_renderer;
+    const char *str_version;
 };
 
 enum {
@@ -380,6 +404,11 @@ struct fdk_wayland_egl_window {
     struct wl_egl_window *wl_win;
     EGLSurface surface;
     EGLContext ctx;
+    /* 1.0.0 (the re-release): the desktop-GL core app context (NULL
+     * = render through the GLES2 presentation context — flavor
+     * "gles2"). It shares NOTHING (EGL sharing cannot cross the
+     * ES2/desktop API split); the app's objects are the app's. */
+    EGLContext app_ctx;
     unsigned int tex;
     int w, h;
     fdk_u32 *staging;
@@ -842,6 +871,14 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     EGL_RESOLVE(eglTerminate, "eglTerminate");
     EGL_RESOLVE(eglChooseConfig, "eglChooseConfig");
     EGL_RESOLVE(eglCreateContext, "eglCreateContext");
+    /* 1.0.0 (the re-release): optional — the desktop-GL app context
+     * needs it; NULL simply means no core-profile attempt. */
+    {
+        void *sym_ = egl->fn.eglGetProcAddress("eglBindAPI");
+        if (sym_ != NULL) {
+            (*(void **)&(egl->fn.eglBindAPI)) = sym_;
+        }
+    }
     EGL_RESOLVE(eglDestroyContext, "eglDestroyContext");
     EGL_RESOLVE(eglCreateWindowSurface, "eglCreateWindowSurface");
     EGL_RESOLVE(eglDestroySurface, "eglDestroySurface");
@@ -1495,6 +1532,59 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
         egl->refused = 1;
         return NULL;
     }
+
+    /* 1.0.0 (the re-release) — the APPLICATION context PROBE: where
+     * the driver offers EGL_KHR_create_context (desktop GL) AND
+     * eglBindAPI resolved, prove a core-profile 3.3 context CAN be
+     * created on a desktop-GL config for this display. The
+     * presentation context stays GLES2 (the lane's quad program is
+     * GLES2); per-window app contexts are minted by
+     * fdk_wayland_egl_window_app_ctx_ensure(). Every failure here is
+     * quiet and non-fatal — the app falls back to the GLES2 context
+     * and the flavor reports "gles2" honestly. The probe context is
+     * destroyed immediately (it existed to answer the question). */
+    if (egl->fn.eglBindAPI != NULL && egl->fn.eglQueryString != NULL &&
+        egl->flavor == 0) {
+        const char *ev = egl->fn.eglQueryString(egl->egl_display,
+                                                EGLC_EXTENSIONS);
+        if (ev != NULL &&
+            fdk_wlgl_strcasestr(ev, "EGL_KHR_create_context") != NULL &&
+            egl->fn.eglBindAPI(EGLC_OPENGL_API)) {
+            EGLConfig gl_cfg = NULL;
+            int n_gl = 0;
+            const EGLint gl_cfg_attr[] = {
+                EGLC_SURFACE_TYPE, EGLC_WINDOW_BIT,
+                EGLC_RENDERABLE_TYPE, EGLC_OPENGL_BIT,
+                EGLC_RED_SIZE, 8,
+                EGLC_GREEN_SIZE, 8,
+                EGLC_BLUE_SIZE, 8,
+                EGLC_NONE
+            };
+            if (egl->fn.eglChooseConfig(egl->egl_display, gl_cfg_attr,
+                                        &gl_cfg, 1, &n_gl) && n_gl > 0 &&
+                gl_cfg != NULL) {
+                const EGLint core33[] = {
+                    EGLC_CONTEXT_MAJOR_VERSION_KHR, 3,
+                    EGLC_CONTEXT_MINOR_VERSION_KHR, 3,
+                    EGLC_CONTEXT_OPENGL_PROFILE_MASK,
+                    EGLC_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+                    EGLC_NONE_KHR
+                };
+                EGLContext app_ctx = egl->fn.eglCreateContext(
+                    egl->egl_display, gl_cfg, EGLC_NO_CONTEXT, core33);
+                if (app_ctx != EGLC_NO_CONTEXT) {
+                    egl->app_ctx_template_ok = 1;
+                    (void)egl->fn.eglDestroyContext(egl->egl_display,
+                                                    app_ctx);
+                    FDK_DEBUG("desktop-GL core 3.3 contexts available "
+                              "(fdk_window_gl_* / fdk_ext_gl_* app "
+                              "contexts)");
+                }
+            }
+            /* Back to ES for everything the lane does. */
+            (void)egl->fn.eglBindAPI(EGLC_OPENGL_ES_API);
+        }
+    }
     /* Setup-stage drain #1: the context's error flag at birth plus
      * anything the renderer/extension reads raised — consumed BEFORE
      * the program build so later stages only see their own errors. */
@@ -1508,6 +1598,33 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
         const unsigned char *r = egl->fn.glGetString(GLC_RENDERER);
         if (r != NULL) {
             (void)snprintf(egl->renderer, sizeof(egl->renderer), "%s", r);
+        }
+        /* 1.0.0 (the re-release): the identity set
+         * fdk_window_gl_info() reports. Copied into lane storage
+         * while a context is current; the version string's leading
+         * major.minor parsed for the numeric pair. The gles2
+         * flavor's version is what the ES2 context reports
+         * ("OpenGL ES 3.2 Mesa..." on ES3-capable drivers) —
+         * reported as-is, honestly. */
+        static char vendor_buf[80];
+        static char version_buf[160];
+        const unsigned char *v = egl->fn.glGetString(GLC_VENDOR);
+        const unsigned char *ver = egl->fn.glGetString(GLC_VERSION);
+        if (v != NULL && egl->str_vendor == NULL) {
+            (void)snprintf(vendor_buf, sizeof vendor_buf, "%s", v);
+            egl->str_vendor = vendor_buf;
+        }
+        if (ver != NULL && egl->str_version == NULL) {
+            (void)snprintf(version_buf, sizeof version_buf, "%s", ver);
+            egl->str_version = version_buf;
+            int vmaj = 0, vmin = 0;
+            if (sscanf((const char *)ver, "%d.%d", &vmaj, &vmin) >= 1) {
+                egl->ver_major = vmaj;
+                egl->ver_minor = vmin;
+            }
+        }
+        if (egl->str_renderer == NULL) {
+            egl->str_renderer = egl->renderer;
         }
     }
     if (wlgl_trace_enabled()) {
@@ -1876,6 +1993,13 @@ void fdk_wayland_egl_window_destroy(struct fdk_wayland_egl *egl,
         (void)egl->fn.eglDestroySurface(egl->egl_display, ewin->surface);
         lane_trace_teardown("eglDestroyContext(window)");
         (void)egl->fn.eglDestroyContext(egl->egl_display, ewin->ctx);
+        if (ewin->app_ctx != 0) {
+            /* 1.0.0 (the re-release): the desktop-GL app context
+             * dies with the window (destroy under the same NO
+             * binding; eglDestroyContext is API-agnostic). */
+            (void)egl->fn.eglDestroyContext(egl->egl_display,
+                                            ewin->app_ctx);
+        }
     }
     lane_trace_teardown("wl_egl_window_destroy");
     wl_egl_window_destroy(ewin->wl_win);
@@ -2717,11 +2841,111 @@ fdk_result fdk_wayland_egl_window_make_current(
         return FDK_ERR_INVALID_ARGUMENT;
     }
     struct fdk_wayland_egl *egl = ewin->egl;
+    /* 1.0.0 (the re-release): prefer the desktop-GL core app
+     * context when one exists (fdk_window_gl_* / fdk_ext_gl_*
+     * callers bring their own shaders). eglBindAPI must match the
+     * context's API — a desktop context is only current under
+     * EGL_OPENGL_API, and the lane's own GLES work must bind ES
+     * back after. */
+    if (ewin->app_ctx != 0) {
+        if (egl->fn.eglBindAPI != NULL &&
+            egl->fn.eglBindAPI(EGLC_OPENGL_API)) {
+            if (egl->fn.eglMakeCurrent(egl->egl_display, ewin->surface,
+                                       ewin->surface, ewin->app_ctx)) {
+                return FDK_OK;
+            }
+            /* fall through to ES after restoring the API */
+            (void)egl->fn.eglBindAPI(EGLC_OPENGL_ES_API);
+        }
+    }
     if (!egl->fn.eglMakeCurrent(egl->egl_display, ewin->surface,
                                 ewin->surface, ewin->ctx)) {
         return FDK_ERR_UNSUPPORTED;
     }
     return FDK_OK;
+}
+
+/* ---- 1.0.0 (the re-release): identity accessors + the per-window
+ * app-context step (fdk_window_gl_info / fdk_window_gl_engage). */
+int fdk_wayland_egl_flavor(const struct fdk_wayland_egl *egl) {
+    return (egl != NULL) ? egl->flavor : 0;
+}
+
+int fdk_wayland_egl_refused(const struct fdk_wayland_egl *egl) {
+    return (egl != NULL) ? egl->refused : 0;
+}
+
+void fdk_wayland_egl_version(const struct fdk_wayland_egl *egl,
+                             int *out_major, int *out_minor) {
+    if (out_major != NULL) *out_major = (egl != NULL) ? egl->ver_major : 0;
+    if (out_minor != NULL) *out_minor = (egl != NULL) ? egl->ver_minor : 0;
+}
+
+const char *fdk_wayland_egl_vendor(const struct fdk_wayland_egl *egl) {
+    return (egl != NULL && egl->str_vendor != NULL) ? egl->str_vendor
+                                                    : "<unknown>";
+}
+
+const char *fdk_wayland_egl_renderer_string(
+    const struct fdk_wayland_egl *egl) {
+    return (egl != NULL && egl->str_renderer != NULL) ? egl->str_renderer
+                                                      : "<unknown>";
+}
+
+const char *fdk_wayland_egl_version_string(
+    const struct fdk_wayland_egl *egl) {
+    return (egl != NULL && egl->str_version != NULL) ? egl->str_version
+                                                     : "<unknown>";
+}
+
+int fdk_wayland_egl_window_app_ctx_ensure(
+    struct fdk_wayland_egl_window *ewin) {
+    if (ewin == NULL || ewin->egl == NULL) {
+        return 0;
+    }
+    if (ewin->app_ctx != 0) {
+        return 1; /* already there */
+    }
+    struct fdk_wayland_egl *egl = ewin->egl;
+    if (!egl->app_ctx_template_ok || egl->fn.eglBindAPI == NULL) {
+        return 0;
+    }
+    if (!egl->fn.eglBindAPI(EGLC_OPENGL_API)) {
+        return 0;
+    }
+    EGLConfig gl_cfg = NULL;
+    int n_gl = 0;
+    const EGLint gl_cfg_attr[] = {
+        EGLC_SURFACE_TYPE, EGLC_WINDOW_BIT,
+        EGLC_RENDERABLE_TYPE, EGLC_OPENGL_BIT,
+        EGLC_RED_SIZE, 8,
+        EGLC_GREEN_SIZE, 8,
+        EGLC_BLUE_SIZE, 8,
+        EGLC_NONE
+    };
+    int ok = 0;
+    if (egl->fn.eglChooseConfig(egl->egl_display, gl_cfg_attr, &gl_cfg, 1,
+                                &n_gl) &&
+        n_gl > 0 && gl_cfg != NULL) {
+        const EGLint core33[] = {
+            EGLC_CONTEXT_MAJOR_VERSION_KHR, 3,
+            EGLC_CONTEXT_MINOR_VERSION_KHR, 3,
+            EGLC_CONTEXT_OPENGL_PROFILE_MASK,
+            EGLC_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+            EGLC_NONE_KHR
+        };
+        EGLContext app_ctx = egl->fn.eglCreateContext(
+            egl->egl_display, gl_cfg, EGLC_NO_CONTEXT, core33);
+        if (app_ctx != EGLC_NO_CONTEXT) {
+            ewin->app_ctx = app_ctx;
+            egl->flavor = 1;
+            ok = 1;
+            FDK_DEBUG("desktop-GL core 3.3 app context created for a "
+                      "window (fdk_window_gl_* / fdk_ext_gl_*)");
+        }
+    }
+    (void)egl->fn.eglBindAPI(EGLC_OPENGL_ES_API);
+    return ok;
 }
 
 fdk_result fdk_wayland_egl_window_swap(struct fdk_wayland_egl_window *ewin) {

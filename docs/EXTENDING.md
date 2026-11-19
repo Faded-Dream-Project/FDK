@@ -1020,6 +1020,22 @@ the chooser widgets below.
 
 ---
 
+## 19b. Application-owned GL on plain windows (1.0.0, fdk_gl.h)
+
+The add-on GL quartet (`fdk_ext_gl_*`, §6/P2) needs an
+`fdk_ext_surface`. Since the 2026-11-18 re-release the same power —
+and more — exists for ORDINARY windows through
+`include/fdk/fdk_gl.h`: engage the lane explicitly
+(`fdk_window_gl_engage`, before any present, overriding the size
+gate), ask WHY on any refusal (`fdk_gl_status` +
+`FDK_GL_REASON_*`: NOT_YET / SIZE_GATE / CPU_MODE / DRIVER / BACKEND
+/ DOWNGRADED — never an ambiguous bare UNSUPPORTED), read the
+context identity (`fdk_window_gl_info`: core/compat/gles2 flavor,
+version, vendor, renderer), or drop a `fdk_gl_viewport` widget into
+any tree and render in its callback (compositing, z-order,
+on-demand frames, context-loss reporting all owned by the widget).
+The example `examples/gl_viewport_3d.c` is the reference consumer.
+
 ## The reference consumers (in-tree)
 
 The model this document describes has its proofs in the tree:
