@@ -727,7 +727,7 @@ static fdk_u8 *e_resample(const fdk_u8 *src, int sw, int sh, int dw,
                 fdk_f32 r = 0.0f, g = 0.0f, b = 0.0f, a = 0.0f, wsum = 0.0f;
                 for (int yy = iy0; yy < iy1; yy++) {
                     fdk_f32 wy = 1.0f;
-                    if (yy < fy0) {
+                    if ((fdk_f32)yy < fy0) {
                         wy = (fdk_f32)yy + 1.0f - fy0;
                     }
                     if ((fdk_f32)(yy + 1) > fy1) {
@@ -738,7 +738,7 @@ static fdk_u8 *e_resample(const fdk_u8 *src, int sw, int sh, int dw,
                     }
                     for (int xx = ix0; xx < ix1; xx++) {
                         fdk_f32 wx = 1.0f;
-                        if (xx < fx0) {
+                        if ((fdk_f32)xx < fx0) {
                             wx = (fdk_f32)xx + 1.0f - fx0;
                         }
                         if ((fdk_f32)(xx + 1) > fx1) {
