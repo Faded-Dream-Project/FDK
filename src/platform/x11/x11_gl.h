@@ -142,6 +142,9 @@ fdk_result fdk_x11_gl_window_cb_readback(struct fdk_x11_gl_window *gwin,
                                          struct fdk_surface *resolved,
                                          fdk_u32 *out, int width,
                                          int height);
+fdk_result fdk_x11_gl_window_read_region(struct fdk_x11_gl_window *gwin,
+                                         int x, int y, int w, int h,
+                                         fdk_u32 *out);
 fdk_result fdk_x11_gl_window_readback(struct fdk_x11_gl_window *gwin,
                                       void *surface, fdk_u32 *out,
                                       int width, int height);

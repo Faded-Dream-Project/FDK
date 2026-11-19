@@ -3616,8 +3616,18 @@ void fdk_wayland_window_set_render_mode(fdk_platform_window *pw,
 }
 
 fdk_result fdk_wayland_window_gl_make_current(fdk_platform_window *pw) {
-    if (pw == NULL || pw->egl_win == NULL) {
-        return FDK_ERR_UNSUPPORTED;
+    if (pw == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* R-001 (Halcyon), the Wayland twin of the X11 fix: an adopted
+     * extension window never acquires a framebuffer through the
+     * engine, so nothing attached the EGL lane — attach it on
+     * demand through the same engage machinery a normal window
+     * gets. An engage failure is the honest refusal it already is. */
+    if (pw->egl_win == NULL) {
+        if (!fdk_ok(fdk_wayland_window_gl_engage(pw, NULL))) {
+            return FDK_ERR_UNSUPPORTED;
+        }
     }
     return fdk_wayland_egl_window_make_current(pw->egl_win);
 }
@@ -3635,8 +3645,12 @@ fdk_result fdk_wayland_window_gl_set_frame_cb(fdk_platform_window *pw,
     if (pw == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
+    /* R-001: same lazy lane attach as make_current (a NULL fn is an
+     * unregister — always allowed). */
     if (fn != NULL && pw->egl_win == NULL) {
-        return FDK_ERR_UNSUPPORTED;
+        if (!fdk_ok(fdk_wayland_window_gl_engage(pw, NULL))) {
+            return FDK_ERR_UNSUPPORTED;
+        }
     }
     pw->gl_frame_fn = fn;
     pw->gl_frame_user = user;
@@ -3650,6 +3664,18 @@ fdk_result fdk_wayland_window_gl_fence_insert(fdk_platform_window *pw,
         return FDK_ERR_UNSUPPORTED;
     }
     return fdk_wayland_egl_window_fence_insert(pw->egl_win, out_fence);
+}
+
+fdk_result fdk_wayland_window_gl_read_region(fdk_platform_window *pw,
+                                             int x, int y, int w, int h,
+                                             fdk_u32 *out) {
+    if (pw == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (pw->egl_win == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk_wayland_egl_window_read_region(pw->egl_win, x, y, w, h, out);
 }
 
 fdk_result fdk_wayland_window_gl_fence_wait(fdk_platform_window *pw,

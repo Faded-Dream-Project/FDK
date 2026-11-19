@@ -183,6 +183,11 @@ struct fdk_gl_fns {
     const char *(*glGetString)(GLenum);
     GLenum (*glGetError)(void);
     void (*glFinish)(void);
+    /* R-003 (the GL viewport composite): the lane's own region
+     * readback — the fn-table twin of the Wayland lane's
+     * glReadPixels (the self-check probe there already uses it). */
+    void (*glReadPixels)(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum,
+                         void *);
     void *(*glFenceSync)(unsigned, int);
     unsigned (*glClientWaitSync)(void *, unsigned, unsigned long long);
     void (*glDeleteSync)(void *);
@@ -490,6 +495,7 @@ struct fdk_x11_gl *fdk_x11_gl_try_load(fdk_platform_connection *conn) {
     GL_RESOLVE(glGetString, "glGetString");
     GL_RESOLVE(glGetError, "glGetError");
     GL_RESOLVE(glFinish, "glFinish");
+    GL_RESOLVE(glReadPixels, "glReadPixels");
     GL_RESOLVE(glFenceSync, "glFenceSync");
     GL_RESOLVE(glClientWaitSync, "glClientWaitSync");
     GL_RESOLVE(glDeleteSync, "glDeleteSync");
@@ -1423,6 +1429,44 @@ fdk_result fdk_x11_gl_window_paint_flush(struct fdk_x11_gl_window *gwin,
     return FDK_OK;
 }
 
+/* R-003 (Halcyon): the GL viewport widget's composite source —
+ * read a SUB-RECT of the back buffer (the widget's region, physical
+ * pixels, window-relative) as top-down RGBA8888 while the lane
+ * context is current on this window. Called by the widget's paint
+ * right after the application's render callback, BEFORE the tree's
+ * present draws the CPU composite: the read pixels are blitted into
+ * the CPU surface in paint order, so later siblings (menus, popups,
+ * tooltips) still draw OVER the region — the documented promise the
+ * 1.0.0 build broke by leaving the GL content in the back buffer
+ * where the present's fullscreen CPU quad covered it. */
+fdk_result fdk_x11_gl_window_read_region(struct fdk_x11_gl_window *gwin,
+                                         int x, int y, int w, int h,
+                                         fdk_u32 *out) {
+    if (gwin == NULL || out == NULL || w <= 0 || h <= 0 ||
+        gwin->ctx == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    struct fdk_x11_gl *gl = gwin->gl;
+    if (!gl->fn.glXMakeCurrent(gl->conn->display, gwin->xwindow,
+                               (gwin->app_ctx != NULL) ? gwin->app_ctx
+                                                       : gwin->ctx)) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    gl->fn.glFinish();
+    /* GL rows are bottom-up: read one row at a time from the top of
+     * the requested region so the caller's buffer is top-down (the
+     * same flip the engine readback performs). */
+    for (int row = 0; row < h; row++) {
+        gl->fn.glReadPixels(x, y + h - 1 - row, w, 1, GLC_RGBA,
+                            GLC_UNSIGNED_BYTE,
+                            out + (size_t)row * (size_t)w);
+    }
+    if (gl->fn.glGetError() != 0) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return FDK_OK;
+}
+
 /* Test seam: readback of the GPU frame. makeCurrent, then the
  * engine's glReadPixels path (top-down RGBA8888 into `out`). */
 fdk_result fdk_x11_gl_window_readback(struct fdk_x11_gl_window *gwin,
@@ -1492,7 +1536,11 @@ fdk_result fdk_x11_gl_window_cb_flush(struct fdk_x11_gl_window *gwin,
     if (!fdk_ok(r)) {
         return r;
     }
-    fn(user, surface);
+    /* The declared fdk_ext_gl_frame_fn order: (surface, user).
+     * (The 1.0.0 build shipped this swapped as fn(user, surface) —
+     * R-002 in Halcyon's FDK requests; the swap-symmetric draws
+     * hid it until a counting callback proved the order.) */
+    fn(surface, user);
     return fdk_x11_gl_window_swap(gwin);
 }
 
@@ -1509,7 +1557,7 @@ fdk_result fdk_x11_gl_window_cb_readback(struct fdk_x11_gl_window *gwin,
     if (!fdk_ok(r)) {
         return r;
     }
-    fn(user, surface);
+    fn(surface, user); /* the declared (surface, user) order — see cb_flush */
     /* the ENGINE state of this window (the registered surface may be
      * NULL — the add-on decides what it passes its callback) */
     struct fdk_surface *s = resolved;

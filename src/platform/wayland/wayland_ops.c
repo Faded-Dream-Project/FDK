@@ -64,6 +64,7 @@ static const fdk_platform_ops g_wayland_ops = {
     .window_gl_set_frame_cb = fdk_wayland_window_gl_set_frame_cb,
     .window_gl_fence_insert = fdk_wayland_window_gl_fence_insert,
     .window_gl_fence_wait = fdk_wayland_window_gl_fence_wait,
+    .window_gl_read_region = fdk_wayland_window_gl_read_region,
     .window_gl_engage = fdk_wayland_window_gl_engage,
     .window_gl_status = fdk_wayland_window_gl_status,
     .window_gl_info = fdk_wayland_window_gl_info,

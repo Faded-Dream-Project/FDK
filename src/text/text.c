@@ -1170,6 +1170,187 @@ static void rect_union_i64(fdk_i64 *x0, fdk_i64 *y0, fdk_i64 *x1,
     if (ry1 > *y1) *y1 = ry1;
 }
 
+/* R-002 (Halcyon, 2026-11-19): rasterize a text run into CALLER-OWNED
+ * ARGB8888 memory — no fdk_surface, no context, no window. The same
+ * shaped placement walk fdk_surface_draw_utf8 uses (identical shaping,
+ * kerning, fallback fonts, and glyph cache), so a cached label
+ * rasterized here and the same string drawn on a surface agree
+ * pixel-for-pixel. The pen starts at x=0 and the BASELINE is
+ * `baseline_y`, both in buffer coordinates — the same geometry
+ * fdk_surface_draw_utf8 paints with (its pen_x/baseline_y against
+ * the surface); `w`/`h`/`stride_bytes` describe `dst` exactly as a
+ * surface's framebuffer (stride in BYTES, >= w*4). Blending is
+ * straight source-over INCLUDING the destination alpha (the ARGB
+ * branch of blend_mask's math — text into a transparent sprite
+ * produces correct premultiplied-ready straight alpha). Glyphs
+ * outside the buffer clip away exactly as they clip against a
+ * surface. `out_ink` (optional) receives the run's ink-union in
+ * buffer coordinates; a no-ink run (whitespace/empty) reports an
+ * empty box (width or height 0) and paints nothing. Can fail with
+ * FDK_ERR_INVALID_ARGUMENT (NULL font/utf8, or dst == NULL / w <= 0
+ * / h <= 0 / stride_bytes < w*4) or FDK_ERR_OUT_OF_MEMORY (the
+ * shaped-cache entry could not be built). */
+fdk_result fdk_font_rasterize_utf8(const fdk_font *font,
+                                   const char *utf8, size_t byte_len,
+                                   fdk_color color, fdk_u32 *dst,
+                                   fdk_i32 w, fdk_i32 h,
+                                   fdk_i32 stride_bytes,
+                                   fdk_i32 baseline_y,
+                                   fdk_rect *out_ink) {
+    if (out_ink != NULL) {
+        out_ink->x = 0;
+        out_ink->y = 0;
+        out_ink->width = 0;
+        out_ink->height = 0;
+    }
+    fdk_font *f = fdk_text_font_mutable(font);
+    if (f == NULL || utf8 == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (dst == NULL || w <= 0 || h <= 0 ||
+        stride_bytes < (fdk_i32)sizeof(fdk_u32) * w) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk__shaped *s = fdk__shape_range_cached(f, utf8,
+                                             byte_len, 0, byte_len, NULL,
+                                             0);
+    if (s == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    const fdk_i32 dst_stride =
+        stride_bytes / (fdk_i32)sizeof(fdk_u32);
+    const fdk_f32 rf = color.r, gf = color.g, bf = color.b;
+    const fdk_f32 af = color.a;
+    fdk_i64 ux0 = 0, uy0 = 0, ux1 = -1, uy1 = -1; /* empty union */
+    int any = 0;
+    for (size_t i = 0; i < s->n_places; i++) {
+        const fdk__placement *p = &s->places[i];
+        const fdk_glyph *glyph = p->raster;
+        if (glyph == NULL || glyph->bits == NULL || glyph->w <= 0 ||
+            glyph->h <= 0) {
+            continue;
+        }
+        const fdk_i64 gx0 = (fdk_i64)p->x + glyph->xoff;
+        const fdk_i64 gy0 = (fdk_i64)glyph->yoff + p->y_shift +
+                            (fdk_i64)baseline_y;
+        const fdk_i64 gx1 = gx0 + glyph->w;
+        const fdk_i64 gy1 = gy0 + glyph->h;
+        if (!any) {
+            ux0 = gx0; uy0 = gy0; ux1 = gx1; uy1 = gy1;
+            any = 1;
+        } else {
+            if (gx0 < ux0) ux0 = gx0;
+            if (gy0 < uy0) uy0 = gy0;
+            if (gx1 > ux1) ux1 = gx1;
+            if (gy1 > uy1) uy1 = gy1;
+        }
+        const fdk_i64 cx0 = gx0 < 0 ? 0 : gx0;
+        const fdk_i64 cy0 = gy0 < 0 ? 0 : gy0;
+        const fdk_i64 cx1 = gx1 > (fdk_i64)w ? (fdk_i64)w : gx1;
+        const fdk_i64 cy1 = gy1 > (fdk_i64)h ? (fdk_i64)h : gy1;
+        if (cx1 <= cx0 || cy1 <= cy0) {
+            continue; /* fully clipped: the ink union still counts it */
+        }
+        for (fdk_i64 y = cy0; y < cy1; y++) {
+            fdk_u32 *drow = dst + (size_t)y * (size_t)dst_stride +
+                            (size_t)cx0;
+            if (glyph->color) {
+                /* C-3: the glyph carries straight RGBA — composite
+                 * over, its own alpha (the blend_rgba math). */
+                const fdk_u8 *srow = glyph->bits +
+                    ((size_t)(y - gy0) * (size_t)glyph->w +
+                     (size_t)(cx0 - gx0)) * 4u;
+                for (fdk_i64 x = cx0; x < cx1; x++) {
+                    const fdk_u8 *sp = srow + (size_t)(x - cx0) * 4u;
+                    const int sa = sp[3];
+                    if (sa <= 0) {
+                        continue;
+                    }
+                    fdk_u32 d = drow[x - cx0];
+                    const int da = (int)((d >> 24) & 0xFFu);
+                    const int out_a = sa + da * (255 - sa) / 255;
+                    if (out_a <= 0) {
+                        drow[x - cx0] = 0;
+                        continue;
+                    }
+                    int ch[3];
+                    for (int c = 0; c < 3; c++) {
+                        const int sc = sp[c];
+                        const int dc =
+                            (int)((d >> (16 - 8 * c)) & 0xFFu);
+                        ch[c] = (sc * sa + dc * da * (255 - sa) / 255 +
+                                 127) / out_a;
+                    }
+                    drow[x - cx0] = ((fdk_u32)out_a << 24) |
+                                    ((fdk_u32)ch[0] << 16) |
+                                    ((fdk_u32)ch[1] << 8) |
+                                    (fdk_u32)ch[2];
+                }
+            } else {
+                /* Alpha-mask glyph tinted by `color` — the ARGB
+                 * branch of blend_mask's math (float form, straight
+                 * source-over including the alpha channel). */
+                const fdk_u8 *mrow = glyph->bits +
+                    (size_t)(y - gy0) * (size_t)glyph->w +
+                    (size_t)(cx0 - gx0);
+                for (fdk_i64 x = cx0; x < cx1; x++) {
+                    const int m = mrow[x - cx0];
+                    if (m <= 0) {
+                        continue;
+                    }
+                    const fdk_f32 cov_a = af * (fdk_f32)m / 255.0f;
+                    fdk_u32 d = drow[x - cx0];
+                    const fdk_f32 da =
+                        (fdk_f32)((d >> 24) & 0xFFu) / 255.0f;
+                    const fdk_f32 out_a =
+                        cov_a + da * (1.0f - cov_a);
+                    if (out_a <= 0.0f) {
+                        drow[x - cx0] = 0;
+                        continue;
+                    }
+                    const fdk_f32 dr =
+                        (fdk_f32)((d >> 16) & 0xFFu) / 255.0f;
+                    const fdk_f32 dg =
+                        (fdk_f32)((d >> 8) & 0xFFu) / 255.0f;
+                    const fdk_f32 db = (fdk_f32)(d & 0xFFu) / 255.0f;
+                    const int or_ = (int)(rf * 255.0f / out_a *
+                                          cov_a + dr * da *
+                                          (1.0f - cov_a) / out_a *
+                                          255.0f + 0.5f);
+                    const int og = (int)(gf * 255.0f / out_a *
+                                          cov_a + dg * da *
+                                          (1.0f - cov_a) / out_a *
+                                          255.0f + 0.5f);
+                    const int ob = (int)(bf * 255.0f / out_a *
+                                          cov_a + db * da *
+                                          (1.0f - cov_a) / out_a *
+                                          255.0f + 0.5f);
+                    drow[x - cx0] =
+                        ((fdk_u32)(int)(out_a * 255.0f + 0.5f) << 24) |
+                        ((fdk_u32)(or_ > 255 ? 255 : or_) << 16) |
+                        ((fdk_u32)(og > 255 ? 255 : og) << 8) |
+                        (fdk_u32)(ob > 255 ? 255 : ob);
+                }
+            }
+        }
+    }
+    /* borrowed: the shaped cache owns the result */
+    if (out_ink != NULL && any) {
+        fdk_i64 ix0 = ux0 < 0 ? 0 : ux0;
+        fdk_i64 iy0 = uy0 < 0 ? 0 : uy0;
+        fdk_i64 ix1 = ux1 > (fdk_i64)w ? (fdk_i64)w : ux1;
+        fdk_i64 iy1 = uy1 > (fdk_i64)h ? (fdk_i64)h : uy1;
+        if (ix1 > ix0 && iy1 > iy0 &&
+            ix0 <= (fdk_i64)INT32_MAX && iy0 <= (fdk_i64)INT32_MAX) {
+            out_ink->x = (fdk_i32)ix0;
+            out_ink->y = (fdk_i32)iy0;
+            out_ink->width = (fdk_i32)(ix1 - ix0);
+            out_ink->height = (fdk_i32)(iy1 - iy0);
+        }
+    }
+    return FDK_OK;
+}
+
 fdk_result fdk_surface_draw_utf8(fdk_surface *surface, fdk_font *font,
                                  const char *utf8, size_t byte_len,
                                  fdk_i32 pen_x, fdk_i32 baseline_y,

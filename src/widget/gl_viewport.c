@@ -46,7 +46,14 @@ typedef struct fdk_gl_viewport {
     void *on_lost_data;
     int lane_ok;        /* 0 = lost (or never had it)             */
     int lost_reported;  /* the one-shot context-loss flag          */
+    int readback_lost_reported; /* one-shot composite-loss flag     */
     fdk_size last_region;
+    /* R-003: the composite scratch (RGBA readback buffer + ARGB
+     * carrier surface with its cached pixel pointer). */
+    fdk_u32 *scratch_px;
+    int scratch_w, scratch_h;
+    fdk_surface *carrier;
+    fdk_u32 *carrier_px;
 } fdk_gl_viewport;
 
 static fdk_gl_viewport *glv_of(fdk_widget *w) {
@@ -100,6 +107,13 @@ static void glv_paint(fdk_widget *w, fdk_surface *surface,
 
     fdk_f32 scale = 1.0f;
     (void)fdk_window_get_scale(win, &scale);
+    /* PHYSICAL pixels: the readback region and the blit target are
+     * the same rect in the window's framebuffer, while the callback
+     * receives the LOGICAL size (the documented contract). */
+    const int px = (int)((fdk_f32)bounds.x * scale + 0.5f);
+    const int py = (int)((fdk_f32)bounds.y * scale + 0.5f);
+    const int pw_phys = (int)((fdk_f32)bounds.width * scale + 0.5f);
+    const int ph_phys = (int)((fdk_f32)bounds.height * scale + 0.5f);
     const int pw = (int)bounds.width;
     const int ph = (int)bounds.height;
 
@@ -110,16 +124,97 @@ static void glv_paint(fdk_widget *w, fdk_surface *surface,
     /* The callback owns the GL: it sets its viewport, draws with its
      * own shaders (depth test and all — the flavor fdk_gl.h reports
      * governs what it may use), and returns. FDK never draws GL on
-     * the application's behalf; the region's presence in the frame
-     * rides the window's present (the callback drew INTO the lane's
-     * drawable, the same channel the ext frame-callback owns). */
+     * the application's behalf. */
     v->on_render(w, pw, ph, scale, v->on_render_data);
 
-    /* The region's background box in the CPU surface: keeps the
-     * damage bookkeeping and the tree's composite coherent while the
-     * GL content rides the lane's present. */
+    /* R-003 (Halcyon): COMPOSITE IN PAINT ORDER. The 1.0.0 build
+     * left the GL content in the back buffer and let the present
+     * carry it — but the present draws the CPU composite as a
+     * fullscreen quad AFTER the tree walk, covering the region
+     * entirely (pixel-proven: the widget was never visible). The
+     * fix reads the region back RIGHT HERE, while the callback's
+     * frame is in the back buffer and the context is current, and
+     * blits it into the CPU surface as an ordinary opaque sprite:
+     * later siblings (menus, popups, tooltips) paint after this
+     * widget in the walk and therefore draw OVER it — the documented
+     * promise, now actually true. The present path is untouched and
+     * backend-agnostic; the cost is one glReadPixels of the region
+     * per rendered frame (bounded by the widget's size, never the
+     * window's). */
     fdk_surface_fill_rect(surface, bounds,
                           (fdk_color){ 0.06f, 0.07f, 0.09f, 1.0f });
+    if (win->ops->window_gl_read_region != NULL && pw_phys > 0 &&
+        ph_phys > 0) {
+        int composed = 0;
+        /* Reused per-widget scratch: RGBA readback + an ARGB
+         * offscreen carrier for the blit. Resized on region change;
+         * freed with the widget (glv_destroy). */
+        if (v->scratch_w != pw_phys || v->scratch_h != ph_phys ||
+            v->scratch_px == NULL || v->carrier == NULL) {
+            fdk_free(v->scratch_px);
+            v->scratch_px = fdk_alloc(
+                (size_t)pw_phys * (size_t)ph_phys * sizeof(fdk_u32));
+            if (v->carrier != NULL) {
+                fdk_surface_destroy(v->carrier);
+                v->carrier = NULL;
+            }
+            if (fdk_ok(fdk_surface_create_format(
+                    pw_phys, ph_phys, FDK_SURFACE_FORMAT_ARGB8888,
+                    &v->carrier))) {
+                /* cache the carrier's pixel pointer: an offscreen
+                 * surface owns its pixels for its whole life (the
+                 * header's offscreen contract), so one get_info is
+                 * enough. */
+                fdk_surface_info ci;
+                if (fdk_ok(fdk_surface_get_info(v->carrier, &ci))) {
+                    v->carrier_px = ci.pixels;
+                } else {
+                    fdk_surface_destroy(v->carrier);
+                    v->carrier = NULL;
+                }
+            }
+            v->scratch_w = pw_phys;
+            v->scratch_h = ph_phys;
+        }
+        if (v->scratch_px != NULL && v->carrier != NULL &&
+            v->carrier_px != NULL &&
+            fdk_ok(win->ops->window_gl_read_region(
+                win->pwindow, px, py, pw_phys, ph_phys, v->scratch_px))) {
+            /* GL gives RGBA bytes; the ARGB carrier wants
+             * A<<24|R<<16|G<<8|B with straight alpha. */
+            const fdk_u8 *src = (const fdk_u8 *)v->scratch_px;
+            for (int row = 0; row < ph_phys; row++) {
+                const fdk_u8 *srow =
+                    src + (size_t)row * (size_t)pw_phys * 4u;
+                fdk_u32 *drow =
+                    v->carrier_px + (size_t)row * (size_t)pw_phys;
+                for (int col = 0; col < pw_phys; col++) {
+                    drow[col] = ((fdk_u32)srow[col * 4] << 16) |
+                                ((fdk_u32)srow[col * 4 + 1] << 8) |
+                                (fdk_u32)srow[col * 4 + 2] |
+                                ((fdk_u32)srow[col * 4 + 3] << 24);
+                }
+            }
+            if (fdk_ok(fdk_surface_blit(
+                    surface, bounds.x, bounds.y, v->carrier,
+                    (fdk_rect){ 0, 0, pw_phys, ph_phys }))) {
+                composed = 1;
+            }
+        }
+        if (!composed) {
+            /* Readback refused (a driver quirk, a lost context):
+             * the themed-background box above already stands, and
+             * the region stays honest rather than showing stale
+             * content. One INFO per loss. */
+            if (v->readback_lost_reported == 0) {
+                v->readback_lost_reported = 1;
+                FDK_INFO("gl_viewport: the GL region could not be read "
+                         "back this frame — the themed background stands");
+            }
+        } else {
+            v->readback_lost_reported = 0;
+        }
+    }
     v->last_region.width = bounds.width;
     v->last_region.height = bounds.height;
 }
@@ -137,6 +232,17 @@ static const fdk_a11y_class glv_a11y = {
     .perform = NULL,
 };
 
+static void glv_finalize(fdk_widget *w) {
+    fdk_gl_viewport *v = glv_of(w);
+    fdk_free(v->scratch_px);
+    v->scratch_px = NULL;
+    if (v->carrier != NULL) {
+        fdk_surface_destroy(v->carrier);
+        v->carrier = NULL;
+        v->carrier_px = NULL;
+    }
+}
+
 const fdk_widget_class fdk_gl_viewport_class_def = {
     .size = sizeof(fdk_gl_viewport),
     .name = "gl_viewport",
@@ -144,7 +250,7 @@ const fdk_widget_class fdk_gl_viewport_class_def = {
     .paint = glv_paint,
     .measure = glv_measure,
     .arrange = NULL,
-    .instance_finalize = NULL,
+    .instance_finalize = glv_finalize,
     .a11y = &glv_a11y,
 };
 

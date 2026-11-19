@@ -1251,6 +1251,8 @@ void fdk_wayland_window_gl_info(fdk_platform_window *pwindow,
                                 const char **out_vendor,
                                 const char **out_renderer,
                                 const char **out_version);
+fdk_result fdk_wayland_window_gl_read_region(
+    fdk_platform_window *pwindow, int x, int y, int w, int h, fdk_u32 *out);
 fdk_result fdk_wayland_window_gl_fence_wait(fdk_platform_window *pwindow,
                                             fdk_u64 fence);
 /* The adopt-path render-mode stamp (2026-11-12): platform_internal.h's

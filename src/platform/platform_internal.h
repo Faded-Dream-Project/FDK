@@ -655,6 +655,16 @@ typedef struct fdk_platform_ops {
                                          fdk_u64 *out_fence);
     fdk_result (*window_gl_fence_wait)(fdk_platform_window *pwindow,
                                        fdk_u64 fence);
+    /* R-003 (Halcyon): read a sub-rect of the window's GL back
+     * buffer (physical pixels, window-relative, top-down RGBA8888
+     * into caller-owned memory) while the lane context is current.
+     * The GL viewport widget's composite source — called right
+     * after the application's render callback, before the present.
+     * NULL when the backend has no lane. UNSUPPORTED when the
+     * window has no engaged lane context. */
+    fdk_result (*window_gl_read_region)(fdk_platform_window *pwindow,
+                                        int x, int y, int w, int h,
+                                        fdk_u32 *out);
     /* OPTIONAL (the 2026-11-12 adopt-path render-mode fix): stamp
      * the resolved effective mode onto an ADOPTED platform window
      * after the fact — the wrapper layer (src/window/extend.c)

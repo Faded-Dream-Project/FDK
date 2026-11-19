@@ -71,6 +71,7 @@ static const fdk_platform_ops g_x11_ops = {
     .window_gl_set_frame_cb = fdk_x11_window_gl_set_frame_cb,
     .window_gl_fence_insert = fdk_x11_window_gl_fence_insert,
     .window_gl_fence_wait = fdk_x11_window_gl_fence_wait,
+    .window_gl_read_region = fdk_x11_window_gl_read_region,
     .window_gl_engage = fdk_x11_window_gl_engage,
     .window_gl_status = fdk_x11_window_gl_status,
     .window_gl_info = fdk_x11_window_gl_info,

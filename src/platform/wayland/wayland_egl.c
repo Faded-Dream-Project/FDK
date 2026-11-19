@@ -855,7 +855,11 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
 #undef WL_RESOLVE
 
     /* EGL core — dlsym on libEGL (these ARE guaranteed exports of the
-     * loader library itself). */
+     * loader library itself). eglGetProcAddress is resolved FIRST:
+     * the 1.0.0 app-context block below looks up eglBindAPI through
+     * it, and calling it before the resolve dereferences a NULL
+     * function pointer (R-006: every GPU-mode window on Wayland
+     * SEGV'd at pc=0 inside fdk_wayland_egl_try_load). */
 #define EGL_RESOLVE(field, name) \
     do { \
         void *sym_ = dlsym(lib_egl, name); \
@@ -866,15 +870,22 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
         } \
         FDK_WLGL_STORE_FN(egl->fn.field, sym_); \
     } while (0)
+    EGL_RESOLVE(eglGetProcAddress, "eglGetProcAddress");
     EGL_RESOLVE(eglGetPlatformDisplay, "eglGetPlatformDisplay");
     EGL_RESOLVE(eglInitialize, "eglInitialize");
     EGL_RESOLVE(eglTerminate, "eglTerminate");
     EGL_RESOLVE(eglChooseConfig, "eglChooseConfig");
     EGL_RESOLVE(eglCreateContext, "eglCreateContext");
     /* 1.0.0 (the re-release): optional — the desktop-GL app context
-     * needs it; NULL simply means no core-profile attempt. */
+     * needs it; NULL simply means no core-profile attempt. Resolved
+     * through eglGetProcAddress (the documented loader entry) with
+     * a dlsym fallback — eglBindAPI is a direct export of every
+     * EGL 1.2+ loader, so the fallback is not merely theoretical. */
     {
         void *sym_ = egl->fn.eglGetProcAddress("eglBindAPI");
+        if (sym_ == NULL) {
+            sym_ = dlsym(lib_egl, "eglBindAPI");
+        }
         if (sym_ != NULL) {
             (*(void **)&(egl->fn.eglBindAPI)) = sym_;
         }
@@ -890,7 +901,6 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     EGL_RESOLVE(eglSwapInterval, "eglSwapInterval");
     EGL_RESOLVE(eglQueryString, "eglQueryString");
     EGL_RESOLVE(eglGetError, "eglGetError");
-    EGL_RESOLVE(eglGetProcAddress, "eglGetProcAddress");
     /* Optional (EGL 1.2+, present everywhere real; a stub without it
      * only costs the shutdown tail call — see shutdown's note). */
     {
@@ -2834,6 +2844,38 @@ fdk_result fdk_wayland_egl_window_readback(
                : FDK_ERR_UNSUPPORTED;
 }
 
+/* R-003 (Halcyon): the GL viewport widget's composite source — the
+ * Wayland twin of fdk_x11_gl_window_read_region. Reads a sub-rect
+ * of the back buffer as top-down RGBA8888 while the lane context is
+ * current; called right after the application's render callback,
+ * before the tree's present. */
+fdk_result fdk_wayland_egl_window_read_region(
+    struct fdk_wayland_egl_window *ewin, int x, int y, int w, int h,
+    fdk_u32 *out) {
+    if (ewin == NULL || out == NULL || w <= 0 || h <= 0 ||
+        ewin->surface == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_result r = fdk_wayland_egl_window_make_current(ewin);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    struct fdk_wayland_egl *egl = ewin->egl;
+    (void)egl->fn.glGetError(); /* drain queued errors — see readback */
+    if (egl->fn.glFinish != NULL) {
+        egl->fn.glFinish();
+    }
+    for (int row = 0; row < h; row++) {
+        egl->fn.glReadPixels(x, y + h - 1 - row, w, 1, GLC_RGBA,
+                             GLC_UNSIGNED_BYTE,
+                             out + (size_t)row * (size_t)w);
+    }
+    if (egl->fn.glGetError() != 0) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return FDK_OK;
+}
+
 /* P2: makeCurrent / swap without the engine (add-on GL). */
 fdk_result fdk_wayland_egl_window_make_current(
     struct fdk_wayland_egl_window *ewin) {
@@ -2973,7 +3015,9 @@ fdk_result fdk_wayland_egl_window_cb_flush(struct fdk_wayland_egl_window *ewin,
     if (!fdk_ok(r)) {
         return r;
     }
-    fn(user, surface);
+    /* The declared fdk_ext_gl_frame_fn order: (surface, user) —
+     * R-002; the X11 twin had (and has fixed) the same swap. */
+    fn(surface, user);
     return fdk_wayland_egl_window_swap(ewin);
 }
 

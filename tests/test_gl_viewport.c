@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <dlfcn.h>
 
 #include "platform/platform_internal.h"
 
@@ -19,9 +20,42 @@ static void check(int cond, const char *what) {
 }
 
 static int render_calls;
+/* R-003's pixel proof: the callback clears to a color far from every
+ * FDK theme/CPU-fill tone (the widget's fallback box is 0.06/0.07/
+ * 0.09 dark blue-gray -> 0x0f1217). If the composite works, this
+ * color MUST be readable from the window's CPU surface after a
+ * present. GL entry points resolve through dlopen, the examples'
+ * pattern (gl_viewport_3d.c): no GL headers, no link dependency —
+ * the lane context is current when the callback runs. */
+#define GLV_TEST_R 0.20f
+#define GLV_TEST_G 0.80f
+#define GLV_TEST_B 0.30f
+static void (*t_glClearColor)(float, float, float, float);
+static void (*t_glClear)(unsigned);
+static void *t_gl_handle;
 static void on_render(fdk_widget *vp, int w, int h, fdk_f32 s, void *u) {
     (void)vp; (void)w; (void)h; (void)s; (void)u;
     render_calls++;
+    if (t_glClearColor == NULL) {
+        t_gl_handle = dlopen("libGL.so.1", RTLD_NOW | RTLD_GLOBAL);
+        if (t_gl_handle == NULL) {
+            t_gl_handle = dlopen("libGL.so", RTLD_NOW | RTLD_GLOBAL);
+        }
+        if (t_gl_handle != NULL) {
+            /* dlsym's void* -> function pointer: the union carry
+             * (ISO-pedantic-safe, the codebase's standing idiom). */
+            union { void *obj; void (*fn)(float, float, float, float); } u_cc;
+            union { void *obj; void (*fn)(unsigned); } u_cl;
+            u_cc.obj = dlsym(t_gl_handle, "glClearColor");
+            u_cl.obj = dlsym(t_gl_handle, "glClear");
+            t_glClearColor = u_cc.fn;
+            t_glClear = u_cl.fn;
+        }
+    }
+    if (t_glClearColor != NULL && t_glClear != NULL) {
+        t_glClearColor(GLV_TEST_R, GLV_TEST_G, GLV_TEST_B, 1.0f);
+        t_glClear(0x00004000u /* GL_COLOR_BUFFER_BIT */);
+    }
 }
 
 int main(void) {
@@ -65,12 +99,17 @@ int main(void) {
         fdk_shutdown(ctx);
         return fails ? 1 : 0;
     }
+    fdk_window_show(w); /* map + expose -> the paint cycle runs */
     fdk_widget *root = NULL;
     (void)fdk_window_get_root(w, &root);
     fdk_widget *vp = NULL;
     check(fdk_ok(fdk_gl_viewport_create(root, on_render, NULL, &vp)) &&
           vp != NULL, "fdk_gl_viewport_create");
     fdk_gl_viewport_set_render_callback(vp, on_render, NULL);
+    /* Give the viewport a real region: the root spans the window
+     * content; direct bounds keep the test independent of any
+     * container layout policy. */
+    fdk_widget_set_bounds(vp, (fdk_rect){ 10, 10, 200, 120 });
     fdk_gl_viewport_request_frame(vp);
     check(fdk_gl_viewport_status(NULL, NULL) == FDK_ERR_INVALID_ARGUMENT,
           "viewport_status(NULL) -> INVALID_ARGUMENT");
@@ -112,6 +151,70 @@ int main(void) {
               strcmp(gi.flavor, "gles2") == 0,
               "identity sane (core>=3 or honest compat/gles2)");
     }
+    /* R-003 (Halcyon): the composite pixel proof. The 1.0.0 build
+     * drew the GL content into the back buffer where the present's
+     * fullscreen CPU quad covered it — the widget was NEVER visible.
+     * Now the region is read back and blitted in paint order: after
+     * one presented frame the window's CPU surface must carry the
+     * callback's clear color inside the region (and the CPU fill
+     * color OUTSIDE it when a lane is engaged). Runs only when the
+     * lane engaged AND a present actually happened; headless boxes
+     * keep passing through the legs above. */
+    if (fdk_ok(r)) {
+        /* Drive real paint cycles first: the expose/map handshake
+         * and the widget walk both happen inside the pump (the
+         * request_frame flag is consumed by the NEXT paint). A few
+         * rounds ride Xvfb's map timing. */
+        for (int i = 0; i < 6; i++) {
+            (void)fdk_pump_events(ctx, 100);
+        }
+        check(render_calls > 0, "R-003 leg: the render callback ran "
+              "(paint cycle reached the viewport)");
+        fdk_surface *sf = NULL;
+        if (fdk_ok(fdk_window_get_surface(w, &sf)) && sf != NULL) {
+            fdk_gl_viewport_request_frame(vp);
+            for (int i = 0; i < 3; i++) {
+                (void)fdk_pump_events(ctx, 100);
+            }
+            fdk_surface_info si;
+            if (fdk_ok(fdk_surface_get_info(sf, &si)) &&
+                si.pixels != NULL) {
+                fdk_surface_present(sf);
+                /* Re-acquire (the present may rotate buffers) and
+                 * inspect the region's center. */
+                if (fdk_ok(fdk_surface_get_info(sf, &si)) &&
+                    si.pixels != NULL && si.width > 4 && si.height > 4) {
+                    const fdk_u32 *px = si.pixels +
+                        (size_t)(si.height / 2) * (size_t)si.stride +
+                        (size_t)(si.width / 2);
+                    fdk_u32 got = *px & 0x00FFFFFFu;
+                    fdk_u32 want = ((fdk_u32)(GLV_TEST_R * 255.0f + 0.5f)
+                                    << 16) |
+                                   ((fdk_u32)(GLV_TEST_G * 255.0f + 0.5f)
+                                    << 8) |
+                                   (fdk_u32)(GLV_TEST_B * 255.0f + 0.5f);
+                    printf("[glv] composite center pixel: got 0x%06x "
+                           "want 0x%06x (render_calls=%d)\n",
+                           (unsigned)got, (unsigned)want, render_calls);
+                    /* +-1 per channel: the float->byte rounding of the
+                     * clear and the readback's channel repack may
+                     * differ by one ULP; anything more is a wrong
+                     * composite (the CPU fill is 0x0f1217, an
+                     * entirely different color). */
+                    int dr = (int)(got >> 16 & 0xFF) -
+                             (int)(want >> 16 & 0xFF);
+                    int dg = (int)(got >> 8 & 0xFF) -
+                             (int)(want >> 8 & 0xFF);
+                    int db = (int)(got & 0xFF) - (int)(want & 0xFF);
+                    check(dr >= -1 && dr <= 1 && dg >= -1 && dg <= 1 &&
+                          db >= -1 && db <= 1,
+                          "R-003: GL region composites into the frame "
+                          "(paint order)");
+                }
+            }
+        }
+    }
+
     fdk_window_destroy(w);
     fdk_shutdown(ctx);
     printf("[glv] %s\n", fails ? "FAILURES" : "all pass");

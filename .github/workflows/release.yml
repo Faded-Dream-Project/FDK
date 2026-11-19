@@ -55,6 +55,22 @@ jobs:
         # the sanitizer debug config mid-run).
         run: make FDK_CONFIG=release all examples verify-exports
 
+      - name: Verify both backends are in the shipped library
+        # R-005 (Halcyon): the bundle must carry the Wayland backend —
+        # an X11-only libfdk.so.1 turns every Wayland session into
+        # FDK_ERR_NO_DISPLAY. The build above auto-detects Wayland
+        # from the dev packages this job installs; this gate makes
+        # that a CONTRACT instead of an assumption: the library must
+        # NEEDED-link libwayland-client, and the bundle's backend
+        # probe must answer both backends. A runner where Wayland
+        # silently went missing fails the release loudly here.
+        run: |
+          if ! readelf -d build/libfdk.so.1 | grep -q 'libwayland-client'; then
+            echo "::error::libfdk.so.1 does not link libwayland-client — the Wayland backend is MISSING from the release bundle (R-005). Install libwayland-dev/libxkbcommon-dev in the build job or investigate the detection."
+            exit 1
+          fi
+          echo "bundle library links libwayland-client (Wayland backend present)"
+
       - name: Stage the bundle
         run: |
           VER="${GITHUB_REF_NAME#v}"

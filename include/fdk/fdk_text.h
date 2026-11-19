@@ -329,6 +329,28 @@ fdk_result fdk_font_layout_byte_at_x(const fdk_font *font,
  * FDK_OK (text that falls entirely outside the clip is a successful
  * no-op).
  */
+/* R-002 (Halcyon): rasterize a text run into CALLER-OWNED ARGB8888
+ * memory — cached label textures, viewport overlay sprites, offscreen
+ * atlas pages: text without an fdk_surface. The same shaping and
+ * glyph cache fdk_surface_draw_utf8 uses, so results agree
+ * pixel-for-pixel with on-surface draws. `color` tints the glyphs.
+ * `dst` is w*h ARGB pixels
+ * (A<<24|R<<16|G<<8|B, straight alpha), `stride_bytes` the row pitch
+ * (>= w*4); the pen starts at x=0 and the baseline is `baseline_y`
+ * (buffer-relative) — the same geometry fdk_surface_draw_utf8
+ * (pen_x=0, baseline_y) paints with. The buffer is the clip.
+ * Blending is straight source-over including the destination alpha.
+ * `out_ink` (optional) returns the run's ink
+ * union in buffer coordinates (empty box = no ink). Fails with
+ * FDK_ERR_INVALID_ARGUMENT or FDK_ERR_OUT_OF_MEMORY. */
+fdk_result fdk_font_rasterize_utf8(const fdk_font *font,
+                                   const char *utf8, size_t byte_len,
+                                   fdk_color color, fdk_u32 *dst,
+                                   fdk_i32 w, fdk_i32 h,
+                                   fdk_i32 stride_bytes,
+                                   fdk_i32 baseline_y,
+                                   fdk_rect *out_ink);
+
 fdk_result fdk_surface_draw_utf8(fdk_surface *surface, fdk_font *font,
                                  const char *utf8, size_t byte_len,
                                  fdk_i32 pen_x, fdk_i32 baseline_y,

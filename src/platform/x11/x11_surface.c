@@ -1093,8 +1093,23 @@ void fdk_x11_window_set_render_mode(fdk_platform_window *pw,
 }
 
 fdk_result fdk_x11_window_gl_make_current(fdk_platform_window *pw) {
-    if (pw == NULL || pw->gl_win == NULL) {
-        return FDK_ERR_UNSUPPORTED;
+    if (pw == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* R-001 (Halcyon): an ADOPTED extension window never acquires a
+     * framebuffer through the engine, so nothing ever attached the
+     * lane — every ext GL call answered FDK_ERR_UNSUPPORTED with
+     * FDK_EXT_CAP_GL true. Attach it here, on demand, through the
+     * same engage machinery a normal window gets (the lane load, the
+     * GLX context, the shared root, the core-profile app context:
+     * fdk_x11_gl_window_try_init is xid-agnostic — an adopted window
+     * is just another drawable). An engage failure is returned as
+     * the honest per-reason refusal it already is. */
+    if (pw->gl_win == NULL) {
+        int reason = FDK_PLATFORM_GL_REASON_BACKEND;
+        if (!fdk_ok(fdk_x11_window_gl_engage(pw, &reason))) {
+            return FDK_ERR_UNSUPPORTED;
+        }
     }
     return fdk_x11_gl_window_make_current(pw->gl_win);
 }
@@ -1112,8 +1127,15 @@ fdk_result fdk_x11_window_gl_set_frame_cb(fdk_platform_window *pw,
     if (pw == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
+    /* R-001 (Halcyon): same lazy lane attach as make_current — an
+     * adopted window with a callback to register is an add-on
+     * asking for the GPU present path; engage it instead of
+     * refusing. (A NULL fn is an unregister: always allowed.) */
     if (fn != NULL && pw->gl_win == NULL) {
-        return FDK_ERR_UNSUPPORTED;
+        int reason = FDK_PLATFORM_GL_REASON_BACKEND;
+        if (!fdk_ok(fdk_x11_window_gl_engage(pw, &reason))) {
+            return FDK_ERR_UNSUPPORTED;
+        }
     }
     pw->gl_frame_fn = fn;
     pw->gl_frame_user = user;
@@ -1135,6 +1157,18 @@ fdk_result fdk_x11_window_gl_fence_wait(fdk_platform_window *pw,
         return FDK_ERR_UNSUPPORTED;
     }
     return fdk_x11_gl_window_fence_wait(pw->gl_win, fence);
+}
+
+fdk_result fdk_x11_window_gl_read_region(fdk_platform_window *pw,
+                                         int x, int y, int w, int h,
+                                         fdk_u32 *out) {
+    if (pw == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (pw->gl_win == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return fdk_x11_gl_window_read_region(pw->gl_win, x, y, w, h, out);
 }
 
 /* ---- 1.0.0 (fdk_gl.h, the 2026-11-18 re-release): engage/status/id ----

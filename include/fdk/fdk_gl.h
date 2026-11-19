@@ -152,6 +152,21 @@ typedef struct fdk_gl_info {
     const char *version;   /* glGetString(GL_VERSION)  */
 } fdk_gl_info;
 
+/* ---- Known driver quirks in the app context ------------------------------
+ *
+ * R-004 (Halcyon's spike, 2026-11-19, llvmpipe 19.1 core 4.5):
+ * glDrawElements(GL_UNSIGNED_BYTE, ...) on the engaged lane's
+ * core-profile context rasterizes NOTHING and reports NO error;
+ * GL_UNSIGNED_SHORT and GL_UNSIGNED_INT indices work correctly.
+ * FDK's own drawing never uses byte indices (the present path is
+ * an unindexed fullscreen quad), so nothing inside FDK can hit or
+ * fix this — it is a driver-side silent failure. Until it is
+ * fixed upstream, applications drawing through the app context
+ * should index with GL_UNSIGNED_SHORT or GL_UNSIGNED_INT (the
+ * spec-legal byte-index path is unreliable on at least Mesa's
+ * software rasterizer). This note is the honest bound of what FDK
+ * can promise about the context it hands out. */
+
 /* ---- Window-level engage/query ------------------------------------------
  *
  * fdk_window_gl_engage: ask the lane to serve THIS window now —

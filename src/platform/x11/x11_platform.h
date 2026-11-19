@@ -1107,6 +1107,8 @@ fdk_result fdk_x11_window_gl_set_frame_cb(fdk_platform_window *pwindow,
                                           void *user, void *surface);
 fdk_result fdk_x11_window_gl_fence_insert(fdk_platform_window *pwindow,
                                           fdk_u64 *out_fence);
+fdk_result fdk_x11_window_gl_read_region(
+    fdk_platform_window *pwindow, int x, int y, int w, int h, fdk_u32 *out);
 fdk_result fdk_x11_window_gl_fence_wait(fdk_platform_window *pwindow,
                                         fdk_u64 fence);
 /* 1.0.0 (fdk_gl.h, the re-release): explicit engage + status +
