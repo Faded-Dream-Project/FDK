@@ -57,7 +57,8 @@ int fdk_text_utf8_next(const char *s, size_t len, size_t i,
     if (b0 >= 0xC2u && b0 <= 0xDFu && i + 1 < len &&
         FDK_IS_CONT((unsigned char)s[i + 1])) {
         *out_cp = ((b0 & 0x1Fu) << 6) |
-                  (fdk_u32)(unsigned char)(s[i + 1] & 0x3Fu);
+                  (fdk_u32)(unsigned char)((unsigned char)s[i + 1] &
+                                           0x3Fu);
         return 2;
     }
 
@@ -85,7 +86,8 @@ int fdk_text_utf8_next(const char *s, size_t len, size_t i,
         fdk_u32 b1 = (fdk_u32)(unsigned char)s[i + 1];
         fdk_u32 cp = ((b0 & 0x07u) << 18) | ((b1 & 0x3Fu) << 12) |
                      (((fdk_u32)(unsigned char)s[i + 2] & 0x3Fu) << 6) |
-                     (fdk_u32)(unsigned char)(s[i + 3] & 0x3Fu);
+                     (fdk_u32)(unsigned char)((unsigned char)s[i + 3] &
+                                             0x3Fu);
         if ((b0 == 0xF0u && b1 >= 0x90u && b1 <= 0xBFu) ||
             (b0 >= 0xF1u && b0 <= 0xF3u) ||
             (b0 == 0xF4u && b1 >= 0x80u && b1 <= 0x8Fu)) {
