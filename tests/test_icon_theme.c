@@ -116,11 +116,27 @@ static void fixture_dir(const char *rel) {
     mkdir_p(buf);
 }
 
+/* Puts the real $HOME back (atexit): env_point_at_fixture points HOME
+ * at the fixture root for hermeticity; restore it before the process
+ * dies so anything reading HOME after main (sanitizer symbolizers,
+ * an atexit-registered cleanup) still sees the user's world. */
+static void restore_home(void);
+static char g_home_real[600];
+static int g_home_saved = 0;
+
 static void fixture_png(const char *rel, const unsigned char *data,
                         size_t len) {
     char buf[600];
     snprintf(buf, sizeof(buf), "%s/%s", g_root, rel);
     write_file(buf, data, len);
+}
+
+static void restore_home(void) {
+    if (g_home_real[0] != '\0') {
+        setenv("HOME", g_home_real, 1);
+    } else {
+        unsetenv("HOME");
+    }
 }
 
 static void fixture_text(const char *rel, const char *content) {
@@ -134,6 +150,28 @@ static void fixture_text(const char *rel, const char *content) {
  * every other discovery input is scrubbed. */
 static void env_point_at_fixture(void) {
     char buf[600];
+    /* HOME TOO: the icon search path's slot 1 is $HOME/.icons (the
+     * spec-first legacy dir, AHEAD of XDG_DATA_HOME), the default
+     * channel (channel 8) scans the whole search path, and several
+     * fallbacks derive from HOME. A host with a real ~/.icons
+     * (a cursor theme's default/index.theme, say) leaks its theme
+     * into these assertions and flips every "lands on hicolor /
+     * default-channel" leg — the 2026-11-19 packaging-report bug:
+     * the rig was hermetic except for the one directory it forgot.
+     * The fixture root carries no .icons, which is exactly the
+     * hermetic assumption every leg below makes. */
+    if (g_home_saved == 0) {
+        g_home_saved = 1;
+        const char *h = getenv("HOME");
+        if (h != NULL) {
+            snprintf(g_home_real, sizeof(g_home_real), "%s", h);
+        } else {
+            g_home_real[0] = '\0';
+        }
+        atexit(restore_home);
+    }
+    snprintf(buf, sizeof(buf), "%s", g_root);
+    setenv("HOME", buf, 1);
     snprintf(buf, sizeof(buf), "%s/data", g_root);
     setenv("XDG_DATA_HOME", buf, 1);
     snprintf(buf, sizeof(buf), "%s/config", g_root);
