@@ -724,7 +724,7 @@ static fdk_u8 *e_resample(const fdk_u8 *src, int sw, int sh, int dw,
                 if (ix1 > sw) {
                     ix1 = sw;
                 }
-                fdk_f32 r = 0, g = 0, b = 0, a = 0, wsum = 0;
+                fdk_f32 r = 0.0f, g = 0.0f, b = 0.0f, a = 0.0f, wsum = 0.0f;
                 for (int yy = iy0; yy < iy1; yy++) {
                     fdk_f32 wy = 1.0f;
                     if (yy < fy0) {
@@ -733,7 +733,7 @@ static fdk_u8 *e_resample(const fdk_u8 *src, int sw, int sh, int dw,
                     if ((fdk_f32)(yy + 1) > fy1) {
                         wy = fy1 - (fdk_f32)yy;
                         if (wy < 0) {
-                            wy = 0;
+                            wy = 0.0f;
                         }
                     }
                     for (int xx = ix0; xx < ix1; xx++) {
@@ -744,7 +744,7 @@ static fdk_u8 *e_resample(const fdk_u8 *src, int sw, int sh, int dw,
                         if ((fdk_f32)(xx + 1) > fx1) {
                             wx = fx1 - (fdk_f32)xx;
                             if (wx < 0) {
-                                wx = 0;
+                                wx = 0.0f;
                             }
                         }
                         fdk_f32 wgt = wx * wy;
@@ -1197,10 +1197,10 @@ static bool e_colorline_parse(const e_ctx *ctx, size_t off,
         e_palette_color(ctx->pal, e_be16(s + 2), out->rgba[i]);
         fdk_f32 alpha = e_f2dot14(e_be16(s + 4));
         if (alpha < 0) {
-            alpha = 0;
+            alpha = 0.0f;
         }
         if (alpha > 1) {
-            alpha = 1;
+            alpha = 1.0f;
         }
         out->rgba[i][3] =
             (fdk_u8)((fdk_f32)out->rgba[i][3] * alpha + 0.5f);
@@ -1221,7 +1221,7 @@ static void e_colorline_at(const e_colorline *cl, fdk_f32 t,
     if (cl->extend == 1) { /* repeat */
         t = t - floorf(t);
         if (t < 0) {
-            t = 0;
+            t = 0.0f;
         }
     } else if (cl->extend == 2) { /* reflect */
         fdk_f32 two = 2.0f * (t - floorf(t)) - 1.0f; /* in [-1, 1) */
@@ -1231,10 +1231,10 @@ static void e_colorline_at(const e_colorline *cl, fdk_f32 t,
         t = two;
     } else { /* pad */
         if (t < 0) {
-            t = 0;
+            t = 0.0f;
         }
         if (t > 1) {
-            t = 1;
+            t = 1.0f;
         }
     }
     /* Bracketing stops. */
@@ -1563,7 +1563,7 @@ static void e_composite(fdk_u8 *dst, const fdk_u8 *src, int w, int h,
             for (int c = 0; c < 3; c++) {
                 fdk_f32 base = (1.0f - ad) * as * cs[c] +
                                (1.0f - as) * ad * cb[c];
-                fdk_f32 b = 0;
+                fdk_f32 b = 0.0f;
                 switch (mode) {
                 case 13: b = e_sep_screen(cb[c], cs[c]); break;
                 case 14: b = e_sep_overlay(cb[c], cs[c]); break;
@@ -2164,10 +2164,10 @@ static void e_paint_eval(e_ctx *ctx, size_t off, const e_mat *m,
         fdk_u16 pal = e_be16(p + 1);
         fdk_f32 alpha = e_f2dot14(e_be16(p + 3));
         if (alpha < 0) {
-            alpha = 0;
+            alpha = 0.0f;
         }
         if (alpha > 1) {
-            alpha = 1;
+            alpha = 1.0f;
         }
         fdk_u8 rgba[4];
         e_palette_color(ctx->pal, pal, rgba);

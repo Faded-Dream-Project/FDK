@@ -583,7 +583,7 @@ static void scan_tag(const char *s, size_t len, size_t i, tag_scan *out) {
                 fdk_color span_color = {0, 0, 0, 0};
                 size_t q = p;
                 fdk_attr_kind kind = (fdk_attr_kind)0;
-                fdk_f32 num = 0;
+                fdk_f32 num = 0.0f;
                 fdk_i32 integer = 0;
                 fdk_color at_color = {0, 0, 0, 0};
                 bool color_valid = false;
@@ -643,9 +643,9 @@ static void scan_tag(const char *s, size_t len, size_t i, tag_scan *out) {
                         } else if (vlen == 6 &&
                                    memcmp(s + vs, "larger", 6) == 0) {
                             kind = FDK_ATTR_SIZE_DELTA;
-                            num = 2;
+                            num = 2.0f;
                         } else {
-                            fdk_f32 v = 0;
+                            fdk_f32 v = 0.0f;
                             int used = 0;
                             if (sscanf(s + vs, "%f%n", &v, &used) == 1 &&
                                 (size_t)used == vlen && v >= 1.0f &&
@@ -718,7 +718,7 @@ static void scan_tag(const char *s, size_t len, size_t i, tag_scan *out) {
                         }
                     } else if (alen == 4 &&
                                memcmp(s + as, "rise", 4) == 0) {
-                        fdk_f32 v = 0;
+                        fdk_f32 v = 0.0f;
                         int used = 0;
                         if (sscanf(s + vs, "%f%n", &v, &used) == 1 &&
                             (size_t)used == vlen) {
@@ -729,7 +729,7 @@ static void scan_tag(const char *s, size_t len, size_t i, tag_scan *out) {
                         }
                     } else if (alen == 14 &&
                                memcmp(s + as, "letter_spacing", 14) == 0) {
-                        fdk_f32 v = 0;
+                        fdk_f32 v = 0.0f;
                         int used = 0;
                         if (sscanf(s + vs, "%f%n", &v, &used) == 1 &&
                             (size_t)used == vlen) {

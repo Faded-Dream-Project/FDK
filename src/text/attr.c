@@ -958,7 +958,7 @@ bool fdk_attrs_link_at(const fdk_font *font, const char *utf8,
             }
             /* The run's x extent: the FIRST in-range cp's start pen
              * to the LAST in-range cp's end pen. */
-            fdk_f32 x0 = 0, x1 = 0;
+            fdk_f32 x0 = 0.0f, x1 = 0.0f;
             bool got = false;
             for (size_t c = 0; c < s->n_cp; c++) {
                 if (s->cp_byte[c] >= runs[k].start &&

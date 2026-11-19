@@ -960,9 +960,9 @@ fdk_result fdk_print_render_page(const unsigned char *pdf,
      * glyph-ink approximation — the PRINT is the PDF; the PREVIEW
      * approximates type), rects and lines draw exactly, colors are
      * tracked. */
-    fdk_f32 cur_r = 0, cur_g = 0, cur_b = 0;
-    fdk_f32 tx = 0, ty = 0;      /* the Td pen (PDF coords)      */
-    fdk_f32 font_size = 12;
+    fdk_f32 cur_r = 0.0f, cur_g = 0.0f, cur_b = 0.0f;
+    fdk_f32 tx = 0.0f, ty = 0.0f;  /* the Td pen (PDF coordinates) */
+    fdk_f32 font_size = 12.0f;
     fdk_f32 nums[8];             /* the pending operand stack     */
     size_t n_nums = 0;
     char last_string[512];
