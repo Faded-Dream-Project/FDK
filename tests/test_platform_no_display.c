@@ -17,6 +17,27 @@
 int main(void) {
     unsetenv("DISPLAY");
     unsetenv("WAYLAND_DISPLAY");
+    /* XDG_RUNTIME_DIR TOO, or the premise is a lie on a desktop:
+     * with WAYLAND_DISPLAY unset, libwayland's wl_display_connect
+     * (NULL) does not give up — it falls back to the DEFAULT socket
+     * "wayland-0" inside $XDG_RUNTIME_DIR (see libwayland's
+     * connect_to_socket). A `make test` run from inside a live
+     * Wayland session therefore "finds" the user's real compositor
+     * through the back door: the AUTO leg never tries (its gate is
+     * the env var), but the EXPLICIT FDK_PLATFORM_WAYLAND leg calls
+     * wl_display_connect directly, connects to the session
+     * compositor, and comes back success — the assert then fires on
+     * a machine whose only sin was being logged in (the 2026-11-19
+     * packaging report: `make test` failed inside the reporter's
+     * Wayland session, CI was green because its runners have no
+     * socket). Unset the runtime dir as well and libwayland has
+     * nothing left to try. */
+    unsetenv("XDG_RUNTIME_DIR");
+    /* Same back door, other side: WAYLAND_SOCKET hands libwayland an
+     * ALREADY-CONNECTED fd (it bypasses the path logic entirely), a
+     * wrapper script or session service may leave one pointed at a
+     * live compositor. */
+    unsetenv("WAYLAND_SOCKET");
 
     fdk_context *ctx = NULL;
     fdk_result r = fdk_init(&ctx, NULL);
