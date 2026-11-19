@@ -932,7 +932,11 @@ int main(void) {
      * large file; the groups leave ~30 small ones. */
     char cmd[512];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", g_dir);
-    (void)system(cmd);
+    /* Best-effort fixture cleanup (the suite already passed) — the
+     * result is unobservable by design; consume it for
+     * -Werror=unused-result on strict distro compilers. */
+    int rm_rc = system(cmd);
+    (void)rm_rc;
 
     printf("all prefs tests passed\n");
     return 0;

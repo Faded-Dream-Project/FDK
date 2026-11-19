@@ -1178,6 +1178,19 @@ static void read_socket(fdk_dbus_connection *c) {
              * passing was never negotiated, so their only possible
              * origin is a hostile peer — an unclosed fd is a
              * resource leak and a privilege hazard. */
+            /* musl's CMSG_FIRSTHDR/CMSG_NXTHDR expand with signed
+             * internal arithmetic (their inline helpers return long
+             * int), which -Wsign-conversion on musl/gcc flags at the
+             * MACRO site — nothing this call site can express
+             * differently. Scoped diagnostic-off for exactly this
+             * walk (the glibc expansion is unsigned and unaffected). */
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wsign-conversion"
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
             for (struct cmsghdr *cm = CMSG_FIRSTHDR(&msg); cm != NULL;
                  cm = CMSG_NXTHDR(&msg, cm)) {
                 if (cm->cmsg_level == SOL_SOCKET &&
@@ -1195,6 +1208,7 @@ static void read_socket(fdk_dbus_connection *c) {
                                  : 0;
                     int *fds = (int *)CMSG_DATA(cm);
                     for (int k = 0; k < nf; k++) {
+                        /* (body unchanged) */
                         close(fds[k]);
                     }
                     FDK_WARN("D-Bus peer sent %d unix fd(s) uninvited — "
@@ -1202,6 +1216,11 @@ static void read_socket(fdk_dbus_connection *c) {
                              nf);
                 }
             }
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#else
+#pragma GCC diagnostic pop
+#endif
             process_buffer(c);
             if (c->dead) {
                 return;

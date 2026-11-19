@@ -54,6 +54,7 @@ static void on_lock(void *user, int locked) {
 static int g_raw_globals = 0;
 static void raw_global(void *data, struct wl_registry *r, uint32_t name,
                        const char *iface, uint32_t version) {
+    (void)data; /* the wl_registry listener signature's user arg */
     (void)r;
     (void)name;
     (void)version;
