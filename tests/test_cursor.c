@@ -248,7 +248,11 @@ static void test_theme_loader_hermetic(void) {
     unsetenv("XCURSOR_THEME");
     char rmcmd[360];
     snprintf(rmcmd, sizeof rmcmd, "rm -rf '%s'", root);
-    (void)system(rmcmd);
+    /* Best-effort cleanup of the test's own fixture directory; the
+     * result is unobservable by design (the test already passed) —
+     * consume it so -Werror=unused-result (alpine) stays quiet. */
+    int rm_rc = system(rmcmd);
+    (void)rm_rc;
     printf("[ok] theme loader: hermetic fixture resolves, candidates "
            "walk, hostile refused, closest size picked\n");
 }

@@ -37,12 +37,17 @@ static void gl_frame(fdk_ext_surface *surface, void *user) {
     if (Clear == NULL) {
         extern void *fdk_x11_gl_proc_for_test(fdk_platform_window *pw,
                                               const char *name);
-        ClearColor = (void (*)(float, float, float, float))
-            fdk_x11_gl_proc_for_test(wgl_pwindow, "glClearColor");
-        Clear = (void (*)(unsigned))fdk_x11_gl_proc_for_test(
-            wgl_pwindow, "glClear");
-        Finish = (void (*)(void))fdk_x11_gl_proc_for_test(wgl_pwindow,
-                                                          "glFinish");
+        /* The POSIX dereference-through-void** store: ISO pedantic
+         * forbids the direct object->function cast (ubuntu's newer
+         * gcc got stricter about it). */
+        void *sym_cc = fdk_x11_gl_proc_for_test(wgl_pwindow,
+                                                "glClearColor");
+        void *sym_cl = fdk_x11_gl_proc_for_test(wgl_pwindow, "glClear");
+        void *sym_fn = fdk_x11_gl_proc_for_test(wgl_pwindow,
+                                                "glFinish");
+        *(void **)&ClearColor = sym_cc;
+        *(void **)&Clear = sym_cl;
+        *(void **)&Finish = sym_fn;
     }
     if (ClearColor != NULL) {
         ClearColor(1.0f, 0.0f, 1.0f, 1.0f);

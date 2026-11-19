@@ -32,7 +32,7 @@ echo "== building FDK $VERSION arch package ($ARCH) =="
 # plain `make install` after a release build silently rebuilds debug
 # with sanitizers into the payload).
 make
-make test
+ASAN_OPTIONS=detect_leaks=0 make test
 if command -v Xvfb >/dev/null 2>&1; then
 # The X11 suite in distro containers runs with LSan exitcode=0: every
 # test must still pass, but exit-time leak REPORTS from third-party

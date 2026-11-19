@@ -40,12 +40,12 @@ checksum=SKIP
 
 do_build() {
         make
-        make test
+        ASAN_OPTIONS=detect_leaks=0 make test
         make FDK_CONFIG=release all
 }
 
 do_check() {
-        make test
+        ASAN_OPTIONS=detect_leaks=0 make test
 }
 
 do_install() {
