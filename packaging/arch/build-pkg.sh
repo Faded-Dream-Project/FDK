@@ -1,15 +1,20 @@
 #!/bin/sh
 # packaging/arch/build-pkg.sh — build the FDK Arch package.
 #
-# Runs INSIDE an archlinux:base container (root) with the build
-# dependencies already installed by the orchestrator
-# (packaging/ci/arch.sh): base-devel, pkgconf, libx11, libxext, zlib,
-# wayland, libxkbcommon, xvfb, ttf-dejavu.
+# Two supported launch shapes, same artifact: (a) INSIDE an
+# archlinux:base container (root) with the build dependencies
+# already installed by the orchestrator (packaging/ci/arch.sh):
+# base-devel, pkgconf, libx11, libxext, zlib, wayland, libxkbcommon,
+# xvfb, ttf-dejavu — the script provisions the `builder` user;
+# (b) on an Arch developer desktop, launched as the logged-in user
+# with the same dependencies — no provisioning happens, the current
+# user builds (the 2026-11-19 desktop-run report's path).
 #
 # makepkg refuses to run as root, so the flow is: run the test suites
 # on the plain tree, prepare a pristine tarball + PKGBUILD in a
-# builder-owned workspace, run makepkg as the builder user, copy the
-# artifact back, verify it, and smoke-test the extracted payload.
+# builder-owned workspace, run makepkg as the builder user (the
+# current user when unprivileged), copy the artifact back, verify
+# it, and smoke-test the extracted payload.
 
 set -eu
 . "$(dirname "$0")/../ci/common.sh"
@@ -48,24 +53,41 @@ ASAN_OPTIONS=detect_leaks=0 make test
 # the EXTRACTED payload and opens a real window under Xvfb below.
 make FDK_CONFIG=release all
 
-# --- builder workspace (makepkg forbids root) -----------------------------
+# --- builder workspace (makepkg refuses root) -----------------------------
 WORK="/tmp/fdk-makepkg"
 rm -rf "$WORK"
 mkdir -p "$WORK/src"
-id builder >/dev/null 2>&1 || useradd -m builder
+# makepkg refuses to run as root, so the package is built as an
+# unprivileged user. Two paths to one outcome: in the CI container
+# the script runs as root and provisions the `builder` user; on a
+# developer desktop it is launched as the logged-in user already —
+# provisioning would need root (the 2026-11-19 report: "useradd:
+# Permission denied") and is unnecessary, so the CURRENT user
+# becomes the builder and the su indirection collapses away.
+if [ "$(id -u)" = "0" ]; then
+    id builder >/dev/null 2>&1 || useradd -m builder
+    BUILDER_USER=builder
+else
+    BUILDER_USER="$(id -un)"
+    echo "== unprivileged run: building as $BUILDER_USER (no user provisioning) =="
+fi
 tar --exclude=.git --exclude=build --exclude=dist \
     -czf "$WORK/fdk-$PACKVER.tar.gz" \
     --transform "s|^\./|fdk-$PACKVER/|" ./
 SHA="$(sha256sum "$WORK/fdk-$PACKVER.tar.gz" | awk '{print $1}')"
 sed -e "s|@VERSION@|$PACKVER|g" -e "s|@SHA256@|$SHA|" \
     packaging/arch/PKGBUILD > "$WORK/PKGBUILD"
-chown -R builder:builder "$WORK"
+chown -R "$BUILDER_USER":"$(id -gn "$BUILDER_USER")" "$WORK"
 
-su builder -s /bin/sh -c "
-    set -eu
-    cd '$WORK'
-    makepkg --force
-"
+if [ "$BUILDER_USER" = "builder" ]; then
+    su builder -s /bin/sh -c "
+        set -eu
+        cd '$WORK'
+        makepkg --force
+    "
+else
+    ( cd "$WORK" && makepkg --force )
+fi
 PKG="$(find "$WORK" -maxdepth 1 -name 'fdk-*.pkg.tar.*' -type f ! -name '*debug*')"
 [ -n "$PKG" ] || { echo "BUILD FAIL: makepkg produced no package"; exit 1; }
 mkdir -p dist

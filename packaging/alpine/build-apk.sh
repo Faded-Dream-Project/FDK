@@ -1,12 +1,16 @@
 #!/bin/sh
 # packaging/alpine/build-apk.sh — build the FDK Alpine packages.
 #
-# Runs INSIDE an alpine:3.22 container (root) with the build
-# dependencies already installed by the orchestrator
-# (packaging/ci/alpine.sh): build-base, pkgconf, libx11-dev,
-# libxext-dev, zlib-dev, wayland-dev, libxkbcommon-dev, alpine-sdk,
-# coreutils (+ xvfb and font-dejavu when available, for the X11
-# suite — see the XVFB-SKIP disclosure otherwise).
+# Two supported launch shapes, same artifact: (a) INSIDE an
+# alpine:3.22 container (root) with the build dependencies already
+# installed by the orchestrator (packaging/ci/alpine.sh): build-base,
+# pkgconf, libx11-dev, libxext-dev, zlib-dev, wayland-dev,
+# libxkbcommon-dev, alpine-sdk, coreutils (+ xvfb and font-dejavu
+# when available, for the X11 suite) — the script provisions the
+# `builder` user; (b) on an Alpine developer desktop, launched as
+# the logged-in user with the same dependencies — no provisioning
+# happens, the current user builds (the 2026-11-19 desktop-run
+# report's path).
 #
 # This is the musl target: the produced binaries are linked against
 # musl libc and only run on musl systems. abuild runs as an
@@ -54,30 +58,61 @@ make FDK_SANITIZE=0 test
 make FDK_SANITIZE=0 FDK_CONFIG=release all
 
 # --- builder user + key (abuild refuses root) ------------------------------
-id builder >/dev/null 2>&1 || adduser -D builder
-addgroup builder abuild 2>/dev/null || true
-WORK="/home/builder/fdk-build"
+# Two paths to one outcome, the arch twin's shape: in the CI
+# container the script runs as root and provisions the `builder`
+# user; on a developer desktop it is launched as the logged-in user
+# already — provisioning would need root (the 2026-11-19 report:
+# "useradd: Permission denied") and is unnecessary, so the CURRENT
+# user becomes the builder, the workspace lives under its home, and
+# the su indirections collapse to direct runs. The signing key is
+# generated either way; only the root-side /etc/apk/keys install is
+# container-only (the desktop artifact is unsigned, the documented
+# upstream apk posture).
+if [ "$(id -u)" = "0" ]; then
+    id builder >/dev/null 2>&1 || adduser -D builder
+    addgroup builder abuild 2>/dev/null || true
+    BUILDER_USER=builder
+    WORK="/home/builder/fdk-build"
+    BUILDER_HOME=/home/builder
+else
+    BUILDER_USER="$(id -un)"
+    BUILDER_HOME="$(cd ~"$BUILDER_USER" && pwd)"
+    WORK="$BUILDER_HOME/fdk-build"
+    echo "== unprivileged run: building as $BUILDER_USER (no user provisioning) =="
+fi
 rm -rf "$WORK"
 mkdir -p "$WORK"
 tar --exclude=.git --exclude=build --exclude=dist \
     -czf "$WORK/fdk-$PACKVER.tar.gz" \
     --transform "s|^\./|fdk-$PACKVER/|" ./
-chown -R builder:builder "$WORK"
+chown -R "$BUILDER_USER":"$(id -gn "$BUILDER_USER")" "$WORK"
 
-su builder -c "abuild-keygen -a -n" </dev/null
-# Install the fresh key so apk inside the build trusts it (root-side).
-cp /home/builder/.abuild/*.rsa.pub /etc/apk/keys/ 2>/dev/null || true
+if [ "$BUILDER_USER" = "builder" ]; then
+    su builder -c "abuild-keygen -a -n" </dev/null
+    # Install the fresh key so apk inside the build trusts it (root-side).
+    cp /home/builder/.abuild/*.rsa.pub /etc/apk/keys/ 2>/dev/null || true
+else
+    abuild-keygen -a -n </dev/null
+fi
 
-# Prepare the APKBUILD root-side with the version substituted, then
-# let abuild finalize the checksum as the builder, then build.
+# Prepare the APKBUILD with the version substituted, then let abuild
+# finalize the checksum as the builder, then build.
 sed -e "s|@VERSION@|$PACKVER|g" packaging/alpine/APKBUILD > "$WORK/APKBUILD"
-chown builder:builder "$WORK/APKBUILD"
-su builder -c "cd '$WORK' && abuild checksum" </dev/null
-chown builder:builder "$WORK/APKBUILD"
-su builder -c "cd '$WORK' && abuild -r" </dev/null
+chown "$BUILDER_USER":"$(id -gn "$BUILDER_USER")" "$WORK/APKBUILD"
+if [ "$BUILDER_USER" = "builder" ]; then
+    su builder -c "cd '$WORK' && abuild checksum" </dev/null
+else
+    ( cd "$WORK" && abuild checksum )
+fi
+chown "$BUILDER_USER":"$(id -gn "$BUILDER_USER")" "$WORK/APKBUILD"
+if [ "$BUILDER_USER" = "builder" ]; then
+    su builder -c "cd '$WORK' && abuild -r" </dev/null
+else
+    ( cd "$WORK" && abuild -r )
+fi
 
 # --- collect the artifacts -------------------------------------------------
-APKS="$(find /home/builder/packages -name '*.apk' -type f 2>/dev/null)"
+APKS="$(find "$BUILDER_HOME/packages" -name '*.apk' -type f 2>/dev/null)"
 [ -n "$APKS" ] || { echo "BUILD FAIL: abuild produced no packages"; exit 1; }
 mkdir -p dist
 for a in $APKS; do
