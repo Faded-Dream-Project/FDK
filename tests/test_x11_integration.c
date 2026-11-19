@@ -13028,12 +13028,32 @@ static fdk_result ext_test_create(fdk_ext_surface *surface,
     assert(nd.backend == FDK_EXT_BACKEND_X11);
     Display *dpy = (Display *)nd.display;
 
-    /* The add-on's own window: unmapped, its own size, dock-typed.
+    /* The add-on's own window: unmapped, its own size, dock-typed,
+     * OVERRIDE-REDIRECT. Two reasons, one structural, one
+     * hermeticity. Structurally, a dock IS override-redirect in
+     * real X11 practice — panels and docks bypass the WM's layout;
+     * nothing in the EWMH spec REQUIRES a WM to leave even a
+     * _NET_WM_WINDOW_TYPE_DOCK alone, so this is the honest shape
+     * for the kind being modeled. Hermeticity: the 2026-11-19
+     * packaging report — run against a live desktop, the WM's own
+     * trailing ConfigureNotify (sent as it reparented/managed the
+     * add-on's window) landed in the test's pump AFTER the
+     * synthetic notify_configure(300,80) and overwrote the
+     * "last configure" record; the suite was green in CI only
+     * because Xvfb ships no WM to send one (the tiny_wm repro in
+     * scripts/: a frame-correct reparenting WM whose 150 ms-delayed
+     * configure aborts the old test). override_redirect buys NO
+     * reparent, NO WM configure, NO delivery-shift window — the
+     * only configures this window can ever see are the API's own
+     * dispatch and the test's explicit server-side geometry acts.
      * (Properties set BEFORE the map — the adopt contract.) */
-    Window xw = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
-                                    12, 34, 200, 60, 0,
-                                    BlackPixel(dpy, DefaultScreen(dpy)),
-                                    WhitePixel(dpy, DefaultScreen(dpy)));
+    XSetWindowAttributes swa;
+    memset(&swa, 0, sizeof(swa));
+    swa.override_redirect = True;
+    Window xw = XCreateWindow(
+        dpy, DefaultRootWindow(dpy), 12, 34, 200, 60, 0,
+        CopyFromParent, InputOutput, CopyFromParent,
+        CWOverrideRedirect, &swa);
     if (xw == None) {
         return FDK_ERR_WINDOW_CREATE;
     }
@@ -13320,17 +13340,16 @@ static void test_ext_notify_configure(void) {
 
     /* The add-on reports a compositor-assigned size (the Wayland
      * shape; X11 never calls this — its ConfigureNotify arrives on
-     * its own — but the mirror path must behave identically). */
+     * its own — but the mirror path must behave identically).
+     * Delivery is SYNCHRONOUS — fdk_ext_surface_notify_configure
+     * dispatches through fdk_window_dispatch_event before it
+     * returns — so the assertions below need NO pump: asserting
+     * right here is both race-free against trailing server traffic
+     * (the 2026-11-19 report's lesson: a pump between the notify
+     * and the assert is a delivery-shift window for whatever the
+     * desktop happens to send) and a STRONGER contract check: the
+     * callback must already have fired. */
     assert(fdk_ext_surface_notify_configure(surf, 300, 80) == FDK_OK);
-    (void)fdk_pump_events(ctx, 100);
-    /* Ordering-safe: the assertion is that the configure WAS
-     * DELIVERED with the reported size — NOT that it is the last
-     * event on the surface. A trailing server event (an Expose from
-     * the map, whose delivery shifts across pump boundaries when
-     * the poll set carries a D-Bus member — the AT-SPI bridge holds
-     * a live connection on bus-present hosts, S-8) may legitimately
-     * follow it; the "last event" formulation raced exactly that
-     * and lost on the CI runners. */
     assert(g_ext_saw_configure);
     assert(g_ext_last_w == 300 && g_ext_last_h == 80);
 
@@ -13399,10 +13418,22 @@ static fdk_result ext_widget_host_create(fdk_ext_surface *surface,
         return FDK_ERR_NOT_INITIALIZED;
     }
     Display *dpy = (Display *)nd.display;
-    Window xw = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
-                                    12, 34, 200, 100, 0,
-                                    BlackPixel(dpy, DefaultScreen(dpy)),
-                                    WhitePixel(dpy, DefaultScreen(dpy)));
+    /* OVERRIDE-REDIRECT like ext_test_create's window (see the
+     * comment there): the hosting contract under test is FDK's own
+     * tree/resize/render behavior, not WM interplay, and a WM on a
+     * live desktop would otherwise reparent this window and inject
+     * its own ConfigureNotify/geometry acts into the middle of the
+     * test's readbacks (the 2026-11-19 packaging report's disease).
+     * The test drives geometry explicitly via XResizeWindow, which
+     * on an override-redirect window goes straight to the server —
+     * no WM in the loop to forward or deny it. */
+    XSetWindowAttributes swa;
+    memset(&swa, 0, sizeof(swa));
+    swa.override_redirect = True;
+    Window xw = XCreateWindow(
+        dpy, DefaultRootWindow(dpy), 12, 34, 200, 100, 0,
+        CopyFromParent, InputOutput, CopyFromParent,
+        CWOverrideRedirect, &swa);
     if (xw == None) {
         return FDK_ERR_WINDOW_CREATE;
     }

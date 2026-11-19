@@ -41,11 +41,19 @@ echo "== building FDK $VERSION XBPS packages ($ARCH, glibc) =="
 # with sanitizers into the payload).
 make FDK_SANITIZE=0
 make FDK_SANITIZE=0 test
-if command -v Xvfb >/dev/null 2>&1; then
-    make FDK_SANITIZE=0 test-x11
-else
-    echo "XVFB-SKIP: Xvfb not present; the X11 integration suite was not run for this build (disclosed)"
-fi
+# The X11 integration suite (make test-x11) is deliberately NOT a
+# packaging gate (2026-11-19 decision): CI's ubuntu job already runs
+# it sanitized with the strict leak gate, so a per-distro re-run
+# proved nothing about the PAYLOAD — it re-tested the same source
+# tree unsanitized (musl ships no sanitizer runtimes), doubled the
+# container time, and (the triggering report) made package builds
+# hostage to the launcher's desktop session: the Makefile target
+# prefers $DISPLAY when set, so build-xbps.sh launched from a live
+# desktop ran the suite against the real WM instead of Xvfb — where
+# a WM-sensitivity bug in the suite (fixed the same day) aborted
+# the build. The per-distro graphical proof that packaging actually
+# needs still runs: the install smoke test links against the
+# staged payload and opens a real window under Xvfb below.
 make FDK_SANITIZE=0 FDK_CONFIG=release all
 
 # --- stage + split ---------------------------------------------------------

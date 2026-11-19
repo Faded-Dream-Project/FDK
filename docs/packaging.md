@@ -348,10 +348,22 @@ rather than half-implemented.
 - **Theme not found after install** — the faces live in
   `/usr/share/fdk/.FDKThemes` and are discovered through the default
   `$XDG_DATA_DIRS`; check yours still includes `/usr/share`.
-- **The X11 suite fails under a strange environment** — the suite
-  starts its own Xvfb; make sure `Xvfb` is installed and `/tmp` is
-  writable. Under a container without Xvfb the packaging scripts
-  skip it with an `XVFB-SKIP` line and say so.
+- **The X11 suite and packaging** — the distro build scripts do NOT
+  run `make test-x11` (2026-11-19 decision): that suite is a
+  source-tree integration test that CI's ubuntu job already runs
+  sanitized with the strict leak gate, so re-running it per distro
+  proved nothing about the payload and made package builds hostage
+  to the launcher's desktop session (the Makefile target prefers
+  `$DISPLAY` when set — launched from a live desktop, the suite ran
+  against the real window manager, whose own ConfigureNotify
+  traffic tripped a since-fixed WM-sensitivity bug in the suite).
+  Packaging gates on `make test` (hermetic, display-free) plus the
+  install smoke test, which links against the installed payload and
+  opens a real window under a throwaway Xvfb. To run the X11
+  integration suite yourself: `make test-x11` — with `Xvfb`
+  installed and no `$DISPLAY` it starts its own; with `$DISPLAY`
+  set it uses your session, which is the developer-desktop path the
+  suite now also tolerates.
 - **Reproducibility** — the package builds are not byte-reproducible
   (archives carry timestamps); the source `git archive` tarball is.
   Reproduce any package with the `packaging/ci/<distro>.sh` scripts.
