@@ -73,8 +73,8 @@ static fdk_f32 sp_phase(fdk_widget *w) {
 static void spinner_paint(fdk_widget *w, fdk_surface *surface,
                           fdk_rect bounds, fdk_rect clip) {
     (void)clip;
-    if (bounds.width <= SPINNER_INSET * 2 ||
-        bounds.height <= SPINNER_INSET * 2) {
+    if ((fdk_f32)bounds.width <= SPINNER_INSET * 2.0f ||
+        (fdk_f32)bounds.height <= SPINNER_INSET * 2.0f) {
         return; /* too small to draw an honest ring */
     }
     const bool disabled = (w->flags & FDK_WF_ENABLED) == 0;
