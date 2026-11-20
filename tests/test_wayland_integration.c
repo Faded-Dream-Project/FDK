@@ -1270,6 +1270,43 @@ int main(void) {
         return 0;
     }
 
+    /* --- presentation-time + tearing-control degradation pins ----
+     * Both protocols are OPTIONAL by design: their absence must
+     * refuse cleanly, never error, never change frame behavior.
+     * The accessor contract: 0 when unknown (no protocol, or no
+     * presented events yet). These pins run against whatever
+     * compositor is live; weston-headless and sway differ in which
+     * of the two they offer, which is exactly the point. */
+    {
+        fdk_window *deg = NULL;
+        fdk_window_options wopts = {0};
+        wopts.width = 64;
+        wopts.height = 64;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &deg)));
+        /* internal seam: the fdk_window struct (window_internal.h)
+         * carries the backend handle directly — the same access the
+         * cursor section above uses through cw->pwindow. */
+        fdk_platform_window *pdeg = deg->pwindow;
+        /* The refresh accessor NEVER crashes and never lies: it is
+         * 0 until real presented events arrive (weston headless
+         * sends them on its virtual clock; sway does too). */
+        int64_t ri = fdk_wayland_window_refresh_interval_ns(pdeg);
+        assert(ri >= 0);
+        /* Tearing: whatever the answer, it must be one of the two
+         * honest results — OK (applied) or UNSUPPORTED (no
+         * tearing-control on this compositor). Anything else is a
+         * bug. Round-trip both directions when supported. */
+        fdk_result tr = fdk_wayland_window_set_tearing(pdeg, true);
+        assert(tr == FDK_OK || tr == FDK_ERR_UNSUPPORTED);
+        if (tr == FDK_OK) {
+            assert(fdk_ok(fdk_wayland_window_set_tearing(pdeg, false)));
+        }
+        fdk_window_destroy(deg);
+        printf("[ok] wl degradation pins: refresh=%lldns, tearing=%s\n",
+               (long long)ri,
+               tr == FDK_OK ? "supported+roundtrip" : "unsupported-refused");
+    }
+
     /* ---- The deferred-first-frame regression (found live in 1.0.0:
      * every example painted before the first configure and never
      * mapped) ----

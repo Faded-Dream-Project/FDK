@@ -7,6 +7,8 @@
 
 #include "generated/viewporter-client-protocol.h"
 #include "generated/fractional-scale-v1-client-protocol.h"
+#include "generated/presentation-time-client-protocol.h"
+#include "generated/tearing-control-v1-client-protocol.h"
 #include "generated/primary-selection-unstable-v1-client-protocol.h"
 #include "generated/cursor-shape-v1-client-protocol.h"
 #include "generated/xdg-toplevel-icon-v1-client-protocol.h"
@@ -104,6 +106,20 @@ static void registry_global(void *data, struct wl_registry *registry,
         if (output != NULL) {
             fdk_wayland_track_output(conn, output, name);
         }
+    } else if (strcmp(interface, wp_presentation_interface.name) == 0) {
+        /* OPTIONAL (presentation-time): physical presentation
+         * feedback for frame pacing. Absent -> frame callback only. */
+        uint32_t pv = version < 1 ? version : 1;
+        conn->presentation =
+            wl_registry_bind(registry, name, &wp_presentation_interface, pv);
+    } else if (strcmp(interface,
+                      wp_tearing_control_manager_v1_interface.name) == 0) {
+        /* OPTIONAL (tearing-control-v1): per-surface tearing
+         * allowance. Absent -> set_tearing refuses cleanly. */
+        uint32_t tv = version < 1 ? version : 1;
+        conn->tearing_manager =
+            wl_registry_bind(registry, name,
+                             &wp_tearing_control_manager_v1_interface, tv);
     } else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
         /* OPTIONAL (HiDPI): the source-rectangle mechanism fractional
          * scaling rides on. Absent -> integer buffer scale only. */

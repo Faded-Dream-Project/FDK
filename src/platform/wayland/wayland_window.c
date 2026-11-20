@@ -8,6 +8,8 @@
 #include "render/render_backend.h"
 
 #include "generated/viewporter-client-protocol.h"
+#include "generated/presentation-time-client-protocol.h"
+#include "generated/tearing-control-v1-client-protocol.h"
 #include "generated/fractional-scale-v1-client-protocol.h"
 #include "generated/xdg-toplevel-icon-v1-client-protocol.h"
 #include "generated/idle-inhibit-unstable-v1-client-protocol.h"
@@ -812,6 +814,153 @@ static const struct wl_buffer_listener g_render_buffer_listener = {
 /* Frame callback: the compositor finished presenting the last
  * committed frame — the green light for the next one. Destroys the
  * one-shot callback object (its only event has arrived). */
+/* ---- presentation-time: physical frame feedback (1.0.0-dev) -----
+ *
+ * wp_presentation reports WHEN and HOW the compositor presented a
+ * committed buffer, on the compositor's own presentation clock. FDK
+ * uses exactly one number out of it: the refresh INTERVAL estimate
+ * (clock delta between consecutive presented_syncno events), which
+ * replaces the pacing guard's static starvation fallback with a
+ * measured one. The sync/refresh/ust/msc events are recorded (the
+ * flags survive for diagnostics); everything else is advisory, so
+ * the listener is pure bookkeeping — no decisions ride on it, and
+ * a compositor that never sends the events changes nothing.
+ *
+ * DEGRADATION: no wp_presentation global -> no feedback objects at
+ * all; the pacing guard keeps its static timeout (the exact
+ * behavior before this protocol existed). */
+static void presentation_sync_output(void *data,
+                                     struct wp_presentation_feedback *fb,
+                                     struct wl_output *output) {
+    (void)data;
+    (void)fb;
+    (void)output; /* which output — not consumed by the estimate */
+}
+
+static void presentation_presented(void *data,
+                                   struct wp_presentation_feedback *fb,
+                                   uint32_t tv_sec_hi, uint32_t tv_sec_lo,
+                                   uint32_t tv_nsec, uint32_t refresh_nsec,
+                                   uint32_t seq_hi, uint32_t seq_lo,
+                                   uint32_t flags) {
+    (void)fb;
+    fdk_platform_window *pwindow = data;
+    (void)tv_nsec; /* sub-second component: a delta this fine is
+                    * display jitter, not refresh rate. */
+    (void)refresh_nsec; /* the compositor's nominal rate is also
+                         * available; the MEASURED delta is what the
+                         * estimate below uses (the two disagree on
+                         * variable-refresh displays, where the
+                         * measured number is the honest one). */
+    (void)flags; /* kind bits: no FDK consumer reads them yet. */
+    int64_t ust = ((int64_t)tv_sec_hi << 32) + tv_sec_lo;
+    (void)seq_hi;
+    (void)seq_lo;
+    if (pwindow->last_presented_ns != 0 && ust > pwindow->last_presented_ns) {
+        int64_t delta = ust - pwindow->last_presented_ns;
+        /* Clamped sanity: 1ms..100ms bounds the interval before it
+         * feeds the estimate (a compositor glitch producing a huge
+         * gap must not poison the guard's timeout). */
+        if (delta >= 1000000 && delta <= 100000000) {
+            if (pwindow->refresh_interval_ns <= 0) {
+                pwindow->refresh_interval_ns = delta; /* first sample */
+            } else {
+                /* exponential smoothing, ~4-sample memory: fast to
+                 * settle, slow to poison. */
+                pwindow->refresh_interval_ns =
+                    (pwindow->refresh_interval_ns * 3 + delta) / 4;
+            }
+            if (pwindow->refresh_samples < 0xFFFFFFFFu) {
+                pwindow->refresh_samples++;
+            }
+        }
+    }
+    pwindow->last_presented_ns = ust;
+    /* The kind bits (VSYNC/HW_CLOCK/...) are not carried by this
+     * event — the protocol implies them from which events fired —
+     * and no FDK consumer reads them, so nothing is recorded
+     * beyond the fact of presentation itself. */
+}
+
+static void presentation_discarded(void *data,
+                                   struct wp_presentation_feedback *fb) {
+    (void)fb;
+    fdk_platform_window *pwindow = data;
+    /* The compositor did not present this frame (surface hidden).
+     * The interval estimate must NOT see the gap: skip the delta. */
+    pwindow->last_presented_ns = 0;
+}
+
+static const struct wp_presentation_feedback_listener
+    g_presentation_feedback_listener = {
+    .sync_output = presentation_sync_output,
+    .presented = presentation_presented,
+    .discarded = presentation_discarded,
+};
+
+/* Requests presentation feedback for the commit this rides with
+ * (same ordering rule as the frame callback: BEFORE wl_surface_commit,
+ * which the caller guarantees). No-op without the global. */
+static void presentation_request_feedback(fdk_platform_window *pwindow) {
+    if (pwindow->conn->presentation == NULL ||
+        pwindow->surface == NULL) {
+        return;
+    }
+    if (pwindow->presentation_fb != NULL) {
+        wp_presentation_feedback_destroy(pwindow->presentation_fb);
+    }
+    pwindow->presentation_fb =
+        wp_presentation_feedback(pwindow->conn->presentation,
+                                 pwindow->surface);
+    if (pwindow->presentation_fb != NULL) {
+        wp_presentation_feedback_add_listener(
+            pwindow->presentation_fb, &g_presentation_feedback_listener,
+            pwindow);
+    }
+}
+
+/* ---- tearing-control-v1: the low-latency allowance (1.0.0-dev) ---
+ *
+ * wp_tearing_control_v1 lets the client mark a surface as
+ * tearable: the compositor may flip buffers mid-scanout instead of
+ * queueing to vblank. The application opts in per window; FDK's
+ * API is the honest refusal when the protocol (or the setting)
+ * is absent — behavior identical to before otherwise. */
+int64_t fdk_wayland_window_refresh_interval_ns(
+    const fdk_platform_window *pwindow) {
+    if (pwindow == NULL || pwindow->refresh_samples == 0) {
+        return 0;
+    }
+    return pwindow->refresh_interval_ns > 0 ? pwindow->refresh_interval_ns
+                                            : 0;
+}
+
+fdk_result fdk_wayland_window_set_tearing(fdk_platform_window *pwindow,
+                                          bool allow) {
+    if (pwindow == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (pwindow->conn->tearing_manager == NULL) {
+        return FDK_ERR_UNSUPPORTED; /* clean degradation */
+    }
+    if (pwindow->tearing == NULL) {
+        pwindow->tearing = wp_tearing_control_manager_v1_get_tearing_control(
+            pwindow->conn->tearing_manager, pwindow->surface);
+        if (pwindow->tearing == NULL) {
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+    }
+    if (allow) {
+        wp_tearing_control_v1_set_presentation_hint(
+            pwindow->tearing, WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC);
+    } else {
+        wp_tearing_control_v1_set_presentation_hint(
+            pwindow->tearing, WP_TEARING_CONTROL_V1_PRESENTATION_HINT_VSYNC);
+    }
+    pwindow->tearing_allowed = allow ? 1 : 0;
+    return FDK_OK;
+}
+
 static void frame_callback_done(void *data, struct wl_callback *callback,
                                  uint32_t callback_data) {
     (void)callback_data;
@@ -1701,6 +1850,10 @@ static fdk_result commit_render_pending(fdk_platform_window *pwindow,
      * wlr-screencopy keeps photographing the stale frame. Every
      * reference client (weston-simple-shm, GTK, Qt) requests frame
      * first; now FDK does too. */
+    /* Presentation feedback rides the SAME ordering rule (request
+     * before the commit it measures). No-op without the global. */
+    presentation_request_feedback(pwindow);
+
     struct wl_callback *cb = wl_surface_frame(pwindow->surface);
     if (cb != NULL) {
         /* A previous callback that never fired (hidden/minimized
@@ -2737,6 +2890,14 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
     if (pwindow->frame_cb != NULL) {
         wl_callback_destroy(pwindow->frame_cb);
         pwindow->frame_cb = NULL;
+    }
+    if (pwindow->presentation_fb != NULL) {
+        wp_presentation_feedback_destroy(pwindow->presentation_fb);
+        pwindow->presentation_fb = NULL;
+    }
+    if (pwindow->tearing != NULL) {
+        wp_tearing_control_v1_destroy(pwindow->tearing);
+        pwindow->tearing = NULL;
     }
     /* The decoration object (if any) must die before the toplevel it
      * wraps — xdg-decoration objects are inert after the toplevel is

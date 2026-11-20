@@ -593,3 +593,44 @@ matter); the GPU present lane covers both backends since 1.0.0
 renderers only; Mesa's software rasterizers stay on wl_shm, where
 the CPU path is faster, unless FDK_GL_FORCE=1). None of
 these reshape this layer's contracts.
+
+## Wayland presentation-time and tearing-control (1.0.0-dev)
+
+Two optional Wayland protocols joined the present lane, both with
+clean degradation when the compositor does not offer them:
+
+**presentation-time** (`wp_presentation`, stable): the compositor
+reports the physical presentation clock of each committed frame.
+FDK uses it for exactly one number — the measured refresh interval
+(an exponentially-smoothed, sanity-clamped estimate from
+consecutive `presented` events), exposed internally as
+`fdk_wayland_window_refresh_interval_ns()`. The pacing guard can
+consult it opportunistically; when the protocol is absent (or no
+events have arrived yet) the accessor returns 0 and the guard keeps
+its static timeout — behavior identical to before. Discarded frames
+(surface hidden) never feed the estimate.
+
+**tearing-control** (`wp_tearing_control_v1`, staging): the
+low-latency allowance. `fdk_wayland_window_set_tearing(window,
+allow)` requests the compositor to let the surface tear (flip
+mid-scanout) instead of queueing to vblank — the fullscreen-game /
+stylus-drawing path. Without the protocol the call returns
+`FDK_ERR_UNSUPPORTED` and the vsync path is untouched; with it, the
+hint round-trips (allow then disallow). The object dies with the
+window.
+
+Both protocols' XMLs are vendored under
+`third_party/wayland-protocols/` (MIT, copyright blocks intact —
+same provenance as the existing xdg-shell/viewporter/fractional-scale
+files) and their bindings generated with wayland-scanner into
+`src/platform/wayland/generated/`. Feedback requests ride the same
+ordering rule as the frame callback: marshalled before the commit
+they measure.
+
+**Degradation pins** live in `tests/test_wayland_integration.c`
+(the degradation group runs first against whatever compositor is
+live): the refresh accessor never lies (0 until real samples), and
+teearing set is either OK-with-roundtrip or a clean
+`FDK_ERR_UNSUPPORTED` — anything else fails the test. The
+headless-sandbox leg (no compositor) exercises the self-skip path;
+the live-compositor legs run in CI.

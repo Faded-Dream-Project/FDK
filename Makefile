@@ -260,6 +260,8 @@ ifeq ($(BUILD_WAYLAND),1)
                            src/platform/wayland/generated/xdg-shell-protocol.c \
                            src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c \
                            src/platform/wayland/generated/viewporter-protocol.c \
+                           src/platform/wayland/generated/presentation-time-protocol.c \
+                           src/platform/wayland/generated/tearing-control-v1-protocol.c \
                            src/platform/wayland/generated/fractional-scale-v1-protocol.c \
                            src/platform/wayland/generated/primary-selection-unstable-v1-protocol.c \
                            src/platform/wayland/generated/cursor-shape-v1-protocol.c \

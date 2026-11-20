@@ -235,6 +235,23 @@ struct fdk_platform_connection {
     struct wp_viewporter *viewporter;
     struct wp_fractional_scale_manager_v1 *fractional_manager;
 
+    /* OPTIONAL (presentation-time): frame PRESENTATION feedback —
+     * the compositor reports the physical presentation clock of
+     * each committed frame (the wp_presentation event set). Used
+     * for frame pacing statistics: the refresh interval estimate
+     * feeds the pacing guard's starvation timeout. Absent -> the
+     * wl_surface frame callback alone (as before; the guard's
+     * static fallback stays). */
+    struct wp_presentation *presentation;
+
+    /* OPTIONAL (tearing-control-v1): per-surface tearing ALLOWANCE.
+     * When the app asks (fdk_wayland_window_set_tearing), the
+     * surface's next commits may tear — the low-latency path for
+     * fullscreen games and stylus drawing. Absent -> the request
+     * is politely refused (returns FDK_ERR_UNSUPPORTED), behavior
+     * unchanged. */
+    struct wp_tearing_control_manager_v1 *tearing_manager;
+
     /* Bound outputs (grown on demand; wl_output v2+ carries the
      * scale event). Kept for the window's lifetime of the
      * connection; outputs that disappear are left in place with
@@ -779,6 +796,16 @@ struct fdk_platform_window {
      * destroy before the compositor answers). */
     struct wl_callback *frame_cb;
 
+    /* presentation-time + tearing-control (both optional, 1.0.0-dev):
+     * NULL until the protocol is bound AND the window maps. */
+    struct wp_presentation_feedback *presentation_fb; /* in flight, or NULL */
+    int64_t last_presented_ns;        /* last presented clock (0 none) */
+    uint32_t presentation_flags_last; /* PRESENTATION_FEEDBACK bits  */
+    int64_t refresh_interval_ns;      /* estimated, <=0 = unknown    */
+    uint32_t refresh_samples;         /* how many clock deltas seen  */
+    struct wp_tearing_control_v1 *tearing; /* NULL unless requested  */
+    int tearing_allowed;              /* the applied preference     */
+
     fdk_size last_size;
     fdk_size pending_size;   /* accumulated from configure until ack+commit */
     int configured;          /* nonzero once the first xdg_surface.configure
@@ -1236,6 +1263,20 @@ fdk_result fdk_wayland_window_gpu_readback(fdk_platform_window *pwindow,
                                            int height);
 fdk_result fdk_wayland_window_gl_make_current(fdk_platform_window *pwindow);
 fdk_result fdk_wayland_window_gl_swap(fdk_platform_window *pwindow);
+/* Sets this window's tearing allowance (tearing-control-v1).
+ * FDK_ERR_UNSUPPORTED when the compositor offers no tearing
+ * control — behavior then is exactly the pre-protocol vsync path.
+ * The hint applies to subsequent commits. */
+fdk_result fdk_wayland_window_set_tearing(fdk_platform_window *pwindow,
+                                          bool allow);
+
+/* The measured refresh interval from presentation-time feedback,
+ * in nanoseconds; 0 when unknown (no protocol / no samples yet).
+ * Diagnostic only — the pacing guard consults it opportunistically
+ * and falls back to its static timeout when it is 0. */
+int64_t fdk_wayland_window_refresh_interval_ns(
+    const fdk_platform_window *pwindow);
+
 fdk_result fdk_wayland_window_gl_set_frame_cb(fdk_platform_window *pwindow,
                                               void (*fn)(void *, void *),
                                               void *user, void *surface);
