@@ -52,10 +52,17 @@
  * 16132x16191 frame (both sides under 16384) still sums to ~2.2 GB.
  * stbi_info_from_memory/stbi_info parse ONLY the header (no frame
  * allocation), so this pre-flight rejects by total pixels before
- * any buffer exists. 64 Mi pixels (e.g. 8192x8192) keeps every
- * real-world image; the out+background+history worst case at that
- * budget is 320 MiB for GIF, and PNG/JPEG are single-buffer. */
-#define FDK_IMAGE_MAX_PIXELS (64u * 1024u * 1024u)
+ * any buffer exists.
+ *
+ * The number: 16 Mi pixels (e.g. 4096x4096) bounds the GIF triple
+ * buffer at 192 MiB and PNG/JPEG single buffers at 64 MiB. The
+ * first cut used 64 Mi, but that leaves a 768 MiB GIF worst case
+ * — too much headroom for an input that arrived as a 27-byte file.
+ * 4096x4096 covers every icon, screenshot thumbnail and photo the
+ * widget paths were designed for; anything larger is a workload
+ * the caller should decode off the UI thread with its own policy.
+ * Named, not magic: FDK_IMAGE_MAX_PIXELS. */
+#define FDK_IMAGE_MAX_PIXELS (16u * 1024u * 1024u)
 
 static fdk_result fdk__image_header_budget_ok(const void *buf,
                                               int len) {
