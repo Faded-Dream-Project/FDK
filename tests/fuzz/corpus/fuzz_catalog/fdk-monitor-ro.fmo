@@ -1,0 +1,48 @@
+# fdk-monitor — Romanian catalog (round 21)
+msgid "&Monitor"
+msgstr "&Monitor"
+
+msgid "&Pause/resume sampling"
+msgstr "&Pauză/reia eșantionarea"
+
+msgid "&Test notification"
+msgstr "&Testează notificarea"
+
+msgid "&Quit"
+msgstr "&Ieșire"
+
+msgid "&View"
+msgstr "&Vizualizare"
+
+msgid "Sample every &250 ms"
+msgstr "Eșantionează la fiecare &250 ms"
+
+msgid "Sample every &1000 ms"
+msgstr "Eșantionează la fiecare &1000 ms"
+
+msgid "&Help"
+msgstr "&Ajutor"
+
+msgid "&About"
+msgstr "&Despre"
+
+msgid "About fdk-monitor"
+msgstr "Despre fdk-monitor"
+
+msgid "Sampling"
+msgstr "Eșantionare"
+
+msgid "Sampling paused"
+msgstr "Eșantionare oprită"
+
+msgid "Sampling every %u ms"
+msgstr "Eșantionare la fiecare %u ms"
+
+msgid "CPU"
+msgstr "Procesor"
+
+msgid "RAM"
+msgstr "Memorie"
+
+msgid "Swap"
+msgstr "Swap"

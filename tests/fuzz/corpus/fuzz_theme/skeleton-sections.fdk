@@ -1,0 +1,7 @@
+[theme]
+name = x
+version = 1
+[colors]
+bg = #111111
+[metrics]
+radius = 4

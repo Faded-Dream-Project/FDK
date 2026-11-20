@@ -1,0 +1,8 @@
+# broken.fdk — discovery test fixture: valid grammar position, then a
+# hard parse error (unknown key). Exercises the "broken neighbor must
+# not hide the healthy ones" rule.
+version = 1
+name    = "Broken"
+
+[colors]
+not_a_real_token = #123456

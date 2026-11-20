@@ -1,0 +1,5 @@
+# beta.fdk âame    = "Beta"
+author  = "FDK tests"
+
+[colors]
+accent = #00FF00

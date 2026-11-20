@@ -1,0 +1,7 @@
+# beta.fdk — discovery test fixture: the shadowing/precedence dummy.
+version = 1
+name    = "Beta"
+author  = "FDK tests"
+
+[colors]
+accent = #00FF00

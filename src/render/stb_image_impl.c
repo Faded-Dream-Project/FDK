@@ -19,6 +19,18 @@
  *     the vendored include in THIS translation unit only and restored
  *     right after. Every FDK-authored file keeps the full set.
  *
+ *  3. STBI_MAX_DIMENSIONS is pinned to 16384 — the same ceiling
+ *     fdk_surface_create_from_image_bytes / fdk_image_decode_pixels
+ *     document and enforce AFTER a successful decode. stb's stock
+ *     default (2**24) lets a tiny file with lying dimensions
+ *     allocate a w*h*4 buffer BEFORE the post-decode check runs;
+ *     a 27-byte GIF claiming 24836x14080 OOMs the process inside
+ *     the decoder (found by the fuzz lane's fuzz_image harness,
+ *     2026-11-20). Pinning the macro moves the rejection INTO the
+ *     decoder, before any allocation. 16384x16384x4 is still a
+ *     1 GiB worst case — the file-size cap is the other half of
+ *     the bound.
+ *
  * Not part of the public API — never installed.
  */
 
@@ -32,6 +44,7 @@
                                    * the actual problem; FDK logs them at
                                    * WARN and never hands them to the app
                                    * (see surface_image.c) */
+#define STBI_MAX_DIMENSIONS 16384 /* see deviation 3 above */
 
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push

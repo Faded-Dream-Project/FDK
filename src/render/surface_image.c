@@ -44,6 +44,52 @@
  * the read side). */
 #define FDK_IMAGE_MAX_FILE_BYTES (512u * 1024u * 1024u)
 
+/* Pixel budget (fuzz-lane finding, 2026-11-20): stb's GIF decoder
+ * allocates up to THREE full-frame buffers (out + background +
+ * history), so per-side caps alone under-bound the worst case — a
+ * 27-byte GIF claiming 24836x14080 OOMed the process inside the
+ * decoder before the post-decode check could run, and a "legal"
+ * 16132x16191 frame (both sides under 16384) still sums to ~2.2 GB.
+ * stbi_info_from_memory/stbi_info parse ONLY the header (no frame
+ * allocation), so this pre-flight rejects by total pixels before
+ * any buffer exists. 64 Mi pixels (e.g. 8192x8192) keeps every
+ * real-world image; the out+background+history worst case at that
+ * budget is 320 MiB for GIF, and PNG/JPEG are single-buffer. */
+#define FDK_IMAGE_MAX_PIXELS (64u * 1024u * 1024u)
+
+static fdk_result fdk__image_header_budget_ok(const void *buf,
+                                              int len) {
+    int w = 0, h = 0;
+    if (stbi_info_from_memory((const stbi_uc *)buf, len, &w, &h,
+                              NULL) == 0) {
+        return FDK_OK; /* not a parseable header: let the decoder
+                        * produce its honest refusal below */
+    }
+    if (w > 0 && h > 0 &&
+        (unsigned long long)w * (unsigned long long)h >
+            (unsigned long long)FDK_IMAGE_MAX_PIXELS) {
+        FDK_WARN("image dimensions exceed pixel budget (%dx%d, max "
+                 "%u pixels)", w, h, FDK_IMAGE_MAX_PIXELS);
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return FDK_OK;
+}
+
+static fdk_result fdk__image_header_budget_ok_file(const char *path) {
+    int w = 0, h = 0;
+    if (stbi_info(path, &w, &h, NULL) == 0) {
+        return FDK_OK;
+    }
+    if (w > 0 && h > 0 &&
+        (unsigned long long)w * (unsigned long long)h >
+            (unsigned long long)FDK_IMAGE_MAX_PIXELS) {
+        FDK_WARN("image dimensions exceed pixel budget (%dx%d, max "
+                 "%u pixels): %s", w, h, FDK_IMAGE_MAX_PIXELS, path);
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return FDK_OK;
+}
+
 fdk_result fdk_surface_create_from_image(const char *path,
                                          fdk_surface **out_surface) {
     if (path == NULL || out_surface == NULL) {
@@ -78,6 +124,20 @@ fdk_result fdk_surface_create_from_image(const char *path,
      * pixel buffer; 4 channels requested so every format (including
      * paletted PNG and grayscale JPEG) arrives as RGBA8 with STRAIGHT
      * (non-premultiplied) alpha — exactly FDK's ARGB8888 layout. */
+    {
+        fdk_result budget = fdk__image_header_budget_ok_file(path);
+        if (!fdk_ok(budget)) {
+            return budget;
+        }
+    }
+
+    {
+        fdk_result budget = fdk__image_header_budget_ok_file(path);
+        if (!fdk_ok(budget)) {
+            return budget;
+        }
+    }
+
     int w = 0, h = 0, channels = 0;
     unsigned char *data = stbi_load(path, &w, &h, &channels, 4);
     if (data == NULL) {
@@ -220,6 +280,12 @@ fdk_result fdk_surface_create_from_image_bytes(const void *data,
         FDK_WARN("image buffer too large to decode (%zu bytes, max %u)",
                  len, FDK_IMAGE_MAX_FILE_BYTES);
         return FDK_ERR_UNSUPPORTED;
+    }
+    {
+        fdk_result budget = fdk__image_header_budget_ok(data, (int)len);
+        if (!fdk_ok(budget)) {
+            return budget;
+        }
     }
     int w = 0, h = 0, channels = 0;
     unsigned char *px = stbi_load_from_memory(

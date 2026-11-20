@@ -809,6 +809,71 @@ $(BUILD_DIR)/tools/%: tools/%.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(STATIC_LIB) -o $@ $(LDFLAGS)
 
+# --- Fuzzing (docs/fuzzing.md) -------------------------------------------
+#
+# libFuzzer harnesses for every parser that consumes untrusted
+# bytes (.fdk themes, .fmo catalogs, .prefs stores, PNG/GIF via the
+# vendored stb decoders, SVG via the vendored nanosvg, D-Bus wire
+# frames). Built with clang, ASan+UBSan, exactly like CI's fuzz
+# lane; CC=clang is required for the library too (the sanitizer
+# coverage must live in the library objects, or libFuzzer explores
+# only the harness's own code — the lane therefore rebuilds the
+# archive with clang whenever the tree was built by another CC).
+#
+#   make fuzz CC=clang FUZZ_SECONDS=20   build + run every harness
+#   make fuzz-build CC=clang             build the harnesses only
+#   FUZZ_HARNESS=theme make fuzz ...     run one harness
+#
+# Seeds live in tests/fuzz/corpus/<name>/ (committed). libFuzzer
+# leaves crash/leak/timeout inputs under build/fuzz/artifacts/.
+
+FUZZ_SECONDS ?= 20
+FUZZ_HARNESS ?=
+CLANG ?= clang
+FUZZ_DIR := $(BUILD_DIR)/fuzz
+FUZZ_SRCS := fuzz_theme fuzz_catalog fuzz_prefs fuzz_image fuzz_svg fuzz_dbus
+FUZZ_BINS := $(patsubst %,$(FUZZ_DIR)/%,$(FUZZ_SRCS))
+FUZZ_CFLAGS := -std=c17 -g -O1 -fno-omit-frame-pointer \
+               -fsanitize=fuzzer-no-link,address,undefined \
+               -DFDK_FUZZ_BUILD=1 -D_POSIX_C_SOURCE=200809L
+FUZZ_LDFLAGS := -fsanitize=fuzzer,address,undefined
+
+.PHONY: fuzz fuzz-build
+fuzz-build: $(FUZZ_BINS)
+
+ifneq ($(CC),$(CLANG))
+# The tree was built by another compiler: rebuild the objects with
+# clang so the sanitizer coverage reaches the parsers themselves.
+$(FUZZ_DIR)/libfdk-fuzz.a: $(LIB_SRCS) $(ALL_FDK_HEADERS) | $(FUZZ_DIR)
+	@mkdir -p $(FUZZ_DIR)/obj
+	@for s in $(LIB_SRCS); do \
+		o="$(FUZZ_DIR)/obj/`echo $$s | tr / _`.o"; \
+		$(CLANG) $(CPPFLAGS) $(FUZZ_CFLAGS) -Ithird_party/stb -c $$s -o $$o || exit 1; \
+	done
+	ar rcs $@ $(FUZZ_DIR)/obj/*.o
+FUZZ_LINK_LIB := $(FUZZ_DIR)/libfdk-fuzz.a
+else
+FUZZ_LINK_LIB := $(STATIC_LIB)
+endif
+
+$(FUZZ_DIR):
+	@mkdir -p $@
+
+$(FUZZ_DIR)/%: tests/fuzz/%.c $(FUZZ_LINK_LIB) $(ALL_FDK_HEADERS) | $(FUZZ_DIR)
+	$(CLANG) $(CPPFLAGS) -Itests $(FUZZ_CFLAGS) -Ithird_party/stb -Isrc $< $(FUZZ_LINK_LIB) $(X11_LIBS) $(WAYLAND_LIBS) -lm -ldl -lz -pthread -o $@ $(FUZZ_LDFLAGS)
+
+fuzz: $(FUZZ_BINS)
+	@mkdir -p $(FUZZ_DIR)/artifacts
+	@h="$$FUZZ_HARNESS"; \
+	for t in $(FUZZ_SRCS); do \
+		if [ -n "$$h" ] && [ "$$h" != "$$t" ]; then continue; fi; \
+		echo "== fuzz $$t ($$FUZZ_SECONDS s) =="; \
+		./$(FUZZ_DIR)/$$t -max_total_time=$$FUZZ_SECONDS \
+		    -rss_limit_mb=2560 -timeout=25 \
+		    -artifact_prefix=$(FUZZ_DIR)/artifacts/ \
+		    tests/fuzz/corpus/$$t 2>&1 | tail -2 || exit 1; \
+	done
+
 # --- Test applications (§24) --------------------------------------------
 #
 # The validation suite under test-apps/ — four real applications
