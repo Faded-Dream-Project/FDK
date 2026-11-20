@@ -7,6 +7,7 @@
  * `make test-x11`, not plain `make test`) rather than staying here
  * and making ordinary `make test` require a desktop session. */
 
+#include <stddef.h> /* offsetof: the init_ex contract test */
 #include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_prefs.h"
@@ -130,12 +131,91 @@ static void test_image_budget_option(void) {
            "default preserved\n");
 }
 
+/* 1.0.0-dev: the fdk_init_ex append-only contract (fdk_core.h's
+ * big comment is the spec). The struct grew twice by appending
+ * with no size signal; fdk_init_ex is the size-disciplined form.
+ * This group pins, under ASan:
+ *   - a caller compiled against the FIRST-generation layout
+ *     (backend + app_id only, 16 bytes) is never over-read —
+ *     the newer render_mode/image_max_pixels fields read as
+ *     their zero-init defaults;
+ *   - opts_size = 0 behaves as fdk_init (full layout);
+ *   - the image-budget floor still refuses through the ex form;
+ *   - fdk_init and fdk_init_ex agree on the full layout. */
+static void test_init_ex_size_contract(void) {
+    /* The first-generation layout, EXACTLY as a binary compiled
+     * against the original header allocated it. Heap-allocated so
+     * ASan's redzone makes ANY read past 16 bytes a hard failure
+     * — the point of the test. */
+    struct legacy_layout {
+        fdk_platform_backend backend; /* offset 0 */
+        /* 4 bytes padding, as the original ABI had */
+        const char *app_id;           /* offset 8 */
+    };
+    assert(sizeof(struct legacy_layout) == 16);
+    assert(offsetof(struct legacy_layout, app_id) == 8);
+    struct legacy_layout *legacy = calloc(1, sizeof *legacy);
+    assert(legacy != NULL);
+    legacy->backend = FDK_PLATFORM_AUTO;
+    legacy->app_id = "fdk-size-contract-test";
+
+    /* The ex call with the caller's true size: FDK must read
+     * backend and app_id, and must NOT touch a byte past 16.
+     * Validation order (cheap args first) means a backend=0
+     * (AUTO) call proceeds toward the platform connection —
+     * which fails cleanly here (no display in the headless
+     * suite) AFTER the option reads; the reads themselves are
+     * what ASan watches. Either NO_DISPLAY or OK is acceptable;
+     * an over-read is not (it aborts the process). */
+    fdk_context *ctx = (fdk_context *)0x1;
+    fdk_result r = fdk_init_ex(&ctx, (const fdk_init_options *)legacy,
+                               sizeof *legacy);
+    assert(r == FDK_ERR_NO_DISPLAY || fdk_ok(r));
+    if (fdk_ok(r)) {
+        fdk_shutdown(ctx);
+    }
+
+    /* opts_size = 0: the documented "full layout" meaning. Same
+     * acceptance envelope. */
+    fdk_init_options full = {0};
+    full.backend = FDK_PLATFORM_AUTO;
+    ctx = (fdk_context *)0x1;
+    r = fdk_init_ex(&ctx, &full, 0);
+    assert(r == FDK_ERR_NO_DISPLAY || fdk_ok(r));
+    if (fdk_ok(r)) {
+        fdk_shutdown(ctx);
+    }
+
+    /* The floor rule through the ex form: a too-small budget
+     * refuses BEFORE any platform work. */
+    fdk_init_options bad = {0};
+    bad.image_max_pixels = 1000;
+    ctx = NULL;
+    assert(fdk_init_ex(&ctx, &bad, sizeof bad) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    /* The legacy wrapper reads the full layout (callers rebuilt
+     * against this header) — same envelope. */
+    ctx = (fdk_context *)0x1;
+    r = fdk_init(&ctx, &full);
+    assert(r == FDK_ERR_NO_DISPLAY || fdk_ok(r));
+    if (fdk_ok(r)) {
+        fdk_shutdown(ctx);
+    }
+
+    free(legacy);
+    printf("[ok] fdk_init_ex size contract: 16-byte legacy caller "
+           "not over-read (ASan), 0 = full layout, floor enforced, "
+           "fdk_init agreement\n");
+}
+
 int main(void) {
     test_hermetic_pin();
     test_version();
     test_error_strings();
     test_init_rejects_null_out();
     test_image_budget_option();
+    test_init_ex_size_contract();
     test_shutdown_null_is_safe();
     test_quit_null_is_safe();
 

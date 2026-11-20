@@ -421,10 +421,30 @@ fdk_context *fdk__context_active(void) {
     return g_active_context;
 }
 
-fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
+fdk_result fdk_init_ex(fdk_context **out_ctx,
+                       const fdk_init_options *options, size_t opts_size) {
     if (out_ctx == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
+
+    /* The size discipline (see fdk_core.h's fdk_init_ex contract):
+     * FDK reads a field ONLY if it lies wholly inside the caller's
+     * declared opts_size. 0 (and fdk_init's wrapper form) mean the
+     * full current layout. An opts_size LARGER than our layout is
+     * a caller from the FUTURE — clamp to what we know; fields we
+     * have not heard of are their business, not an error. */
+    if (opts_size == 0) {
+        opts_size = sizeof(fdk_init_options);
+    }
+    if (opts_size > sizeof(fdk_init_options)) {
+        opts_size = sizeof(fdk_init_options);
+    }
+    /* offsetof-checked field predicates: compiled per-field, so a
+     * future append is one more line here and the guard cannot
+     * drift from the struct. */
+#define OPT_HAS(field) \
+    (options != NULL && \
+     opts_size >= offsetof(fdk_init_options, field) + sizeof(options->field))
 
     fdk_context *ctx = fdk_alloc(sizeof(fdk_context));
     if (ctx == NULL) {
@@ -456,37 +476,40 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     ctx->image_max_pixels = 0;
 
     fdk_platform_backend requested = FDK_PLATFORM_AUTO;
-    if (options != NULL) {
+    if (OPT_HAS(backend)) {
         ctx->backend = options->backend;
         requested = options->backend;
-        if (options->render_mode != 0 &&
-            (options->render_mode < FDK_RENDER_CPU ||
-             options->render_mode > FDK_RENDER_GPU)) {
-            fdk_free(ctx);
-            return FDK_ERR_INVALID_ARGUMENT;
-        }
-        if (options->image_max_pixels != 0 &&
-            options->image_max_pixels < (1u << 20)) {
-            /* A budget that rejects a 1024x1024 icon cannot be an
-             * intended value; refuse loudly rather than silently
-             * breaking every icon load. */
-            fdk_free(ctx);
-            return FDK_ERR_INVALID_ARGUMENT;
-        }
+    }
+    if (OPT_HAS(render_mode) && options->render_mode != 0 &&
+        (options->render_mode < FDK_RENDER_CPU ||
+         options->render_mode > FDK_RENDER_GPU)) {
+        fdk_free(ctx);
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (OPT_HAS(image_max_pixels) &&
+        options->image_max_pixels != 0 &&
+        options->image_max_pixels < (1u << 20)) {
+        /* A budget that rejects a 1024x1024 icon cannot be an
+         * intended value; refuse loudly rather than silently
+         * breaking every icon load. */
+        fdk_free(ctx);
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (OPT_HAS(image_max_pixels)) {
         ctx->image_max_pixels = options->image_max_pixels;
-        if (options->app_id != NULL) {
-            ctx->app_id = dup_string(options->app_id);
-            if (ctx->app_id == NULL) {
-                fdk_free(ctx);
-                return FDK_ERR_OUT_OF_MEMORY;
-            }
+    }
+    if (OPT_HAS(app_id) && options->app_id != NULL) {
+        ctx->app_id = dup_string(options->app_id);
+        if (ctx->app_id == NULL) {
+            fdk_free(ctx);
+            return FDK_ERR_OUT_OF_MEMORY;
         }
     }
 
     /* Render mode resolution (1.0.0): the init option OVERRIDES the
      * FDK_RENDER environment variable, which OVERRIDES AUTO. */
     ctx->render_mode = render_mode_from_env();
-    if (options != NULL && options->render_mode != 0) {
+    if (OPT_HAS(render_mode) && options->render_mode != 0) {
         ctx->render_mode = options->render_mode;
     }
     if (ctx->render_mode == FDK_RENDER_AUTO) {
@@ -559,6 +582,25 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     *out_ctx = ctx;
     g_active_context = ctx; /* the active-context seam (image budget) */
     return FDK_OK;
+#undef OPT_HAS
+}
+
+/* The frozen entry point: the full current layout, exactly as the
+ * pre-contract ABI read it. Every field FDK knows about is read
+ * (callers rebuilt against newer headers get newer defaults);
+ * callers built against OLDER headers keep passing what they
+ * always passed — the struct only ever grows by appending, so
+ * their allocation still covers every field THAT EXISTED for
+ * them... which fdk_init reads past ONLY IF they compiled against
+ * a header older than a field FDK now reads. That is precisely
+ * why new fields should be set through fdk_init_ex: it is the
+ * form that KNOWS which layout the caller compiled against.
+ * fdk_init stays for defaults, for NULL, and for the documented
+ * full-layout contract. */
+fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
+    return fdk_init_ex(out_ctx, options, options != NULL
+                                          ? sizeof(*options)
+                                          : (size_t)0);
 }
 
 int fdk_pump_events(fdk_context *ctx, int timeout_ms) {

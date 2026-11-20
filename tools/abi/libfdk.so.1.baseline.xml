@@ -487,6 +487,7 @@
     <elf-symbol name='fdk_image_decode_pixels' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='fdk_image_pixels_free' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='fdk_init' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='fdk_init_ex' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='fdk_input_method_close' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='fdk_input_method_commit' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='fdk_input_method_grab_keyboard' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
@@ -2484,7 +2485,7 @@
     <typedef-decl name='fdk_surface_format' type-id='type-id-19' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_surface.h' line='73' column='1' hash='14700a6d4744695d' id='type-id-160'/>
     <typedef-decl name='fdk_tablet_event' type-id='type-id-162' size-in-bits='256' filepath='include/fdk/fdk_event.h' line='499' column='1' id='type-id-199'/>
     <typedef-decl name='fdk_timer' type-id='type-id-163' size-in-bits='320' filepath='include/fdk/fdk_types.h' line='92' column='1' id='type-id-200'/>
-    <typedef-decl name='fdk_timer_fn' type-id='type-id-201' size-in-bits='64' filepath='include/fdk/fdk_core.h' line='202' column='1' hash='fd7a63c0c6c822c4' id='type-id-165'/>
+    <typedef-decl name='fdk_timer_fn' type-id='type-id-201' size-in-bits='64' filepath='include/fdk/fdk_core.h' line='252' column='1' hash='fd7a63c0c6c822c4' id='type-id-165'/>
     <typedef-decl name='fdk_touch_event' type-id='type-id-166' size-in-bits='96' filepath='include/fdk/fdk_event.h' line='454' column='1' id='type-id-202'/>
     <typedef-decl name='fdk_u32' type-id='type-id-203' size-in-bits='32' filepath='include/fdk/fdk_types.h' line='26' column='1' hash='e66b43f97c38e87a' id='type-id-50'/>
     <typedef-decl name='fdk_u64' type-id='type-id-204' size-in-bits='64' filepath='include/fdk/fdk_types.h' line='28' column='1' hash='8fdc5eea2983a729' id='type-id-149'/>
@@ -4198,7 +4199,7 @@
     <typedef-decl name='fdk_event_callback_fn' type-id='type-id-441' size-in-bits='64' filepath='include/fdk/fdk_event.h' line='605' column='1' hash='fd7a63c0c6c822c4' id='type-id-389'/>
     <typedef-decl name='fdk_font' type-id='type-id-442' size-in-bits='922816' filepath='include/fdk/fdk_types.h' line='91' column='1' id='type-id-443'/>
     <typedef-decl name='fdk_i64' type-id='type-id-444' size-in-bits='64' filepath='include/fdk/fdk_types.h' line='27' column='1' hash='b119fe0931d2ee10' id='type-id-395'/>
-    <typedef-decl name='fdk_init_options' type-id='type-id-406' size-in-bits='192' filepath='include/fdk/fdk_core.h' line='106' column='1' id='type-id-445'/>
+    <typedef-decl name='fdk_init_options' type-id='type-id-406' size-in-bits='192' filepath='include/fdk/fdk_core.h' line='114' column='1' id='type-id-445'/>
     <typedef-decl name='fdk_render_mode' type-id='type-id-400' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_core.h' line='80' column='1' hash='ba0abda6ed67d671' id='type-id-446'/>
     <typedef-decl name='fdk_span' type-id='type-id-407' size-in-bits='384' filepath='include/fdk/fdk_text.h' line='563' column='1' id='type-id-447'/>
     <typedef-decl name='fdk_theme_token' type-id='type-id-401' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_theme.h' line='151' column='1' hash='d582b69d35f4ab53' id='type-id-418'/>
@@ -4551,44 +4552,50 @@
       <parameter type-id='type-id-50' name='interval_ms' filepath='src/core/context.c' line='132' column='1'/>
       <return type-id='type-id-10'/>
     </function-decl>
-    <function-decl name='fdk_init' mangled-name='fdk_init' filepath='src/core/context.c' line='424' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_init@@FDK_1.0' hash='37b98f488519a7e5'>
+    <function-decl name='fdk_init_ex' mangled-name='fdk_init_ex' filepath='src/core/context.c' line='424' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_init_ex@@FDK_1.0' hash='9881f3f1334fc37e'>
       <parameter type-id='type-id-476' name='out_ctx' filepath='src/core/context.c' line='424' column='1'/>
-      <parameter type-id='type-id-466' name='options' filepath='src/core/context.c' line='424' column='1'/>
+      <parameter type-id='type-id-466' name='options' filepath='src/core/context.c' line='425' column='1'/>
+      <parameter type-id='type-id-6' name='opts_size' filepath='src/core/context.c' line='425' column='1'/>
       <return type-id='type-id-195'/>
     </function-decl>
-    <function-decl name='fdk_pump_events' mangled-name='fdk_pump_events' filepath='src/core/context.c' line='564' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_pump_events@@FDK_1.0' hash='7f926ebf119ced7c'>
-      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='564' column='1'/>
-      <parameter type-id='type-id-26' name='timeout_ms' filepath='src/core/context.c' line='564' column='1'/>
-      <return type-id='type-id-26'/>
-    </function-decl>
-    <function-decl name='fdk_run' mangled-name='fdk_run' filepath='src/core/context.c' line='851' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_run@@FDK_1.0' hash='b49d70cfe3c04697#2'>
-      <parameter type-id='type-id-164'/>
-      <return type-id='type-id-10'/>
-    </function-decl>
-    <function-decl name='fdk_quit' mangled-name='fdk_quit' filepath='src/core/context.c' line='909' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_quit@@FDK_1.0' hash='b49d70cfe3c04697#2'>
-      <parameter type-id='type-id-164'/>
-      <return type-id='type-id-10'/>
-    </function-decl>
-    <function-decl name='fdk_shutdown' mangled-name='fdk_shutdown' filepath='src/core/context.c' line='916' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_shutdown@@FDK_1.0' hash='b49d70cfe3c04697#2'>
-      <parameter type-id='type-id-164'/>
-      <return type-id='type-id-10'/>
-    </function-decl>
-    <function-decl name='fdk_ext_modal_run' mangled-name='fdk_ext_modal_run' filepath='src/core/context.c' line='1066' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ext_modal_run@@FDK_1.0' hash='127303374b3232c7#2'>
-      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='1066' column='1'/>
+    <function-decl name='fdk_init' mangled-name='fdk_init' filepath='src/core/context.c' line='600' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_init@@FDK_1.0' hash='37b98f488519a7e5'>
+      <parameter type-id='type-id-476' name='out_ctx' filepath='src/core/context.c' line='600' column='1'/>
+      <parameter type-id='type-id-466' name='options' filepath='src/core/context.c' line='600' column='1'/>
       <return type-id='type-id-195'/>
     </function-decl>
-    <function-decl name='fdk_ext_modal_quit' mangled-name='fdk_ext_modal_quit' filepath='src/core/context.c' line='1095' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ext_modal_quit@@FDK_1.0' hash='b49d70cfe3c04697#2'>
+    <function-decl name='fdk_pump_events' mangled-name='fdk_pump_events' filepath='src/core/context.c' line='606' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_pump_events@@FDK_1.0' hash='7f926ebf119ced7c'>
+      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='606' column='1'/>
+      <parameter type-id='type-id-26' name='timeout_ms' filepath='src/core/context.c' line='606' column='1'/>
+      <return type-id='type-id-26'/>
+    </function-decl>
+    <function-decl name='fdk_run' mangled-name='fdk_run' filepath='src/core/context.c' line='893' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_run@@FDK_1.0' hash='b49d70cfe3c04697#2'>
       <parameter type-id='type-id-164'/>
       <return type-id='type-id-10'/>
     </function-decl>
-    <function-decl name='fdk_ext_modal_depth' mangled-name='fdk_ext_modal_depth' filepath='src/core/context.c' line='1108' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ext_modal_depth@@FDK_1.0' hash='fee94ee636a15b01#2'>
-      <parameter type-id='type-id-462' name='ctx' filepath='src/core/context.c' line='1108' column='1'/>
+    <function-decl name='fdk_quit' mangled-name='fdk_quit' filepath='src/core/context.c' line='951' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_quit@@FDK_1.0' hash='b49d70cfe3c04697#2'>
+      <parameter type-id='type-id-164'/>
+      <return type-id='type-id-10'/>
+    </function-decl>
+    <function-decl name='fdk_shutdown' mangled-name='fdk_shutdown' filepath='src/core/context.c' line='958' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_shutdown@@FDK_1.0' hash='b49d70cfe3c04697#2'>
+      <parameter type-id='type-id-164'/>
+      <return type-id='type-id-10'/>
+    </function-decl>
+    <function-decl name='fdk_ext_modal_run' mangled-name='fdk_ext_modal_run' filepath='src/core/context.c' line='1108' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ext_modal_run@@FDK_1.0' hash='127303374b3232c7#2'>
+      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='1108' column='1'/>
+      <return type-id='type-id-195'/>
+    </function-decl>
+    <function-decl name='fdk_ext_modal_quit' mangled-name='fdk_ext_modal_quit' filepath='src/core/context.c' line='1137' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ext_modal_quit@@FDK_1.0' hash='b49d70cfe3c04697#2'>
+      <parameter type-id='type-id-164'/>
+      <return type-id='type-id-10'/>
+    </function-decl>
+    <function-decl name='fdk_ext_modal_depth' mangled-name='fdk_ext_modal_depth' filepath='src/core/context.c' line='1150' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ext_modal_depth@@FDK_1.0' hash='fee94ee636a15b01#2'>
+      <parameter type-id='type-id-462' name='ctx' filepath='src/core/context.c' line='1150' column='1'/>
       <return type-id='type-id-26'/>
     </function-decl>
-    <function-decl name='fdk_context_render_mode' mangled-name='fdk_context_render_mode' filepath='src/core/context.c' line='1143' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_context_render_mode@@FDK_1.0' hash='adc51aece0fbd931'>
-      <parameter type-id='type-id-462' name='ctx' filepath='src/core/context.c' line='1143' column='1'/>
-      <parameter type-id='type-id-478' name='active' filepath='src/core/context.c' line='1144' column='1'/>
-      <parameter type-id='type-id-213' name='reason' filepath='src/core/context.c' line='1145' column='1'/>
+    <function-decl name='fdk_context_render_mode' mangled-name='fdk_context_render_mode' filepath='src/core/context.c' line='1185' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_context_render_mode@@FDK_1.0' hash='adc51aece0fbd931'>
+      <parameter type-id='type-id-462' name='ctx' filepath='src/core/context.c' line='1185' column='1'/>
+      <parameter type-id='type-id-478' name='active' filepath='src/core/context.c' line='1186' column='1'/>
+      <parameter type-id='type-id-213' name='reason' filepath='src/core/context.c' line='1187' column='1'/>
       <return type-id='type-id-10'/>
     </function-decl>
     <typedef-decl name='fdk_platform_window' type-id='type-id-521' filepath='src/platform/platform_internal.h' line='35' column='1' id='type-id-495'/>
@@ -5596,11 +5603,11 @@
       <return type-id='type-id-26'/>
     </function-decl>
     <function-decl name='fdk__thread_wake_fd' mangled-name='fdk__thread_wake_fd' filepath='src/core/thread.c' line='206' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk__thread_wake_fd@@FDK_1.0' hash='fee94ee636a15b01#2'>
-      <parameter type-id='type-id-462' name='ctx' filepath='src/core/context.c' line='1108' column='1'/>
+      <parameter type-id='type-id-462' name='ctx' filepath='src/core/context.c' line='1150' column='1'/>
       <return type-id='type-id-26'/>
     </function-decl>
     <function-decl name='fdk__thread_init' mangled-name='fdk__thread_init' filepath='src/core/thread.c' line='214' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk__thread_init@@FDK_1.0' hash='127303374b3232c7#2'>
-      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='1066' column='1'/>
+      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='1108' column='1'/>
       <return type-id='type-id-195'/>
     </function-decl>
     <function-decl name='fdk__thread_shutdown' mangled-name='fdk__thread_shutdown' filepath='src/core/thread.c' line='249' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk__thread_shutdown@@FDK_1.0' hash='b49d70cfe3c04697#2'>
@@ -9953,7 +9960,7 @@
     </class-decl>
     <typedef-decl name='fdk_context' type-id='type-id-1223' size-in-bits='1664' filepath='include/fdk/fdk_types.h' line='85' column='1' id='type-id-1235'/>
     <typedef-decl name='fdk_timer' type-id='type-id-1226' size-in-bits='320' filepath='include/fdk/fdk_types.h' line='92' column='1' id='type-id-1236'/>
-    <typedef-decl name='fdk_timer_fn' type-id='type-id-1237' size-in-bits='64' filepath='include/fdk/fdk_core.h' line='202' column='1' hash='fd7a63c0c6c822c4#3' id='type-id-1228'/>
+    <typedef-decl name='fdk_timer_fn' type-id='type-id-1237' size-in-bits='64' filepath='include/fdk/fdk_core.h' line='252' column='1' hash='fd7a63c0c6c822c4#3' id='type-id-1228'/>
     <qualified-type-def type-id='type-id-1229' const='yes' hash='057a9951508400a3' id='type-id-1238'/>
     <qualified-type-def type-id='type-id-1233' const='yes' hash='ad34563e75e500ec' id='type-id-1239'/>
     <pointer-type-def type-id='type-id-1235' size-in-bits='64' hash='dbf4cf4694ea749c#4' id='type-id-1227'/>
@@ -13795,7 +13802,7 @@
     <typedef-decl name='fdk_context' type-id='type-id-1633' size-in-bits='1664' filepath='include/fdk/fdk_types.h' line='85' column='1' id='type-id-1644'/>
     <typedef-decl name='fdk_event_callback_fn' type-id='type-id-1645' size-in-bits='64' filepath='include/fdk/fdk_event.h' line='605' column='1' hash='fd7a63c0c6c822c4#2' id='type-id-1643'/>
     <typedef-decl name='fdk_timer' type-id='type-id-1637' size-in-bits='320' filepath='include/fdk/fdk_types.h' line='92' column='1' id='type-id-1646'/>
-    <typedef-decl name='fdk_timer_fn' type-id='type-id-1647' size-in-bits='64' filepath='include/fdk/fdk_core.h' line='202' column='1' hash='fd7a63c0c6c822c4#2' id='type-id-1639'/>
+    <typedef-decl name='fdk_timer_fn' type-id='type-id-1647' size-in-bits='64' filepath='include/fdk/fdk_core.h' line='252' column='1' hash='fd7a63c0c6c822c4#2' id='type-id-1639'/>
     <typedef-decl name='fdk_window' type-id='type-id-1640' size-in-bits='4224' filepath='include/fdk/fdk_types.h' line='86' column='1' id='type-id-1648'/>
     <pointer-type-def type-id='type-id-1631' size-in-bits='64' hash='d14a0d6671c39f71' id='type-id-1649'/>
     <pointer-type-def type-id='type-id-1644' size-in-bits='64' hash='dbf4cf4694ea749c#3' id='type-id-1638'/>

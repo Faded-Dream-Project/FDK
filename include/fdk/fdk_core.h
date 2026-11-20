@@ -98,12 +98,62 @@ typedef struct fdk_init_options {
      * here is the cap for the LARGEST format budget (PNG/JPEG); the
      * stricter GIF budget scales with it. 0 keeps the defaults
      * (see docs/quality-gates.md: 96 Mi pixels PNG/JPEG, 16 Mi GIF).
-     * A value smaller than 1 Mi pixels refuses fdk_init with
+     * A value smaller than 1 Mi pixels refuses init with
      * FDK_ERR_INVALID_ARGUMENT (a budget that rejects a 1024x1024
      * icon cannot be intended). Append-only: existing zero-init
      * callers see no change. */
     unsigned int image_max_pixels;
+
+    /* NO struct_size here, and none will ever be PREPENDED: that
+     * would shift every existing field's offset and break the ABI
+     * in one step (docs/abi-policy.md's classification makes this
+     * struct a frozen-layout input). Fields keep APPENDING, and the
+     * size contract lives at the CALL — see fdk_init_ex() below.
+     * (Future fields follow this comment; the comment is the
+     * contract, not a field.) */
 } fdk_init_options;
+
+/* The append-only CONTRACT for fdk_init_options, made explicit
+ * (2026-11-20): the struct grew twice by appending (render_mode,
+ * then image_max_pixels) with no way for FDK to know which layout
+ * a binary was compiled against — a caller built against the
+ * SMALLER struct passes a smaller allocation, and FDK reading the
+ * newer fields is an immediate over-read.
+ *
+ * Why not a leading struct_size like fdk_toplevel_info /
+ * fdk_widget_class / fdk_ext_surface_ops? Those types were BORN
+ * with the field; fdk_init_options was not, so prepending it now
+ * shifts backend/app_id/render_mode by eight bytes and breaks
+ * every existing binary in one stroke — the exact damage the
+ * contract exists to prevent. A TRAILING size field is unusable
+ * for an INPUT struct: reading it at all is the over-read.
+ *
+ * The safest shape, in the house style: a separate entry point
+ * that takes the caller-declared size.
+ *
+ *   fdk_init    (ctx, opts)                     — frozen forever
+ *                as "opts points at the FULL current layout".
+ *                New fields set through it MUST be written by
+ *                callers rebuilt against the new header.
+ *   fdk_init_ex (ctx, opts, opts_size)          — the versioned
+ *                form. Pass sizeof(fdk_init_options) AS YOUR
+ *                HEADER DEFINED IT (or 0 = same meaning as
+ *                fdk_init). FDK reads exactly
+ *                min(opts_size, sizeof(its own layout)) bytes,
+ *                field-by-field — a caller compiled against an
+ *                older, smaller struct can never be over-read,
+ *                and newer fields it never heard of simply read
+ *                as their zero-init defaults.
+ *
+ * Rules for every future appended field (enforced by review,
+ * pinned by test_core.c's fdk_init_ex group):
+ *   1. append at the end, zero-init must mean the old default;
+ *   2. fdk_init_ex reads it ONLY if it lies wholly inside
+ *      opts_size;
+ *   3. fdk_init keeps reading it (full-layout form) — the two
+ *      entry points differ ONLY in the size discipline. */
+fdk_result fdk_init_ex(fdk_context **out_ctx,
+                       const fdk_init_options *options, size_t opts_size);
 
 /* Reports the context's ACTIVE render mode and, when it differs from
  * what was requested, a human-readable reason (a static string, valid

@@ -64,6 +64,38 @@ it on every push and fails on a breaking change.
    break by definition (`docs/abi-policy.md`); the SONAME major
    must move instead.
 
+**The 2026-11-20 baseline refresh** (the `fdk_init_ex` contract,
+below) is the worked example of step 3: `abidiff` reported exactly
+`1 Added function` — `fdk_init_ex` — with 0 removed, 0 changed, and
+no struct layout change. That is what an append-only change looks
+like on the wire; the refreshed baseline commits it.
+
+### fdk_init_options and the append-only input contract
+
+`fdk_init_options` grew twice by appending (`render_mode`, then
+`image_max_pixels`) with no way for FDK to know which layout a
+caller compiled against — a caller built against the smaller
+struct passes a smaller allocation, and FDK reading the newer
+fields is an immediate over-read. The fix is a SIZE-DISCIPINED
+ENTRY POINT, not a struct change:
+
+- `fdk_init(ctx, opts)` is frozen forever as "opts points at the
+  full current layout" — its ABI and behavior are unchanged.
+- `fdk_init_ex(ctx, opts, opts_size)` reads each field only if it
+  lies wholly inside `opts_size` (`offsetof`-checked per field);
+  `opts_size = 0` means the full layout; a larger size clamps.
+  A caller compiled against the first-generation 16-byte layout
+  can never be over-read, and newer fields read as their
+  zero-init defaults.
+
+Why not the leading `struct_size` the toplevel/widget-class/ext
+tables use? Those types were BORN with the field; `fdk_init_options`
+was not, and prepending it shifts every existing field's offset —
+an immediate break of the exact ABI this gate protects. The full
+reasoning lives in `fdk_core.h`'s `fdk_init_ex` comment; the
+16-byte-caller regression test (under ASan) is
+`tests/test_core.c::test_init_ex_size_contract`.
+
 ## clang-tidy
 
 `make tidy` (advisory, never fails the build) runs clang-tidy over
