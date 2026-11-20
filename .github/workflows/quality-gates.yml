@@ -1,0 +1,132 @@
+name: quality-gates
+
+# The 2026-11-20 quality gates (docs/quality-gates.md): fuzz lane,
+# ABI check, clang-tidy report, hardened release build check, the
+# advisory perf gate, and the arm64 lane. Kept separate from ci.yml
+# so the existing lanes stay untouched; ci.yml stays the authority
+# on "the tree builds and its suite passes".
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: fuzz (libFuzzer, 60s each)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang libx11-dev libxext-dev \
+            libxrandr-dev libxrender-dev libxi-dev \
+            libwayland-dev libxkbcommon-dev zlib1g-dev xvfb
+      - name: build + run every harness
+        run: make fuzz CC=clang FUZZ_SECONDS=60
+      - name: upload findings if any
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: build/fuzz/artifacts/
+          if-no-files-found: ignore
+
+  abi:
+    name: abi-check (libabigail)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libabigail-tools \
+            libx11-dev libxext-dev libxrandr-dev libxrender-dev \
+            libxi-dev libwayland-dev libxkbcommon-dev zlib1g-dev
+      - name: build the shared library
+        run: make shared
+      - name: diff against the committed baseline
+        run: |
+          abidiff tools/abi/libfdk.so.1.baseline.xml build/libfdk.so \
+            || { echo "ABI BREAK vs tools/abi baseline — see above"; exit 1; }
+          echo "ABI OK: no breaking change"
+
+  tidy:
+    name: clang-tidy (report only)
+    runs-on: ubuntu-latest
+    continue-on-error: true   # advisory by design (docs/quality-gates.md)
+    steps:
+      - uses: actions/checkout@v4
+      - name: install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang-tidy clang \
+            libx11-dev libxext-dev libxrandr-dev libxrender-dev \
+            libxi-dev libwayland-dev libxkbcommon-dev zlib1g-dev
+      - name: run the advisory report
+        run: make tidy
+      - name: publish the report in the job summary
+        if: always()
+        run: |
+          {
+            echo "## clang-tidy findings (advisory)"
+            echo '```'
+            tail -n 200 build/clang-tidy.report || echo "(no report produced)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  hardening:
+    name: release flags + relro/now proof
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libx11-dev libxext-dev libxrandr-dev libxrender-dev \
+            libxi-dev libwayland-dev libxkbcommon-dev zlib1g-dev
+      - name: hardened release build
+        run: make release
+      - name: prove the link hardening
+        run: |
+          readelf -d build/libfdk.so | grep -E 'BIND_NOW|FLAGS' || {
+            echo "FAIL: relro/now missing from the release .so"; exit 1; }
+
+  perf:
+    name: perf gate (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true   # advisory until noise is measured
+    steps:
+      - uses: actions/checkout@v4
+      - name: install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libx11-dev libxext-dev libxrandr-dev libxrender-dev \
+            libxi-dev libwayland-dev libxkbcommon-dev zlib1g-dev
+      - name: bench + compare (2x tolerance, print-only)
+        run: make perf-gate
+
+  arm64:
+    name: arm64 (make test)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libx11-dev libxext-dev libxrandr-dev libxrender-dev \
+            libxi-dev libwayland-dev libxkbcommon-dev zlib1g-dev
+      - name: build + run the suite
+        run: make -j"$(nproc)" test
