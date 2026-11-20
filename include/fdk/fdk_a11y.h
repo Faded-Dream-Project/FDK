@@ -272,6 +272,11 @@ fdk_a11y_action_set fdk_a11y_actions_of(const fdk_widget *widget);
  * implement the action in its current state, FDK_ERR_INVALID_
  * ARGUMENT on NULL widget. Actions fire the same notifications the
  * equivalent input path fires. */
+/* Sets a value-bearing widget's value (the Value interface's write
+ * side; see fdk_a11y_class.value_set). FDK_ERR_UNSUPPORTED when the
+ * widget's value is read-only or the class has no hook. */
+fdk_result fdk_a11y_set_value(fdk_widget *widget, double value);
+
 fdk_result fdk_a11y_perform(fdk_widget *widget, fdk_a11y_action action,
                             double value);
 
@@ -376,6 +381,19 @@ typedef struct fdk_a11y_class {
     bool (*text_set_caret)(fdk_widget *widget, size_t offset);
     bool (*text_set_selection)(fdk_widget *widget, size_t anchor,
                                size_t caret);
+
+    /* ---- Value interface (value-bearing widgets; H1) -----
+     *
+     * The READ side needs no hook: describe() fills the snapshot's
+     * has_value/value_* fields (Slider, LevelBar, Spin do today).
+     * This hook is the WRITE side — SetCurrentValue from a screen
+     * reader. Must route through the widget's own public setter
+     * (fdk_slider_set_value's exact path; clamping included).
+     * NULL = the class's value is read-only (LevelBar: a meter).
+     * Appended 2026-11-20; the struct is internal-only (the ABI
+     * policy's class-table clause), so appending is the whole
+     * move. */
+    bool (*value_set)(fdk_widget *widget, double value);
 } fdk_a11y_class;
 
 /* ---- Virtual children (public queries) --------------------------------

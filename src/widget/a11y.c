@@ -376,6 +376,22 @@ fdk_result fdk_a11y_perform(fdk_widget *widget, fdk_a11y_action action,
     return a->perform(widget, action, value) ? FDK_OK : FDK_ERR_UNSUPPORTED;
 }
 
+/* The Value interface's write side (H1, 2026-11-20): routes through
+ * the class's value_set hook — the widget's own public setter, the
+ * same path real input takes. FDK_ERR_UNSUPPORTED for read-only
+ * values (LevelBar) and classes without the hook. */
+fdk_result fdk_a11y_set_value(fdk_widget *widget, double value) {
+    if (widget == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    const fdk_a11y_class *a =
+        (widget->klass != NULL) ? widget->klass->a11y : NULL;
+    if (a == NULL || a->value_set == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return a->value_set(widget, value) ? FDK_OK : FDK_ERR_UNSUPPORTED;
+}
+
 /* ---- virtual children (painted-row containers) ------------------------ */
 
 static const fdk_a11y_class *a11y_of(const fdk_widget *widget) {

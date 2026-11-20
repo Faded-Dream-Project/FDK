@@ -535,11 +535,21 @@ static bool slider_a11y_perform(fdk_widget *w, fdk_a11y_action action,
     }
 }
 
+/* The Value interface's write side (H1): the public setter's exact
+ * path — clamp, quantize, notify — the same as
+ * FDK_A11Y_ACTION_SET_VALUE above, named for the new hook. */
+static bool slider_a11y_value_set(fdk_widget *w, double value) {
+    fdk_slider *s = slider_of(w);
+    slider_set_value(s, value, true);
+    return true;
+}
+
 static const fdk_a11y_class slider_a11y = {
     .role = FDK_A11Y_ROLE_SLIDER,
     .describe = slider_a11y_describe,
     .actions = slider_a11y_actions,
     .perform = slider_a11y_perform,
+    .value_set = slider_a11y_value_set,
 };
 
 const fdk_widget_class fdk_slider_class_def = {

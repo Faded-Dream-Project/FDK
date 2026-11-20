@@ -460,6 +460,29 @@ static void test_actions(void) {
               info.value_current == 40.0 && info.value_min == 0.0 &&
               info.value_max == 100.0,
           "slider value interface");
+    /* H1 (2026-11-20): the Value interface's WRITE side — the
+     * fdk_a11y_class.value_set hook, the same public-setter path
+     * FDK_A11Y_ACTION_SET_VALUE takes, exposed for the AT-SPI
+     * bridge's SetCurrentValue. The slider accepts, QUANTIZES to
+     * its step (62.5 -> 65 at step 5 — clamp+quantize is the
+     * setter's own contract) and clamps out-of-range writes. */
+    CHECK(fdk_a11y_set_value(slider, 62.5) == FDK_OK,
+          "a11y set_value on a slider");
+    fdk_a11y_info after;
+    fdk_a11y_describe(slider, &after);
+    CHECK(after.has_value && after.value_current == 65.0,
+          "a11y set_value took effect, quantized to the step");
+    fdk_a11y_info_free(&after); /* value_text is owned */
+    CHECK(g_last_slider == 65.0, "a11y set_value fired on_changed");
+    CHECK(fdk_a11y_set_value(slider, 500.0) == FDK_OK,
+          "a11y set_value clamps, not refuses");
+    fdk_a11y_describe(slider, &after);
+    CHECK(after.value_current == 100.0, "clamped to the range max");
+    fdk_a11y_info_free(&after);
+    /* Back to the original test's starting point: the SET_VALUE
+     * perform sequence below expects to move 55 -> 60 -> 55. */
+    CHECK(fdk_a11y_set_value(slider, 40.0) == FDK_OK,
+          "restore the slider for the perform sequence below");
     fdk_a11y_info_free(&info);
     r = fdk_a11y_perform(slider, FDK_A11Y_ACTION_SET_VALUE, 55.0);
     CHECK(fdk_ok(r) && fdk_slider_get_value(slider) == 55.0 &&

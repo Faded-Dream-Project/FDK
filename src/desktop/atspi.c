@@ -90,6 +90,7 @@ int fdk_text_utf8_next(const char *s, size_t len, size_t i,
 #define IFACE_ACTION "org.freedesktop.atspi.Action"
 #define IFACE_COMPONENT "org.freedesktop.atspi.Component"
 #define IFACE_TEXT "org.freedesktop.atspi.Text"
+#define IFACE_VALUE "org.freedesktop.atspi.Value"
 #define IFACE_EVENT_OBJECT "org.freedesktop.atspi.Event.Object"
 #define IFACE_DBUS_PROPS "org.freedesktop.DBus.Properties"
 /* The retry interval: a screen reader toggled on mid-session must
@@ -463,6 +464,90 @@ static void serve_text(fdk_dbus_connection *c, fdk_dbus_message *call,
 static void serve_relation_set(fdk_dbus_connection *c,
                                fdk_dbus_message *call, int index);
 
+/* ---- the Value interface (H1, 2026-11-20) ---------------------------------
+ *
+ * Orca's slider story: GetCurrent/Minimum/MaximumValue to speak the
+ * range, SetCurrentValue to drive it. The snapshot's value_* fields
+ * are the truth; SetCurrentValue routes through the a11y class's
+ * value_set hook (the widget's own public setter — the same path
+ * real input takes) and refuses honestly otherwise. */
+static void serve_value(fdk_dbus_connection *c, fdk_dbus_message *call,
+                        int index, const char *member) {
+    fdk_widget *w = NULL;
+    if (index == 0 || !slot_widget(index, &w)) {
+        reply_error(c, call, "org.freedesktop.atspi.Error.Defunct");
+        return;
+    }
+    fdk_a11y_info info;
+    fdk_a11y_describe(w, &info);
+    if (!info.has_value) {
+        fdk_a11y_info_free(&info);
+        reply_error(c, call,
+                    "org.freedesktop.DBus.Error.UnknownMethod");
+        return;
+    }
+    if (strcmp(member, "GetCurrentValue") == 0) {
+        fdk_dbus_message *r = fdk_dbus_message_new_method_return(call);
+        if (r != NULL) {
+            (void)fdk_dbus_message_append_double(r, info.value_current);
+            (void)fdk_dbus_connection_send(c, r);
+        }
+    } else if (strcmp(member, "GetMinimumValue") == 0) {
+        fdk_dbus_message *r = fdk_dbus_message_new_method_return(call);
+        if (r != NULL) {
+            (void)fdk_dbus_message_append_double(r, info.value_min);
+            (void)fdk_dbus_connection_send(c, r);
+        }
+    } else if (strcmp(member, "GetMaximumValue") == 0) {
+        fdk_dbus_message *r = fdk_dbus_message_new_method_return(call);
+        if (r != NULL) {
+            (void)fdk_dbus_message_append_double(r, info.value_max);
+            (void)fdk_dbus_connection_send(c, r);
+        }
+    } else if (strcmp(member, "GetMinimumIncrement") == 0) {
+        fdk_dbus_message *r = fdk_dbus_message_new_method_return(call);
+        if (r != NULL) {
+            /* The snapshot does not carry a step; the honest answer
+             * for a continuous slider is 0.0 (no increment), and
+             * quantized classes can append a value_step field the
+             * day they need it. */
+            (void)fdk_dbus_message_append_double(r, 0.0);
+            (void)fdk_dbus_connection_send(c, r);
+        }
+    } else if (strcmp(member, "SetCurrentValue") == 0) {
+        fdk_dbus_value **args = NULL;
+        size_t n = 0;
+        if (fdk_dbus_message_read_args(call, &args, &n) != FDK_OK ||
+            n < 1 || args == NULL) {
+            fdk_a11y_info_free(&info);
+            reply_error(c, call,
+                        "org.freedesktop.DBus.Error.InvalidArgs");
+            return;
+        }
+        double v = fdk_dbus_value_double(args[0]);
+        fdk_dbus_values_free_array(args, n);
+        fdk_result r = fdk_a11y_set_value(w, v);
+        fdk_a11y_info_free(&info);
+        if (!fdk_ok(r)) {
+            reply_error(c, call,
+                        "org.freedesktop.atspi.Error.NotSupported");
+            return;
+        }
+        fdk_dbus_message *ret = fdk_dbus_message_new_method_return(call);
+        if (ret != NULL) {
+            (void)fdk_dbus_message_append_boolean(ret, true);
+            (void)fdk_dbus_connection_send(c, ret);
+        }
+        return;
+    } else {
+        fdk_a11y_info_free(&info);
+        reply_error(c, call,
+                    "org.freedesktop.DBus.Error.UnknownMethod");
+        return;
+    }
+    fdk_a11y_info_free(&info);
+}
+
 static void serve_accessible(fdk_dbus_connection *c, fdk_dbus_message *call,
                              int index, const char *member) {
     /* The app root: role/name/state with no widget behind it. */
@@ -676,7 +761,7 @@ static void serve_accessible(fdk_dbus_connection *c, fdk_dbus_message *call,
         bool has_text = fdk_a11y_has_text_interface(w);
         fdk_dbus_message *r = fdk_dbus_message_new_method_return(call);
         if (r != NULL) {
-            fdk_dbus_value *items[4];
+            fdk_dbus_value *items[5];
             size_t m = 0;
             items[m++] = fdk_dbus_value_new_string(IFACE_ACCESSIBLE);
             items[m++] = fdk_dbus_value_new_string(IFACE_COMPONENT);
@@ -688,6 +773,21 @@ static void serve_accessible(fdk_dbus_connection *c, fdk_dbus_message *call,
                  * (Entry, TextView, Label, Spin) — the screen reader
                  * enumerates it before issuing Text calls. */
                 items[m++] = fdk_dbus_value_new_string(IFACE_TEXT);
+            }
+            {
+                /* H1 (2026-11-20): the Value interface rides
+                 * value-bearing widgets (Slider, LevelBar, Spin) —
+                 * the snapshot's has_value is the gate, exactly as
+                 * has_text gates Text. Orca queries
+                 * GetCurrentValue/GetMinimumValue/GetMaximumValue
+                 * to speak a slider's range, the gap this closes. */
+                fdk_a11y_info info;
+                if (fdk_ok(fdk_a11y_describe(w, &info)) &&
+                    info.has_value) {
+                    items[m++] =
+                        fdk_dbus_value_new_string(IFACE_VALUE);
+                    fdk_a11y_info_free(&info);
+                }
             }
             fdk_dbus_value *arr = fdk_dbus_value_new_array("s", items, m);
             if (arr != NULL) {
@@ -1115,6 +1215,8 @@ static void atspi_method(fdk_dbus_connection *c, fdk_dbus_message *call,
         serve_action(c, call, index, member);
     } else if (strcmp(iface, IFACE_TEXT) == 0) {
         serve_text(c, call, index, member);
+    } else if (strcmp(iface, IFACE_VALUE) == 0) {
+        serve_value(c, call, index, member);
     } else if (strcmp(iface, IFACE_DBUS_PROPS) == 0) {
         serve_properties(c, call, index, member);
     }
