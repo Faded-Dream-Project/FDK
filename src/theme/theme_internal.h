@@ -205,6 +205,10 @@ const char *fdk__icon_theme_current_name(void);
  * engine consumes it. Returns false (out untouched) when there is
  * no display, no manager, or the property will not parse: the
  * detection chain then falls through to its file channels. */
+/* The INTEGER twin (xsettings type 0) — Net/EnableAnimations and
+ * friends. Same lookup contract as the string reader. */
+bool fdk__x11_xsettings_int(const char *setting_name, int *out);
+
 bool fdk__x11_xsettings_string(const char *setting_name, char *out,
                                size_t cap);
 
@@ -230,6 +234,14 @@ void fdk__color_scheme_portal_tick(fdk_context *ctx);
 
 /* Closes the portal singleton (fdk_shutdown's theme teardown). */
 void fdk__color_scheme_shutdown(void);
+
+/* The reduced-motion preference (reduced_motion.c; the same shape
+ * as color-scheme — see the file header for the channel list). */
+void fdk__reduced_motion_poll_x11(void);
+bool fdk__reduced_motion_x11_spoke(void);
+void fdk__reduced_motion_portal_tick(fdk_context *ctx);
+void fdk__reduced_motion_shutdown(void);
+void fdk__reduced_motion_reset_for_tests(void);
 
 /* Test seam: full module-state reset. */
 void fdk__color_scheme_reset_for_tests(void);

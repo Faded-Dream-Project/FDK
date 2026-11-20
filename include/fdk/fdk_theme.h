@@ -502,6 +502,23 @@ typedef enum fdk_color_scheme {
 
 fdk_color_scheme fdk_system_color_scheme(void);
 
+/* ---- Reduced motion (1.0.0-dev; ACCESSIBILITY-AUDIT.md H2) ----------------
+ *
+ * The desktop's reduced-motion preference, resolved like the color
+ * scheme: the $FDK_REDUCE_MOTION environment override ("1"/"reduce"
+ * forces on, "0"/"none" forces off), then XSETTINGS
+ * Net/EnableAnimations on X11 (0 = reduce), then the portal's
+ * org.gnome.desktop.interface enable-animations (the key Wayland
+ * desktops publish), then the default: NOT reduced. The answer
+ * follows the desktop live unless the override owns it. Getters
+ * never touch a socket; UI-thread only.
+ *
+ * The getter is deliberately the READ side: applications (and
+ * FDK's own rig screens) adapt what they animate to it. The
+ * ANIMATION ENGINE does not gate itself on this value — that
+ * changes widget timing behavior and needs its own decision. */
+bool fdk_system_prefers_reduced_motion(void);
+
 /* ---- UI metrics (1.0.0) ---------------------------------------------------
  *
  * The process's UI font size and scale — one answer, resolved like

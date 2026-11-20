@@ -2768,6 +2768,7 @@ void fdk__window_theme_settings_shutdown(void) {
      * shutdown sweep (an app-level close frees it cleanly; leaving
      * it would dangle the module's handle past the sweep). */
     fdk__color_scheme_shutdown();
+    fdk__reduced_motion_shutdown();
     fdk__atspi_shutdown();
     fdk__ui_metrics_shutdown();
     fdk__theme_settings_shutdown();
@@ -2779,6 +2780,7 @@ void fdk__window_theme_settings_shutdown(void) {
  * dispatch, between event batches, on the UI thread. */
 void fdk__window_theme_settings_notify(void) {
     fdk__color_scheme_poll_x11();
+    fdk__reduced_motion_poll_x11();
     fdk__ui_metrics_poll_x11();
     fdk__theme_settings_recheck();
 }
@@ -2789,6 +2791,7 @@ void fdk__window_theme_settings_notify(void) {
  * channel owns the answer or an override is set). */
 void fdk__window_theme_scheme_tick(fdk_context *ctx) {
     fdk__color_scheme_portal_tick(ctx);
+    fdk__reduced_motion_portal_tick(ctx);
     fdk__ui_metrics_portal_tick(ctx);
     /* 1.0.0, S-8: the AT-SPI bridge's attach point — the same pump
      * tick shape (throttled internally to one attempt; degrades

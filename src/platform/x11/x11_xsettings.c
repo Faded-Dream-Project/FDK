@@ -105,12 +105,22 @@ static size_t xs_pad4(size_t n) {
     return (n + 3u) & ~(size_t)3u;
 }
 
-bool fdk__x11_xsettings_string(const char *setting_name, char *out,
-                               size_t cap) {
-    if (setting_name == NULL || out == NULL || cap == 0) {
+/* The shared lookup: one walk over the settings property, two
+ * typed results. out_str/out_cap is the string channel (type 1),
+ * out_int the integer one (type 0); a NULL out param means the
+ * caller does not want that type. Exactly one of the two should
+ * be wanted per call — the public wrappers below enforce it. */
+static bool xsettings_lookup(const char *setting_name, char *out_str,
+                             size_t cap, int *out_int) {
+    if (setting_name == NULL) {
         return false;
     }
-    out[0] = '\0';
+    if (out_str == NULL && out_int == NULL) {
+        return false;
+    }
+    if (out_str != NULL) {
+        out_str[0] = '\0';
+    }
 
     size_t want_len = strlen(setting_name);
     if (want_len == 0 || want_len > FDK_XSETTINGS_NAME_MAX) {
@@ -179,10 +189,18 @@ bool fdk__x11_xsettings_string(const char *setting_name, char *out,
             }
             size_t value_off = after_name + 4;
 
-            if (type_byte == 1 && name_len == want_len &&
+            if ((type_byte == 0 || type_byte == 1) &&
+                name_len == want_len &&
                 memcmp(data + name_off, setting_name, want_len) == 0) {
-                /* The setting we asked for: string value. */
+                /* The setting we asked for. Integer (0) reads the
+                 * card32 at value_off; string (1) takes the length
+                 * prefix + bytes below. */
                 if (value_off + 4 > len) {
+                    break;
+                }
+                if (type_byte == 0) {
+                    *out_int = (int)xs_read_card32(data + value_off, be);
+                    found = true;
                     break;
                 }
                 unsigned long vlen =
@@ -192,8 +210,8 @@ bool fdk__x11_xsettings_string(const char *setting_name, char *out,
                     voff + vlen > len) {
                     break; /* lying length or won't fit — refuse */
                 }
-                memcpy(out, data + voff, vlen);
-                out[vlen] = '\0';
+                memcpy(out_str, data + voff, vlen);
+                out_str[vlen] = '\0';
                 found = true;
                 break;
             }
@@ -231,9 +249,33 @@ bool fdk__x11_xsettings_string(const char *setting_name, char *out,
     }
     XCloseDisplay(d);
     if (found) {
-        FDK_DEBUG("XSETTINGS live read: %s = '%s'", setting_name, out);
+        if (out_str != NULL) {
+            FDK_DEBUG("XSETTINGS live read: %s = '%s'", setting_name,
+                      out_str);
+        } else {
+            FDK_DEBUG("XSETTINGS live read: %s = %d", setting_name,
+                      *out_int);
+        }
     }
     return found;
+}
+
+/* The string channel (type 1): color-scheme, font names, ... */
+bool fdk__x11_xsettings_string(const char *setting_name, char *out,
+                               size_t cap) {
+    if (out == NULL || cap == 0) {
+        return false;
+    }
+    return xsettings_lookup(setting_name, out, cap, NULL);
+}
+
+/* The integer channel (type 0): Net/EnableAnimations, ... */
+bool fdk__x11_xsettings_int(const char *setting_name, int *out) {
+    if (out == NULL) {
+        return false;
+    }
+    *out = 0;
+    return xsettings_lookup(setting_name, NULL, 0, out);
 }
 
 /* ---- the live follow (1.0.0) --------------------------------------------
