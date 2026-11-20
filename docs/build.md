@@ -349,6 +349,14 @@ The config derives its paths from its own location (not the baked
 prefix), so DESTDIR-staged and final-prefix installs both resolve;
 `FDK_INCLUDE_DIR` / `FDK_LIBRARY` override for exotic relocations.
 
+**`make consumer-test`** drives the whole sequence from source:
+release build -> install to a throwaway `build/consumer-prefix` ->
+both consumers configured, built, linked AND RUN against it
+(the committed projects live in `tests/consumers/{cmake,meson}`).
+It is the CI-visible form of this section (the quality-gates
+release job runs it), and skips cleanly when cmake/meson are
+absent in a dev tree.
+
 **Meson** — plain pkg-config consumption, no wrapper needed:
 
 ```meson

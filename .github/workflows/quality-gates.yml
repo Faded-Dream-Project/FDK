@@ -102,6 +102,10 @@ jobs:
             libxi-dev libwayland-dev libxkbcommon-dev zlib1g-dev
       - name: hardened release build
         run: make release
+      - name: consumer build systems (installed FDK)
+        run: |
+          sudo apt-get install -y -qq cmake meson ninja-build
+          make consumer-test
       - name: prove the link hardening
         run: |
           readelf -d build/libfdk.so | grep -E 'BIND_NOW|FLAGS' || {

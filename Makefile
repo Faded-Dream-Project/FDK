@@ -857,6 +857,50 @@ docs:
 	fi
 
 
+# --- Consumer build-system tests (tests/consumers/) ---------------------
+# Installs FDK to a THROWAWAY prefix and builds+links+RUNS two tiny
+# downstream projects against it: CMake via find_package(fdk CONFIG)
+# (the config package), Meson via dependency('fdk') (the pkg-config
+# file). The install surface is exercised exactly as an integrator
+# consumes it; a broken .pc, config package or link set fails here,
+# not at the first external user. Skips (with a message, rc 0) when
+# cmake or meson is not installed so it can ride in dev trees.
+CONSUMER_PREFIX := $(BUILD_DIR)/consumer-prefix
+
+.PHONY: consumer-test
+consumer-test:
+	@echo "== consumer-test: install FDK to $(CONSUMER_PREFIX) =="
+	$(MAKE) FDK_CONFIG=release DESTDIR=$(CURDIR)/$(CONSUMER_PREFIX) \
+	    PREFIX=/usr/local install
+	@set -e; \
+	have_cmake=$$(command -v cmake >/dev/null 2>&1 && echo 1 || echo 0); \
+	have_meson=$$(command -v meson >/dev/null 2>&1 && echo 1 || echo 0); \
+	if [ "$$have_cmake$$have_meson" = "00" ]; then \
+	  echo "SKIP: neither cmake nor meson installed"; exit 0; fi; \
+	stage=$(CURDIR)/$(CONSUMER_PREFIX)/usr/local; \
+	export PKG_CONFIG_PATH="$$stage/lib/pkgconfig"; \
+	export PKG_CONFIG_SYSROOT_DIR=$(CURDIR)/$(CONSUMER_PREFIX); \
+	export LD_LIBRARY_PATH="$$stage/lib$$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}"; \
+	if [ "$$have_cmake" = 1 ]; then \
+	  echo "== cmake consumer (find_package CONFIG) =="; \
+	  rm -rf $(BUILD_DIR)/consumer-cmake; \
+	  cmake -S tests/consumers/cmake -B $(BUILD_DIR)/consumer-cmake \
+	        -DCMAKE_PREFIX_PATH="$$stage" >/dev/null; \
+	  cmake --build $(BUILD_DIR)/consumer-cmake >/dev/null; \
+	  $(BUILD_DIR)/consumer-cmake/consumer; \
+	fi; \
+	if [ "$$have_meson" = 1 ]; then \
+	  echo "== meson consumer (dependency pkg-config) =="; \
+	  rm -rf $(BUILD_DIR)/consumer-meson; \
+	  meson setup $(BUILD_DIR)/consumer-meson tests/consumers/meson \
+	      >/dev/null 2>&1 || meson setup $(BUILD_DIR)/consumer-meson \
+	      tests/consumers/meson; \
+	  ninja -C $(BUILD_DIR)/consumer-meson >/dev/null; \
+	  $(BUILD_DIR)/consumer-meson/consumer; \
+	fi; \
+	echo "== consumer-test: both consumers built, linked, ran =="
+
+
 # --- clang-tidy (non-blocking report; docs/quality-gates.md) ---------
 # Advisory: findings are reported, never fatal. Reads the same
 # compile line the build uses via compile_commands-lite: we re-run
