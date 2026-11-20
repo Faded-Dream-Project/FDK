@@ -1,0 +1,53 @@
+# faded-dream-highcontrast.fdk — "Faded Dream, High Contrast", the
+# accessibility sibling face FDK ships (1.0.0-dev,
+# ACCESSIBILITY-AUDIT.md H2) — selected ONLY by the desktop's
+# high-contrast statement (the portal's org.freedesktop.appearance
+# "contrast", XSETTINGS Gtk/HighContrast on X11) or the
+# $FDK_HIGH_CONTRAST override, live-followed like every desktop
+# preference; NEVER the default and never a fallback.
+#
+# The palette is the classic high-contrast register: a pure black
+# field, pure white text, and exactly one saturated voice — yellow
+# — for the parts that must be found fast (focus rings, checked
+# state, selections). Every text/background token pair clears
+# WCAG AAA (>= 7:1); most clear 19:1+. Pinned by
+# tests/test_theme.c's contrast gate, which also REPORTS (not
+# fails) the pairs of the other shipped faces below 4.5:1 — the
+# calm default trades contrast for restfulness by design, and the
+# report is the honest accounting of that trade.
+#
+# Sibling convention: "<stem>-highcontrast" (settings.c's contrast
+# pass, the same discovery as -dark/-light). A theme without this
+# file follows nothing when the desktop asks — the face IS the
+# opt-in.
+
+version = 1
+name    = "Faded Dream, High Contrast"
+author  = "FDK project"
+
+[colors]
+window_background          = #000000
+text                       = #FFFFFF
+text_disabled              = #B8B8B8
+control_background         = #000000
+control_background_hover   = #1E1E1E
+control_background_pressed = #2E2E2E
+control_background_disabled= #0A0A0A
+control_border             = #FFFFFF
+accent                     = #FFFF00
+track                      = #000000
+tooltip_background         = #FFFFFF
+tooltip_text               = #000000
+tooltip_border             = #000000
+selection_background       = #FFFF00
+selection_text             = #000000
+focus_ring                 = #FFFF00
+success                    = #7CFC9A
+warning                    = #FFE066
+danger                     = #FF7C7C
+sidebar_background         = #000000
+titlebar_background        = #000000
+titlebar_text              = #FFFFFF
+titlebar_border            = #FFFFFF
+titlebar_button_hover      = #FFFF00
+titlebar_button_pressed    = #FFFF00

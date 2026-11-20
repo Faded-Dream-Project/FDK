@@ -344,6 +344,42 @@ static void uninstall_theme(void) {
     FDK_INFO("theme: setting cleared — back to the built-in theme");
 }
 
+/* The high-contrast variant pass (H2, 2026-11-20): when the
+ * desktop asks for high contrast and the resolved theme has a
+ * "-highcontrast" sibling face, prefer it — the same discovery
+ * and the same posture as the scheme pass below (no sibling
+ * shipped = follow nothing; a sibling that fails to load is loud
+ * and the base stays). Runs BEFORE the scheme pass so the
+ * accessibility statement wins when both preferences are set. */
+static void apply_contrast_variant(char *name, size_t name_cap,
+                                   fdk_theme **t_io,
+                                   const char **origin_io) {
+    if (!fdk_system_prefers_high_contrast()) {
+        return;
+    }
+    char variant[FDK_THEME_STRING_MAX];
+    if ((size_t)snprintf(variant, sizeof variant, "%s-highcontrast",
+                         name) >= sizeof variant) {
+        return; /* name + suffix cannot exist: skip */
+    }
+    fdk_result r = FDK_OK;
+    fdk_theme *vt = fdk_theme_find(variant, &r);
+    if (vt == NULL) {
+        if (r != FDK_ERR_NOT_FOUND) {
+            FDK_WARN("theme: contrast variant '%s' failed to load "
+                     "(error %d); staying on '%s'",
+                     variant, (int)r, name);
+        }
+        return; /* the common case: no sibling shipped */
+    }
+    FDK_INFO("theme: contrast variant — '%s' prefers '%s'", name,
+             fdk_theme_name(vt));
+    fdk_theme_destroy(*t_io);
+    *t_io = vt;
+    snprintf(name, name_cap, "%s", fdk_theme_name(vt));
+    *origin_io = "the desktop's high-contrast variant";
+}
+
 /* The scheme-variant pass (1.0.0): when the desktop prefers a
  * scheme and the resolved theme has a sibling face for it, prefer
  * the sibling. Sibling naming: "<internal name>-dark" /
@@ -411,12 +447,43 @@ static void apply_resolved(void) {
     fdk_theme *t = resolve_theme(name, sizeof name, &origin);
     if (t == NULL) {
         if (name[0] == '\0') {
-            /* Nothing resolvable: only act when a previous install
-             * must be retired (reset-to-default at runtime). */
-            uninstall_theme();
+            /* Nothing resolvable from any preference channel. The
+             * built-in stays the answer — but the desktop's ACCESS
+             * statement still applies to it (H2): a user asking for
+             * high contrast gets it without their app having chosen
+             * a theme first. Probe the SHIPPED high-contrast face;
+             * the search path not carrying one (third-party
+             * built-ins) changes nothing. */
+            fdk_theme *vt = NULL;
+            if (fdk_system_prefers_high_contrast()) {
+                fdk_result pr = FDK_OK;
+                vt = fdk_theme_find("faded-dream-highcontrast", &pr);
+                if (vt == NULL && pr != FDK_ERR_NOT_FOUND) {
+                    FDK_WARN("theme: the high-contrast face failed "
+                             "to load (error %d); the built-in "
+                             "stays", (int)pr);
+                }
+            }
+            if (vt != NULL) {
+                install_theme(vt, "faded-dream-highcontrast",
+                              "the desktop's high-contrast variant");
+            } else {
+                /* No access statement (or no face shipped): only
+                 * act when a previous install must be retired
+                 * (reset-to-default at runtime). */
+                uninstall_theme();
+            }
         }
         return;
     }
+    /* The high-contrast pass FIRST (H2): a -highcontrast sibling
+     * is the accessibility statement and wins over the scheme
+     * sibling — apply_contrast_variant may replace the base with
+     * faded-dream-highcontrast, and the scheme pass then runs
+     * against THAT name (a face with no -dark sibling follows
+     * nothing further, which is correct: one accessibility face
+     * is the whole statement). */
+    apply_contrast_variant(name, sizeof name, &t, &origin);
     apply_scheme_variant(name, sizeof name, &t, &origin);
     if (g_installed != NULL && strcmp(name, g_installed_name) == 0) {
         fdk_theme_destroy(t); /* same theme: no repaint storm */

@@ -519,6 +519,26 @@ fdk_color_scheme fdk_system_color_scheme(void);
  * changes widget timing behavior and needs its own decision. */
 bool fdk_system_prefers_reduced_motion(void);
 
+/* ---- High contrast (1.0.0-dev; ACCESSIBILITY-AUDIT.md H2, final
+ * third) -------------------------------------------------------------------
+ *
+ * The desktop's high-contrast preference, resolved like the others:
+ * the $FDK_HIGH_CONTRAST environment override ("1"/"high" forces on,
+ * "0"/"none" forces off), then XSETTINGS Gtk/HighContrast on X11
+ * (1 = enabled), then the portal's org.freedesktop.appearance
+ * "contrast" (1 = high; the key postdates color-scheme, so older
+ * portals simply do not answer and the channel stays quiet), then
+ * the default: NOT high contrast. Live-followed; UI-thread only.
+ *
+ * What it selects: the theme engine's sibling-face pass prefers a
+ * "-highcontrast" face when one is shipped (the same opt-in as
+ * -dark/-light; a theme without the sibling follows nothing). It
+ * is NEVER the default — only the desktop's statement or the env
+ * override selects it. faded-dream ships one:
+ * faded-dream-highcontrast, WCAG AAA (>= 7:1) on every
+ * text/background token pair (pinned by the theme test). */
+bool fdk_system_prefers_high_contrast(void);
+
 /* ---- UI metrics (1.0.0) ---------------------------------------------------
  *
  * The process's UI font size and scale — one answer, resolved like

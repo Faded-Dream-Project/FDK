@@ -858,6 +858,7 @@
     <elf-symbol name='fdk_surface_push_clip' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='fdk_surface_save_png' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='fdk_system_color_scheme' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='fdk_system_prefers_high_contrast' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='fdk_system_prefers_reduced_motion' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='fdk_text_count_uncovered' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='fdk_text_shaping_available' version='FDK_1.0' is-default-version='yes' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
@@ -1459,7 +1460,7 @@
     <elf-symbol name='wl_surface_interface' type='object-type' binding='global-binding' visibility='default-visibility' is-defined='no'/>
     <elf-symbol name='wl_touch_interface' type='object-type' binding='global-binding' visibility='default-visibility' is-defined='no'/>
   </undefined-elf-variable-symbols>
-  <abi-instr address-size='64' path='src/core/alloc.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/core/alloc.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <type-decl name='char' size-in-bits='8' hash='65b2d157027b431a' id='type-id-1'/>
     <enum-decl name='fdk_log_level' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_log.h' line='23' column='1' hash='0b3b7f2b97d1f0e4' id='type-id-2'>
       <underlying-type type-id='type-id-3'/>
@@ -1506,7 +1507,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/core/clipboard.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/core/clipboard.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <type-decl name='bool' size-in-bits='8' hash='5ba96bb22f4237fb' id='type-id-13'/>
     <type-decl name='double' size-in-bits='64' hash='e9e9b320886d9aa6' id='type-id-14'/>
     <enum-decl name='fdk_event_type' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_event.h' line='26' column='1' hash='0791b52b2824fd42' id='type-id-15'>
@@ -2486,7 +2487,7 @@
     <typedef-decl name='fdk_surface_format' type-id='type-id-19' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_surface.h' line='73' column='1' hash='14700a6d4744695d' id='type-id-160'/>
     <typedef-decl name='fdk_tablet_event' type-id='type-id-162' size-in-bits='256' filepath='include/fdk/fdk_event.h' line='499' column='1' id='type-id-199'/>
     <typedef-decl name='fdk_timer' type-id='type-id-163' size-in-bits='320' filepath='include/fdk/fdk_types.h' line='92' column='1' id='type-id-200'/>
-    <typedef-decl name='fdk_timer_fn' type-id='type-id-201' size-in-bits='64' filepath='include/fdk/fdk_core.h' line='252' column='1' hash='fd7a63c0c6c822c4' id='type-id-165'/>
+    <typedef-decl name='fdk_timer_fn' type-id='type-id-201' size-in-bits='64' filepath='include/fdk/fdk_core.h' line='290' column='1' hash='fd7a63c0c6c822c4' id='type-id-165'/>
     <typedef-decl name='fdk_touch_event' type-id='type-id-166' size-in-bits='96' filepath='include/fdk/fdk_event.h' line='454' column='1' id='type-id-202'/>
     <typedef-decl name='fdk_u32' type-id='type-id-203' size-in-bits='32' filepath='include/fdk/fdk_types.h' line='26' column='1' hash='e66b43f97c38e87a' id='type-id-50'/>
     <typedef-decl name='fdk_u64' type-id='type-id-204' size-in-bits='64' filepath='include/fdk/fdk_types.h' line='28' column='1' hash='8fdc5eea2983a729' id='type-id-149'/>
@@ -3741,7 +3742,7 @@
       <return type-id='type-id-9'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/core/context.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/core/context.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_align' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_layout.h' line='57' column='1' hash='2e66b5cdc566ef1a' id='type-id-399'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_ALIGN_FILL' value='0'/>
@@ -4536,67 +4537,67 @@
       <parameter type-id='type-id-26'/>
       <return type-id='type-id-26'/>
     </function-decl>
-    <function-decl name='fdk_timer_add' mangled-name='fdk_timer_add' filepath='src/core/context.c' line='63' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_timer_add@@FDK_1.0' hash='5a9553b82130867d'>
-      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='63' column='1'/>
-      <parameter type-id='type-id-50' name='interval_ms' filepath='src/core/context.c' line='63' column='1'/>
-      <parameter type-id='type-id-13' name='repeating' filepath='src/core/context.c' line='64' column='1'/>
-      <parameter type-id='type-id-165' name='fn' filepath='src/core/context.c' line='64' column='1'/>
-      <parameter type-id='type-id-9' name='user_data' filepath='src/core/context.c' line='65' column='1'/>
+    <function-decl name='fdk_timer_add' mangled-name='fdk_timer_add' filepath='src/core/context.c' line='67' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_timer_add@@FDK_1.0' hash='5a9553b82130867d'>
+      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='67' column='1'/>
+      <parameter type-id='type-id-50' name='interval_ms' filepath='src/core/context.c' line='67' column='1'/>
+      <parameter type-id='type-id-13' name='repeating' filepath='src/core/context.c' line='68' column='1'/>
+      <parameter type-id='type-id-165' name='fn' filepath='src/core/context.c' line='68' column='1'/>
+      <parameter type-id='type-id-9' name='user_data' filepath='src/core/context.c' line='69' column='1'/>
       <return type-id='type-id-43'/>
     </function-decl>
-    <function-decl name='fdk_timer_remove' mangled-name='fdk_timer_remove' filepath='src/core/context.c' line='118' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_timer_remove@@FDK_1.0' hash='c621ff8193ab4130'>
-      <parameter type-id='type-id-43' name='timer' filepath='src/core/context.c' line='118' column='1'/>
+    <function-decl name='fdk_timer_remove' mangled-name='fdk_timer_remove' filepath='src/core/context.c' line='122' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_timer_remove@@FDK_1.0' hash='c621ff8193ab4130'>
+      <parameter type-id='type-id-43' name='timer' filepath='src/core/context.c' line='122' column='1'/>
       <return type-id='type-id-10'/>
     </function-decl>
-    <function-decl name='fdk_timer_reset' mangled-name='fdk_timer_reset' filepath='src/core/context.c' line='133' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_timer_reset@@FDK_1.0' hash='b78b7321f14659f1'>
-      <parameter type-id='type-id-43' name='timer' filepath='src/core/context.c' line='133' column='1'/>
-      <parameter type-id='type-id-50' name='interval_ms' filepath='src/core/context.c' line='133' column='1'/>
+    <function-decl name='fdk_timer_reset' mangled-name='fdk_timer_reset' filepath='src/core/context.c' line='137' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_timer_reset@@FDK_1.0' hash='b78b7321f14659f1'>
+      <parameter type-id='type-id-43' name='timer' filepath='src/core/context.c' line='137' column='1'/>
+      <parameter type-id='type-id-50' name='interval_ms' filepath='src/core/context.c' line='137' column='1'/>
       <return type-id='type-id-10'/>
     </function-decl>
-    <function-decl name='fdk_init_ex' mangled-name='fdk_init_ex' filepath='src/core/context.c' line='425' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_init_ex@@FDK_1.0' hash='9881f3f1334fc37e'>
-      <parameter type-id='type-id-476' name='out_ctx' filepath='src/core/context.c' line='425' column='1'/>
-      <parameter type-id='type-id-466' name='options' filepath='src/core/context.c' line='426' column='1'/>
-      <parameter type-id='type-id-6' name='opts_size' filepath='src/core/context.c' line='426' column='1'/>
+    <function-decl name='fdk_init_ex' mangled-name='fdk_init_ex' filepath='src/core/context.c' line='429' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_init_ex@@FDK_1.0' hash='9881f3f1334fc37e'>
+      <parameter type-id='type-id-476' name='out_ctx' filepath='src/core/context.c' line='429' column='1'/>
+      <parameter type-id='type-id-466' name='options' filepath='src/core/context.c' line='430' column='1'/>
+      <parameter type-id='type-id-6' name='opts_size' filepath='src/core/context.c' line='430' column='1'/>
       <return type-id='type-id-195'/>
     </function-decl>
-    <function-decl name='fdk_init' mangled-name='fdk_init' filepath='src/core/context.c' line='602' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_init@@FDK_1.0' hash='37b98f488519a7e5'>
-      <parameter type-id='type-id-476' name='out_ctx' filepath='src/core/context.c' line='602' column='1'/>
-      <parameter type-id='type-id-466' name='options' filepath='src/core/context.c' line='602' column='1'/>
+    <function-decl name='fdk_init' mangled-name='fdk_init' filepath='src/core/context.c' line='607' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_init@@FDK_1.0' hash='37b98f488519a7e5'>
+      <parameter type-id='type-id-476' name='out_ctx' filepath='src/core/context.c' line='607' column='1'/>
+      <parameter type-id='type-id-466' name='options' filepath='src/core/context.c' line='607' column='1'/>
       <return type-id='type-id-195'/>
     </function-decl>
-    <function-decl name='fdk_pump_events' mangled-name='fdk_pump_events' filepath='src/core/context.c' line='608' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_pump_events@@FDK_1.0' hash='7f926ebf119ced7c'>
-      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='608' column='1'/>
-      <parameter type-id='type-id-26' name='timeout_ms' filepath='src/core/context.c' line='608' column='1'/>
+    <function-decl name='fdk_pump_events' mangled-name='fdk_pump_events' filepath='src/core/context.c' line='615' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_pump_events@@FDK_1.0' hash='7f926ebf119ced7c'>
+      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='615' column='1'/>
+      <parameter type-id='type-id-26' name='timeout_ms' filepath='src/core/context.c' line='615' column='1'/>
       <return type-id='type-id-26'/>
     </function-decl>
-    <function-decl name='fdk_run' mangled-name='fdk_run' filepath='src/core/context.c' line='895' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_run@@FDK_1.0' hash='b49d70cfe3c04697#2'>
+    <function-decl name='fdk_run' mangled-name='fdk_run' filepath='src/core/context.c' line='902' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_run@@FDK_1.0' hash='b49d70cfe3c04697#2'>
       <parameter type-id='type-id-164'/>
       <return type-id='type-id-10'/>
     </function-decl>
-    <function-decl name='fdk_quit' mangled-name='fdk_quit' filepath='src/core/context.c' line='953' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_quit@@FDK_1.0' hash='b49d70cfe3c04697#2'>
+    <function-decl name='fdk_quit' mangled-name='fdk_quit' filepath='src/core/context.c' line='960' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_quit@@FDK_1.0' hash='b49d70cfe3c04697#2'>
       <parameter type-id='type-id-164'/>
       <return type-id='type-id-10'/>
     </function-decl>
-    <function-decl name='fdk_shutdown' mangled-name='fdk_shutdown' filepath='src/core/context.c' line='960' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_shutdown@@FDK_1.0' hash='b49d70cfe3c04697#2'>
+    <function-decl name='fdk_shutdown' mangled-name='fdk_shutdown' filepath='src/core/context.c' line='967' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_shutdown@@FDK_1.0' hash='b49d70cfe3c04697#2'>
       <parameter type-id='type-id-164'/>
       <return type-id='type-id-10'/>
     </function-decl>
-    <function-decl name='fdk_ext_modal_run' mangled-name='fdk_ext_modal_run' filepath='src/core/context.c' line='1114' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ext_modal_run@@FDK_1.0' hash='127303374b3232c7#2'>
-      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='1114' column='1'/>
+    <function-decl name='fdk_ext_modal_run' mangled-name='fdk_ext_modal_run' filepath='src/core/context.c' line='1121' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ext_modal_run@@FDK_1.0' hash='127303374b3232c7#2'>
+      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='1121' column='1'/>
       <return type-id='type-id-195'/>
     </function-decl>
-    <function-decl name='fdk_ext_modal_quit' mangled-name='fdk_ext_modal_quit' filepath='src/core/context.c' line='1143' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ext_modal_quit@@FDK_1.0' hash='b49d70cfe3c04697#2'>
+    <function-decl name='fdk_ext_modal_quit' mangled-name='fdk_ext_modal_quit' filepath='src/core/context.c' line='1150' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ext_modal_quit@@FDK_1.0' hash='b49d70cfe3c04697#2'>
       <parameter type-id='type-id-164'/>
       <return type-id='type-id-10'/>
     </function-decl>
-    <function-decl name='fdk_ext_modal_depth' mangled-name='fdk_ext_modal_depth' filepath='src/core/context.c' line='1156' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ext_modal_depth@@FDK_1.0' hash='fee94ee636a15b01#2'>
-      <parameter type-id='type-id-462' name='ctx' filepath='src/core/context.c' line='1156' column='1'/>
+    <function-decl name='fdk_ext_modal_depth' mangled-name='fdk_ext_modal_depth' filepath='src/core/context.c' line='1163' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ext_modal_depth@@FDK_1.0' hash='fee94ee636a15b01#2'>
+      <parameter type-id='type-id-462' name='ctx' filepath='src/core/context.c' line='1163' column='1'/>
       <return type-id='type-id-26'/>
     </function-decl>
-    <function-decl name='fdk_context_render_mode' mangled-name='fdk_context_render_mode' filepath='src/core/context.c' line='1191' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_context_render_mode@@FDK_1.0' hash='adc51aece0fbd931'>
-      <parameter type-id='type-id-462' name='ctx' filepath='src/core/context.c' line='1191' column='1'/>
-      <parameter type-id='type-id-478' name='active' filepath='src/core/context.c' line='1192' column='1'/>
-      <parameter type-id='type-id-213' name='reason' filepath='src/core/context.c' line='1193' column='1'/>
+    <function-decl name='fdk_context_render_mode' mangled-name='fdk_context_render_mode' filepath='src/core/context.c' line='1198' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_context_render_mode@@FDK_1.0' hash='adc51aece0fbd931'>
+      <parameter type-id='type-id-462' name='ctx' filepath='src/core/context.c' line='1198' column='1'/>
+      <parameter type-id='type-id-478' name='active' filepath='src/core/context.c' line='1199' column='1'/>
+      <parameter type-id='type-id-213' name='reason' filepath='src/core/context.c' line='1200' column='1'/>
       <return type-id='type-id-10'/>
     </function-decl>
     <typedef-decl name='fdk_platform_window' type-id='type-id-521' filepath='src/platform/platform_internal.h' line='35' column='1' id='type-id-495'/>
@@ -4660,13 +4661,13 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/core/error.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/core/error.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_result_to_string' mangled-name='fdk_result_to_string' filepath='src/core/error.c' line='3' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_result_to_string@@FDK_1.0' hash='9fd769673d6bc092'>
       <parameter type-id='type-id-195'/>
       <return type-id='type-id-8'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/core/extfd.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/core/extfd.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk_ext_fd_fn' type-id='type-id-526' size-in-bits='64' filepath='include/fdk/fdk_extend.h' line='907' column='1' hash='fd7a63c0c6c822c4' id='type-id-373'/>
     <typedef-decl name='fdk_ext_fd_source' type-id='type-id-241' size-in-bits='320' filepath='include/fdk/fdk_extend.h' line='902' column='1' id='type-id-527'/>
     <qualified-type-def type-id='type-id-527' const='yes' hash='2b5084b7012f67f3' id='type-id-528'/>
@@ -4704,7 +4705,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/core/log.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/core/log.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-1' size-in-bits='8' hash='f7aed1c6cc6e7b3c' id='type-id-534'>
       <subrange length='1' lower-bound='0' upper-bound='0' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='eba0a2b392137dcb' id='type-id-535'/>
     </array-type-def>
@@ -4941,7 +4942,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/core/prefs.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/core/prefs.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-434' size-in-bits='192' hash='9904ddbe9e0e1da6' id='type-id-570'>
       <subrange length='3' lower-bound='0' upper-bound='2' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='30d99d19f0f4b2ea' id='type-id-571'/>
     </array-type-def>
@@ -5241,7 +5242,7 @@
       <return type-id='type-id-8'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/core/shortcut.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/core/shortcut.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-66' size-in-bits='64' hash='29532b01862fafc5' id='type-id-597'/>
     <function-decl name='fdk_shortcut_parse' mangled-name='fdk_shortcut_parse' filepath='src/core/shortcut.c' line='383' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_shortcut_parse@@FDK_1.0' hash='5b7a68929e121545'>
       <parameter type-id='type-id-8' name='spec' filepath='src/core/shortcut.c' line='383' column='1'/>
@@ -5257,7 +5258,7 @@
       <return type-id='type-id-13'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/core/thread.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/core/thread.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-1' size-in-bits='320' hash='e7f9696e246a3049' id='type-id-598'>
       <subrange length='40' lower-bound='0' upper-bound='39' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='6281bd35fbce8744' id='type-id-599'/>
     </array-type-def>
@@ -5604,11 +5605,11 @@
       <return type-id='type-id-26'/>
     </function-decl>
     <function-decl name='fdk__thread_wake_fd' mangled-name='fdk__thread_wake_fd' filepath='src/core/thread.c' line='206' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk__thread_wake_fd@@FDK_1.0' hash='fee94ee636a15b01#2'>
-      <parameter type-id='type-id-462' name='ctx' filepath='src/core/context.c' line='1156' column='1'/>
+      <parameter type-id='type-id-462' name='ctx' filepath='src/core/context.c' line='1163' column='1'/>
       <return type-id='type-id-26'/>
     </function-decl>
     <function-decl name='fdk__thread_init' mangled-name='fdk__thread_init' filepath='src/core/thread.c' line='214' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk__thread_init@@FDK_1.0' hash='127303374b3232c7#2'>
-      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='1114' column='1'/>
+      <parameter type-id='type-id-164' name='ctx' filepath='src/core/context.c' line='1121' column='1'/>
       <return type-id='type-id-195'/>
     </function-decl>
     <function-decl name='fdk__thread_shutdown' mangled-name='fdk__thread_shutdown' filepath='src/core/thread.c' line='249' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk__thread_shutdown@@FDK_1.0' hash='b49d70cfe3c04697#2'>
@@ -5667,7 +5668,7 @@
       <return type-id='type-id-9'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/core/undo.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/core/undo.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='fdk_undo_op' is-struct='yes' visibility='default' size-in-bits='256' filepath='include/fdk/fdk_undo.h' line='57' column='1' hash='b88492822fd5c5a1' id='type-id-671'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='user_data' type-id='type-id-9' visibility='default' filepath='include/fdk/fdk_undo.h' line='58' column='1'/>
@@ -5769,7 +5770,7 @@
       <return type-id='type-id-6'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/core/version.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/core/version.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_get_version' mangled-name='fdk_get_version' filepath='src/core/version.c' line='4' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_get_version@@FDK_1.0' hash='388da3fa973fde78'>
       <return type-id='type-id-26'/>
     </function-decl>
@@ -5783,7 +5784,7 @@
       <return type-id='type-id-8'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/dbus/dbus_address.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/dbus/dbus_address.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-1' size-in-bits='112' hash='32c03ac42667596f' id='type-id-683'>
       <subrange length='14' lower-bound='0' upper-bound='13' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='73cf96c2d1f03103' id='type-id-684'/>
     </array-type-def>
@@ -5882,9 +5883,9 @@
       <return type-id='type-id-36'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/dbus/dbus_auth.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/dbus/dbus_auth.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
   </abi-instr>
-  <abi-instr address-size='64' path='src/dbus/dbus_connection.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/dbus/dbus_connection.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-1' size-in-bits='864' hash='f04b2d0666a0a274' id='type-id-706'>
       <subrange length='108' lower-bound='0' upper-bound='107' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='dd90b41895efe02d' id='type-id-707'/>
     </array-type-def>
@@ -6644,9 +6645,9 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/dbus/dbus_marshal.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/dbus/dbus_marshal.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
   </abi-instr>
-  <abi-instr address-size='64' path='src/dbus/dbus_message.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/dbus/dbus_message.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_dbus_message_new_method_call' mangled-name='fdk_dbus_message_new_method_call' filepath='src/dbus/dbus_message.c' line='66' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_dbus_message_new_method_call@@FDK_1.0' hash='66ee915eefc80950'>
       <parameter type-id='type-id-8'/>
       <parameter type-id='type-id-8'/>
@@ -6789,7 +6790,7 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/dbus/dbus_types.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/dbus/dbus_types.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_dbus_value_new_byte' mangled-name='fdk_dbus_value_new_byte' filepath='src/dbus/dbus_types.c' line='47' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_dbus_value_new_byte@@FDK_1.0' hash='5d88101a02d7de22'>
       <parameter type-id='type-id-208'/>
       <return type-id='type-id-739'/>
@@ -6978,7 +6979,7 @@
       <return type-id='type-id-36'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/desktop/atspi.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/desktop/atspi.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='__builtin_memset' mangled-name='memset' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='memset' hash='7f32ffea222edbe7'>
       <return type-id='type-id-10'/>
     </function-decl>
@@ -7017,7 +7018,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/desktop/dbusmenu_server.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/desktop/dbusmenu_server.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_tray_menu_check' naming-typedef-id='type-id-800' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_tray.h' line='77' column='1' hash='395428e641e259df' id='type-id-801'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_TRAY_MENU_CHECK_NONE' value='0'/>
@@ -7426,7 +7427,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/desktop/idle.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/desktop/idle.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_idle_inhibit_status' naming-typedef-id='type-id-843' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_idle.h' line='43' column='1' hash='34e1717920331059' id='type-id-844'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_IDLE_INHIBIT_ACTIVE' value='0'/>
@@ -7462,7 +7463,7 @@
     <typedef-decl name='fdk_platform_window' type-id='type-id-855' filepath='src/platform/platform_internal.h' line='35' column='1' id='type-id-852'/>
     <typedef-decl name='fdk_platform_connection' type-id='type-id-854' filepath='src/platform/platform_internal.h' line='38' column='1' id='type-id-850'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/desktop/notify_client.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/desktop/notify_client.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_notify_status' naming-typedef-id='type-id-856' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_notify.h' line='81' column='1' hash='eb4fa6e6ea638875' id='type-id-857'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_NOTIFY_STATUS_NO_BUS' value='0'/>
@@ -7708,7 +7709,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/desktop/open.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/desktop/open.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='__builtin_strlen' mangled-name='strlen' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='strlen' hash='7f32ffea222edbe7'>
       <return type-id='type-id-10'/>
     </function-decl>
@@ -7762,7 +7763,7 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/desktop/portal_file_chooser.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/desktop/portal_file_chooser.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='fdk__portal_saved_options' type-id='type-id-891' visibility='default' filepath='src/desktop/portal_file_chooser.c' line='58' column='1'/>
     <var-decl name='fdk__portal_saved_valid' type-id='type-id-26' visibility='default' filepath='src/desktop/portal_file_chooser.c' line='59' column='1'/>
     <var-decl name='g_flight_on_done' type-id='type-id-892' visibility='default' filepath='src/desktop/portal_file_chooser.c' line='61' column='1'/>
@@ -7776,7 +7777,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/desktop/session.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/desktop/session.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_session_reason' naming-typedef-id='type-id-895' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_session.h' line='71' column='1' hash='58720a879c80f396' id='type-id-896'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_SESSION_REASON_LAUNCH' value='1'/>
@@ -7857,7 +7858,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/desktop/toplevel.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/desktop/toplevel.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='fdk_toplevel_info' is-struct='yes' visibility='default' size-in-bits='2752' filepath='include/fdk/fdk_toplevel.h' line='53' column='1' hash='fd5b11408becbf73' id='type-id-909'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='struct_size' type-id='type-id-6' visibility='default' filepath='include/fdk/fdk_toplevel.h' line='54' column='1'/>
@@ -7934,7 +7935,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/desktop/tray_item.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/desktop/tray_item.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='fdk_tray_item_options' is-struct='yes' naming-typedef-id='type-id-919' visibility='default' size-in-bits='192' filepath='include/fdk/fdk_tray.h' line='151' column='1' hash='f6e3dc8225f670f8' id='type-id-920'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='id' type-id='type-id-8' visibility='default' filepath='include/fdk/fdk_tray.h' line='152' column='1'/>
@@ -8017,7 +8018,7 @@
       <return type-id='type-id-10'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/i18n/catalog.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/i18n/catalog.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-36' size-in-bits='384' hash='31239b1222bd5f65' id='type-id-927'>
       <subrange length='6' lower-bound='0' upper-bound='5' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='1c0e592c7ffbdbf5' id='type-id-928'/>
     </array-type-def>
@@ -8145,7 +8146,7 @@
       <return type-id='type-id-8'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/i18n/datetime.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/i18n/datetime.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk_i18n_names' type-id='type-id-940' size-in-bits='2560' filepath='src/i18n/i18n_internal.h' line='31' column='1' id='type-id-941'/>
     <typedef-decl name='fdk_i18n_rules' type-id='type-id-942' size-in-bits='960' filepath='src/i18n/i18n_internal.h' line='85' column='1' id='type-id-943'/>
     <function-decl name='fdk_date_is_leap_year' mangled-name='fdk_date_is_leap_year' filepath='src/i18n/datetime.c' line='28' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_date_is_leap_year@@FDK_1.0' hash='bf8627a41670229c'>
@@ -8188,7 +8189,7 @@
     </function-decl>
     <var-decl name='fdk__i18n_names_en' type-id='type-id-949' visibility='default' filepath='src/i18n/i18n_internal.h' line='94' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/i18n/format.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/i18n/format.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='fdk_number_options' is-struct='yes' visibility='default' size-in-bits='128' filepath='include/fdk/fdk_i18n.h' line='150' column='1' hash='fa67088fabad3b61' id='type-id-950'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='min_fraction_digits' type-id='type-id-26' visibility='default' filepath='include/fdk/fdk_i18n.h' line='151' column='1'/>
@@ -8239,7 +8240,7 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/i18n/locale.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/i18n/locale.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-955' size-in-bits='unknown' hash='8e24a005654d0cd1' id='type-id-956'>
       <subrange length='unknown' lower-bound='0' upper-bound='0' size-in-bits='64' is-anonymous='yes' hash='eba0a2b392137dcb' id='type-id-957'/>
     </array-type-def>
@@ -8267,7 +8268,7 @@
       <return type-id='type-id-962'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/i18n/plural.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/i18n/plural.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-963' size-in-bits='64' hash='5370b3249f8e25d3' id='type-id-964'/>
     <function-decl name='fdk_plural_operands_from_int' mangled-name='fdk_plural_operands_from_int' filepath='src/i18n/plural.c' line='188' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_plural_operands_from_int@@FDK_1.0' hash='bef92997323eb743'>
       <parameter type-id='type-id-395' name='value' filepath='src/i18n/plural.c' line='188' column='1'/>
@@ -8290,7 +8291,7 @@
       <return type-id='type-id-962'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/layout/box.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/layout/box.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <qualified-type-def type-id='type-id-421' const='yes' hash='a46253f658273ba4' id='type-id-965'/>
     <function-decl name='fdk_box_create' mangled-name='fdk_box_create' filepath='src/layout/box.c' line='460' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_box_create@@FDK_1.0' hash='f0a07f70634ba497'>
       <parameter type-id='type-id-390' name='parent' filepath='src/layout/box.c' line='460' column='1'/>
@@ -8336,7 +8337,7 @@
     <var-decl name='fdk_revealer_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/widgets_internal.h' line='47' column='1'/>
     <var-decl name='fdk_stack_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/widgets_internal.h' line='48' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/layout/grid.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/layout/grid.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_grid_create' mangled-name='fdk_grid_create' filepath='src/layout/grid.c' line='442' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_grid_create@@FDK_1.0' hash='ef56ad2067141d4c'>
       <parameter type-id='type-id-390' name='parent' filepath='src/layout/grid.c' line='442' column='1'/>
       <parameter type-id='type-id-58' name='rows' filepath='src/layout/grid.c' line='442' column='1'/>
@@ -8382,7 +8383,7 @@
     </function-decl>
     <var-decl name='fdk_grid_class_def' type-id='type-id-965' visibility='default' filepath='src/layout/layout_internal.h' line='47' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/cursor_theme.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/cursor_theme.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <qualified-type-def type-id='type-id-36' restrict='yes' hash='566dfacc48804f50' id='type-id-967'/>
     <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-968'/>
     <function-decl name='fgets' filepath='/usr/include/stdio.h' line='654' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fgets' hash='fd5632ef4c98da5a'>
@@ -8393,37 +8394,37 @@
     </function-decl>
     <var-decl name='fdk__cursor_named_names' type-id='type-id-969' visibility='default' filepath='src/platform/platform_internal.h' line='185' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/cursor-shape-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/cursor-shape-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='wl_pointer_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/cursor-shape-v1-protocol.c' line='40' column='1' elf-symbol-id='wl_pointer_interface'/>
     <var-decl name='wp_cursor_shape_device_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/cursor-shape-v1-protocol.c' line='41' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/ext-session-lock-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/ext-session-lock-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='ext_session_lock_surface_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/ext-session-lock-v1-protocol.c' line='30' column='1'/>
     <var-decl name='ext_session_lock_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/ext-session-lock-v1-protocol.c' line='31' column='1'/>
     <var-decl name='wl_output_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/ext-session-lock-v1-protocol.c' line='32' column='1' elf-symbol-id='wl_output_interface'/>
     <var-decl name='wl_surface_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/ext-session-lock-v1-protocol.c' line='33' column='1' elf-symbol-id='wl_surface_interface'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/fractional-scale-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/fractional-scale-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='wp_fractional_scale_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/fractional-scale-v1-protocol.c' line='42' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/idle-inhibit-unstable-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/idle-inhibit-unstable-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='zwp_idle_inhibitor_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/idle-inhibit-unstable-v1-protocol.c' line='42' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/input-method-unstable-v2-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/input-method-unstable-v2-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='wl_seat_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/input-method-unstable-v2-protocol.c' line='37' column='1' elf-symbol-id='wl_seat_interface'/>
     <var-decl name='zwp_input_method_keyboard_grab_v2_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/input-method-unstable-v2-protocol.c' line='39' column='1'/>
     <var-decl name='zwp_input_method_v2_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/input-method-unstable-v2-protocol.c' line='40' column='1'/>
     <var-decl name='zwp_input_popup_surface_v2_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/input-method-unstable-v2-protocol.c' line='41' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/presentation-time-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/presentation-time-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='wp_presentation_feedback_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/presentation-time-protocol.c' line='43' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/primary-selection-unstable-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/primary-selection-unstable-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='zwp_primary_selection_device_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/primary-selection-unstable-v1-protocol.c' line='42' column='1'/>
     <var-decl name='zwp_primary_selection_offer_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/primary-selection-unstable-v1-protocol.c' line='43' column='1'/>
     <var-decl name='zwp_primary_selection_source_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/primary-selection-unstable-v1-protocol.c' line='44' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/tablet-unstable-v2-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/tablet-unstable-v2-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='zwp_tablet_pad_group_v2_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/tablet-unstable-v2-protocol.c' line='46' column='1'/>
     <var-decl name='zwp_tablet_pad_ring_v2_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/tablet-unstable-v2-protocol.c' line='47' column='1'/>
     <var-decl name='zwp_tablet_pad_strip_v2_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/tablet-unstable-v2-protocol.c' line='48' column='1'/>
@@ -8432,45 +8433,45 @@
     <var-decl name='zwp_tablet_tool_v2_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/tablet-unstable-v2-protocol.c' line='51' column='1'/>
     <var-decl name='zwp_tablet_v2_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/tablet-unstable-v2-protocol.c' line='52' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/tearing-control-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/tearing-control-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='wp_tearing_control_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/tearing-control-v1-protocol.c' line='42' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/text-input-unstable-v3-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/text-input-unstable-v3-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='zwp_text_input_v3_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/text-input-unstable-v3-protocol.c' line='38' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/viewporter-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/viewporter-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='wp_viewport_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/viewporter-protocol.c' line='42' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/virtual-keyboard-unstable-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/virtual-keyboard-unstable-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='zwp_virtual_keyboard_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/virtual-keyboard-unstable-v1-protocol.c' line='45' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/wlr-foreign-toplevel-management-unstable-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/wlr-foreign-toplevel-management-unstable-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='zwlr_foreign_toplevel_handle_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/wlr-foreign-toplevel-management-unstable-v1-protocol.c' line='46' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/wlr-layer-shell-unstable-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/wlr-layer-shell-unstable-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='xdg_popup_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/wlr-layer-shell-unstable-v1-protocol.c' line='45' column='1'/>
     <var-decl name='zwlr_layer_surface_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/wlr-layer-shell-unstable-v1-protocol.c' line='46' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/xdg-activation-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/xdg-activation-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='xdg_activation_token_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/xdg-activation-v1-protocol.c' line='34' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='xdg_toplevel_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c' line='41' column='1'/>
     <var-decl name='zxdg_toplevel_decoration_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c' line='42' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/xdg-session-management-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/xdg-session-management-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='xdg_session_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/xdg-session-management-v1-protocol.c' line='43' column='1'/>
     <var-decl name='xdg_toplevel_session_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/xdg-session-management-v1-protocol.c' line='45' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/xdg-shell-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/xdg-shell-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='xdg_positioner_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/xdg-shell-protocol.c' line='49' column='1'/>
     <var-decl name='xdg_surface_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/xdg-shell-protocol.c' line='50' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/generated/xdg-toplevel-icon-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/generated/xdg-toplevel-icon-v1-protocol.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='wl_buffer_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/xdg-toplevel-icon-v1-protocol.c' line='32' column='1' elf-symbol-id='wl_buffer_interface'/>
     <var-decl name='xdg_toplevel_icon_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/xdg-toplevel-icon-v1-protocol.c' line='34' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_addon.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_addon.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-971' size-in-bits='3072' hash='04d0d5978a4e6e00' id='type-id-972'>
       <subrange length='8' lower-bound='0' upper-bound='7' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='6e87a8ff484907ad' id='type-id-973'/>
     </array-type-def>
@@ -9483,7 +9484,7 @@
       <return type-id='type-id-9'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_clipboard.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_clipboard.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='ssize_t' type-id='type-id-629' size-in-bits='64' filepath='/usr/include/stdio.h' line='78' column='1' hash='b119fe0931d2ee10' id='type-id-670'/>
     <typedef-decl name='wl_fixed_t' type-id='type-id-184' size-in-bits='32' filepath='/home/z/my-project/tools/usr/include/wayland-util.h' line='613' column='1' hash='09d17c08f594edc7' id='type-id-1146'/>
     <pointer-type-def type-id='type-id-1147' size-in-bits='64' hash='551ba7e18ed5752b' id='type-id-1148'/>
@@ -9517,7 +9518,7 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_connection.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_connection.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk_ext_surface_kind' type-id='type-id-245' size-in-bits='640' filepath='include/fdk/fdk_extend.h' line='268' column='1' id='type-id-1157'/>
     <pointer-type-def type-id='type-id-1157' size-in-bits='64' hash='67c50d52cda14522#2' id='type-id-374'/>
     <pointer-type-def type-id='type-id-1158' size-in-bits='64' id='type-id-1159'/>
@@ -9577,7 +9578,7 @@
     <var-decl name='xdg_wm_base_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/xdg-shell-client-protocol.h' line='84' column='1'/>
     <var-decl name='xdg_toplevel_icon_manager_v1_interface' type-id='type-id-970' visibility='default' filepath='src/platform/wayland/generated/xdg-toplevel-icon-v1-client-protocol.h' line='87' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_cursor.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_cursor.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='wl_display' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1170'/>
     <class-decl name='wl_proxy' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1171'/>
     <pointer-type-def type-id='type-id-1170' size-in-bits='64' id='type-id-1172'/>
@@ -9608,7 +9609,7 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_dispatch.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_dispatch.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='wl_display' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1174'/>
     <class-decl name='wl_event_queue' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1175'/>
     <pointer-type-def type-id='type-id-1174' size-in-bits='64' id='type-id-1176'/>
@@ -9636,14 +9637,14 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_dnd.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_dnd.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='wl_display' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1178'/>
     <class-decl name='wl_proxy' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1179'/>
     <pointer-type-def type-id='type-id-1178' size-in-bits='64' id='type-id-1180'/>
     <pointer-type-def type-id='type-id-1179' size-in-bits='64' id='type-id-1181'/>
     <var-decl name='wl_region_interface' type-id='type-id-970' visibility='default' filepath='/home/z/my-project/tools/usr/include/wayland-client-protocol.h' line='769' column='1' elf-symbol-id='wl_region_interface'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_egl.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_egl.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='fdk__dmabuf_egl_api' is-struct='yes' visibility='default' size-in-bits='960' filepath='src/render/dmabuf_egl_internal.h' line='14' column='1' hash='69b339a8e74800b2' id='type-id-1182'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='lib' type-id='type-id-9' visibility='default' filepath='src/render/dmabuf_egl_internal.h' line='15' column='1'/>
@@ -9806,7 +9807,7 @@
       <return type-id='type-id-9'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_ext.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_ext.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='fdk_context' is-struct='yes' visibility='default' size-in-bits='1664' filepath='src/core/context_internal.h' line='29' column='1' hash='68132b763d669b31#3' id='type-id-1222'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='backend' type-id='type-id-35' visibility='default' filepath='src/core/context_internal.h' line='30' column='1'/>
@@ -9940,7 +9941,7 @@
     </class-decl>
     <typedef-decl name='fdk_context' type-id='type-id-1222' size-in-bits='1664' filepath='include/fdk/fdk_types.h' line='85' column='1' id='type-id-1234'/>
     <typedef-decl name='fdk_timer' type-id='type-id-1225' size-in-bits='320' filepath='include/fdk/fdk_types.h' line='92' column='1' id='type-id-1235'/>
-    <typedef-decl name='fdk_timer_fn' type-id='type-id-1236' size-in-bits='64' filepath='include/fdk/fdk_core.h' line='252' column='1' hash='fd7a63c0c6c822c4#3' id='type-id-1227'/>
+    <typedef-decl name='fdk_timer_fn' type-id='type-id-1236' size-in-bits='64' filepath='include/fdk/fdk_core.h' line='290' column='1' hash='fd7a63c0c6c822c4#3' id='type-id-1227'/>
     <qualified-type-def type-id='type-id-1228' const='yes' hash='057a9951508400a3' id='type-id-1237'/>
     <qualified-type-def type-id='type-id-1232' const='yes' hash='ad34563e75e500ec' id='type-id-1238'/>
     <pointer-type-def type-id='type-id-1234' size-in-bits='64' hash='dbf4cf4694ea749c#4' id='type-id-1226'/>
@@ -10036,15 +10037,15 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_im_vk.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_im_vk.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='wl_proxy' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1262'/>
     <pointer-type-def type-id='type-id-1262' size-in-bits='64' id='type-id-1263'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_ime.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_ime.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='wl_proxy' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1264'/>
     <pointer-type-def type-id='type-id-1264' size-in-bits='64' id='type-id-1265'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_layer.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_layer.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='fdk_ext_surface_ops' is-struct='yes' visibility='default' size-in-bits='256' filepath='include/fdk/fdk_extend.h' line='285' column='1' hash='e6d443d065a9eed4' id='type-id-1266'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='struct_size' type-id='type-id-6' visibility='default' filepath='include/fdk/fdk_extend.h' line='286' column='1'/>
@@ -10086,7 +10087,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_ops.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_ops.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-378' size-in-bits='64' hash='1faabd7b21895353#2' id='type-id-1278'/>
     <qualified-type-def type-id='type-id-1279' const='yes' id='type-id-1280'/>
     <pointer-type-def type-id='type-id-1280' size-in-bits='64' id='type-id-1281'/>
@@ -10094,11 +10095,11 @@
     <pointer-type-def type-id='type-id-1282' size-in-bits='64' id='type-id-1283'/>
     <class-decl name='fdk_platform_session' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1279'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_registry.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_registry.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='wl_proxy' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1284'/>
     <pointer-type-def type-id='type-id-1284' size-in-bits='64' id='type-id-1285'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_seat.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_seat.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='xkb_compose_compile_flags' size-in-bits='32' alignment-in-bits='32' filepath='/home/z/my-project/tools/usr/include/xkbcommon/xkbcommon-compose.h' line='142' column='1' hash='b610b02d2eaa0eea' id='type-id-1286'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='XKB_COMPOSE_COMPILE_NO_FLAGS' value='0'/>
@@ -10285,19 +10286,19 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_session.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_session.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='wl_proxy' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1313'/>
     <pointer-type-def type-id='type-id-1313' size-in-bits='64' id='type-id-1314'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_session_lock.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_session_lock.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='wl_proxy' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1315'/>
     <pointer-type-def type-id='type-id-1315' size-in-bits='64' id='type-id-1316'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_tablet.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_tablet.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='wl_proxy' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1317'/>
     <pointer-type-def type-id='type-id-1317' size-in-bits='64' id='type-id-1318'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_toplevel.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_toplevel.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-1' size-in-bits='1280' hash='1ffc9e2209f2c488' id='type-id-910'>
       <subrange length='160' lower-bound='0' upper-bound='159' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='dd8476b5115dfea8' id='type-id-1319'/>
     </array-type-def>
@@ -10331,7 +10332,7 @@
     <pointer-type-def type-id='type-id-1323' size-in-bits='64' id='type-id-1321'/>
     <pointer-type-def type-id='type-id-1324' size-in-bits='64' id='type-id-379'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/wayland/wayland_window.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/wayland/wayland_window.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <qualified-type-def type-id='type-id-1326' const='yes' id='type-id-1327'/>
     <pointer-type-def type-id='type-id-1327' size-in-bits='64' id='type-id-1328'/>
     <qualified-type-def type-id='type-id-1329' const='yes' id='type-id-1330'/>
@@ -10362,7 +10363,7 @@
     </function-decl>
     <var-decl name='wl_callback_interface' type-id='type-id-970' visibility='default' filepath='/home/z/my-project/tools/usr/include/wayland-client-protocol.h' line='188' column='1' elf-symbol-id='wl_callback_interface'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_clipboard.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_clipboard.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-1344' size-in-bits='640' hash='0968a033f8f942b9' id='type-id-1345'>
       <subrange length='10' lower-bound='0' upper-bound='9' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='4e72a2f569b234f4' id='type-id-1346'/>
     </array-type-def>
@@ -12896,7 +12897,7 @@
       <return type-id='type-id-26'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_connection.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_connection.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-1549' size-in-bits='1600' hash='4b439ea14699207c' id='type-id-1550'>
       <subrange length='1' lower-bound='0' upper-bound='0' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='eba0a2b392137dcb' id='type-id-535'/>
     </array-type-def>
@@ -12970,6 +12971,11 @@
       <parameter type-id='type-id-1375'/>
       <return type-id='type-id-26'/>
     </function-decl>
+    <function-decl name='XSync' filepath='/home/z/my-project/tools/usr/include/X11/Xlib.h' line='3419' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='XSync' hash='d628501fd2223339'>
+      <parameter type-id='type-id-1375'/>
+      <parameter type-id='type-id-26'/>
+      <return type-id='type-id-26'/>
+    </function-decl>
     <function-decl name='XSetLocaleModifiers' filepath='/home/z/my-project/tools/usr/include/X11/Xlib.h' line='3563' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='XSetLocaleModifiers' hash='bac6a89264ba699c'>
       <parameter type-id='type-id-8'/>
       <return type-id='type-id-36'/>
@@ -13020,7 +13026,7 @@
       <return type-id='type-id-26'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_cursor.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_cursor.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='2' type-id='type-id-211' size-in-bits='5120' hash='fdb883a38b5928b8' id='type-id-969'>
       <subrange length='20' lower-bound='0' upper-bound='19' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='1ca9e41140ea49be' id='type-id-537'/>
       <subrange length='4' lower-bound='0' upper-bound='3' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='cee611f4a73e486c' id='type-id-603'/>
@@ -13170,7 +13176,7 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_dispatch.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_dispatch.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-1366' size-in-bits='64' hash='d800038e62d52fdb' id='type-id-1587'/>
     <pointer-type-def type-id='type-id-1408' size-in-bits='64' hash='ff0f2eadd122c8d0' id='type-id-1588'/>
     <qualified-type-def type-id='type-id-1502' const='yes' hash='10f10b67a63d01ce' id='type-id-1589'/>
@@ -13233,7 +13239,7 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_dnd.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_dnd.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='XRectangle' is-struct='yes' naming-typedef-id='type-id-1601' visibility='default' size-in-bits='64' filepath='/home/z/my-project/tools/usr/include/X11/Xlib.h' line='426' column='1' hash='66e0babc143b7b3d' id='type-id-1602'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='x' type-id='type-id-404' visibility='default' filepath='/home/z/my-project/tools/usr/include/X11/Xlib.h' line='427' column='1'/>
@@ -13355,7 +13361,7 @@
       <return type-id='type-id-10'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_events.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_events.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='_XComposeStatus' is-struct='yes' visibility='default' size-in-bits='128' filepath='/home/z/my-project/tools/usr/include/X11/Xutil.h' line='231' column='1' hash='8ca9a6150bca0a1f' id='type-id-1616'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='compose_ptr' type-id='type-id-1457' visibility='default' filepath='/home/z/my-project/tools/usr/include/X11/Xutil.h' line='232' column='1'/>
@@ -13403,7 +13409,7 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_ext.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_ext.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='XWindowChanges' is-struct='yes' naming-typedef-id='type-id-1630' visibility='default' size-in-bits='320' filepath='/home/z/my-project/tools/usr/include/X11/Xlib.h' line='395' column='1' hash='f9ab3669999751f9' id='type-id-1631'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='x' type-id='type-id-26' visibility='default' filepath='/home/z/my-project/tools/usr/include/X11/Xlib.h' line='396' column='1'/>
@@ -13782,7 +13788,7 @@
     <typedef-decl name='fdk_context' type-id='type-id-1632' size-in-bits='1664' filepath='include/fdk/fdk_types.h' line='85' column='1' id='type-id-1643'/>
     <typedef-decl name='fdk_event_callback_fn' type-id='type-id-1644' size-in-bits='64' filepath='include/fdk/fdk_event.h' line='605' column='1' hash='fd7a63c0c6c822c4#2' id='type-id-1642'/>
     <typedef-decl name='fdk_timer' type-id='type-id-1636' size-in-bits='320' filepath='include/fdk/fdk_types.h' line='92' column='1' id='type-id-1645'/>
-    <typedef-decl name='fdk_timer_fn' type-id='type-id-1646' size-in-bits='64' filepath='include/fdk/fdk_core.h' line='252' column='1' hash='fd7a63c0c6c822c4#2' id='type-id-1638'/>
+    <typedef-decl name='fdk_timer_fn' type-id='type-id-1646' size-in-bits='64' filepath='include/fdk/fdk_core.h' line='290' column='1' hash='fd7a63c0c6c822c4#2' id='type-id-1638'/>
     <typedef-decl name='fdk_window' type-id='type-id-1639' size-in-bits='4224' filepath='include/fdk/fdk_types.h' line='86' column='1' id='type-id-1647'/>
     <pointer-type-def type-id='type-id-1630' size-in-bits='64' hash='d14a0d6671c39f71' id='type-id-1648'/>
     <pointer-type-def type-id='type-id-1643' size-in-bits='64' hash='dbf4cf4694ea749c#3' id='type-id-1637'/>
@@ -13829,11 +13835,6 @@
       <parameter type-id='type-id-38'/>
       <return type-id='type-id-26'/>
     </function-decl>
-    <function-decl name='XSync' filepath='/home/z/my-project/tools/usr/include/X11/Xlib.h' line='3419' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='XSync' hash='d628501fd2223339'>
-      <parameter type-id='type-id-1375'/>
-      <parameter type-id='type-id-26'/>
-      <return type-id='type-id-26'/>
-    </function-decl>
     <function-decl name='XCreateIC' filepath='/home/z/my-project/tools/usr/include/X11/Xlib.h' line='3863' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='XCreateIC' hash='7f32ffea222edbe7'>
       <parameter type-id='type-id-1660'/>
       <parameter is-variadic='yes'/>
@@ -13878,7 +13879,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_gl.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_gl.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-1' size-in-bits='640' hash='6063e77912eaf557' id='type-id-1546'>
       <subrange length='80' lower-bound='0' upper-bound='79' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='c587c34a0fdf1156' id='type-id-1662'/>
     </array-type-def>
@@ -14217,7 +14218,7 @@
       <return type-id='type-id-9'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_ime.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_ime.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='XVaNestedList' type-id='type-id-9' filepath='/home/z/my-project/tools/usr/include/X11/Xlib.h' line='1229' column='1' id='type-id-1747'/>
     <function-decl name='XVaCreateNestedList' filepath='/home/z/my-project/tools/usr/include/X11/Xlib.h' line='3935' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='XVaCreateNestedList' hash='388da3fa973fde78'>
       <parameter type-id='type-id-26'/>
@@ -14225,13 +14226,13 @@
       <return type-id='type-id-1747'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_ops.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_ops.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk__platform_systray_ops' type-id='type-id-28' size-in-bits='192' filepath='src/platform/platform_internal.h' line='204' column='1' id='type-id-1748'/>
     <qualified-type-def type-id='type-id-1748' const='yes' hash='62319522c841744d#2' id='type-id-1749'/>
     <pointer-type-def type-id='type-id-1475' size-in-bits='64' hash='1faabd7b21895353' id='type-id-1750'/>
     <var-decl name='fdk__x11_systray_ops' type-id='type-id-1749' visibility='default' filepath='src/platform/x11/x11_platform.h' line='90' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_randr.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_randr.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='_XRRCrtcInfo' is-struct='yes' visibility='default' size-in-bits='512' filepath='/home/z/my-project/tools/usr/include/X11/extensions/Xrandr.h' line='360' column='1' hash='8b035e867f2fc90f' id='type-id-1751'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='timestamp' type-id='type-id-1378' visibility='default' filepath='/home/z/my-project/tools/usr/include/X11/extensions/Xrandr.h' line='361' column='1'/>
@@ -14465,9 +14466,9 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_registry.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_registry.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_surface.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_surface.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='ipc_perm' is-struct='yes' visibility='default' size-in-bits='384' filepath='/usr/include/x86_64-linux-gnu/bits/ipc-perm.h' line='28' column='1' hash='73cdc514ada22bc9' id='type-id-1776'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='__key' type-id='type-id-1777' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/ipc-perm.h' line='30' column='1'/>
@@ -14618,7 +14619,7 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_systray.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_systray.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='XVisualInfo' is-struct='yes' naming-typedef-id='type-id-1799' visibility='default' size-in-bits='512' filepath='/home/z/my-project/tools/usr/include/X11/Xutil.h' line='287' column='1' hash='26277cfddeb7cec1' id='type-id-1800'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='visual' type-id='type-id-1361' visibility='default' filepath='/home/z/my-project/tools/usr/include/X11/Xutil.h' line='288' column='1'/>
@@ -14668,7 +14669,7 @@
       <return type-id='type-id-1801'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_toplevel.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_toplevel.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='XClassHint' is-struct='yes' naming-typedef-id='type-id-1809' visibility='default' size-in-bits='128' filepath='/home/z/my-project/tools/usr/include/X11/Xutil.h' line='189' column='1' hash='fca5a88d0a6bbcbe' id='type-id-1810'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='res_name' type-id='type-id-36' visibility='default' filepath='/home/z/my-project/tools/usr/include/X11/Xutil.h' line='190' column='1'/>
@@ -14689,7 +14690,7 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_window.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_window.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-13' size-in-bits='264' hash='ed481dd5ab4fdd70' id='type-id-1815'>
       <subrange length='33' lower-bound='0' upper-bound='32' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='7263f41a68bc1ea3' id='type-id-711'/>
     </array-type-def>
@@ -14892,7 +14893,7 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_xi2.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_xi2.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-1842' size-in-bits='64' id='type-id-1843'/>
     <class-decl name='_XDisplay' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1844'/>
     <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-1845'/>
@@ -14906,12 +14907,12 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/platform/x11/x11_xsettings.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/platform/x11/x11_xsettings.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-1846' size-in-bits='64' id='type-id-1847'/>
     <class-decl name='_XDisplay' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1848'/>
     <typedef-decl name='Display' type-id='type-id-1848' filepath='/home/z/my-project/tools/usr/include/X11/Xlib.h' line='483' column='1' id='type-id-1846'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/print/dialog.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/print/dialog.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-1' size-in-bits='1024' hash='187e130269c4880c' id='type-id-1849'>
       <subrange length='128' lower-bound='0' upper-bound='127' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='6d1a6a21feae6dd2' id='type-id-1850'/>
     </array-type-def>
@@ -14980,7 +14981,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/print/ipp.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/print/ipp.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-1864'/>
     <function-decl name='recv' filepath='/usr/include/x86_64-linux-gnu/sys/socket.h' line='145' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='recv' hash='5f976df3c3f79d18'>
       <parameter type-id='type-id-26'/>
@@ -15004,7 +15005,7 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/print/pdf.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/print/pdf.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_page_orientation' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_print.h' line='80' column='1' hash='1614027dd4a6d3cd' id='type-id-1865'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_PAGE_PORTRAIT' value='1'/>
@@ -15257,7 +15258,7 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/render/dmabuf.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/render/dmabuf.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-1886' size-in-bits='768' hash='8be8b0e1296c1160' id='type-id-1887'>
       <subrange length='4' lower-bound='0' upper-bound='3' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='cee611f4a73e486c' id='type-id-603'/>
     </array-type-def>
@@ -15333,10 +15334,10 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/render/dmabuf_egl.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/render/dmabuf_egl.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-1899'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/render/gif.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/render/gif.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='fdk_gif' is-struct='yes' visibility='default' size-in-bits='320' filepath='src/render/gif.c' line='345' column='1' hash='ac1ab78d58678cfe' id='type-id-1900'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='width' type-id='type-id-58' visibility='default' filepath='src/render/gif.c' line='346' column='1'/>
@@ -15509,12 +15510,12 @@
       <return type-id='type-id-50'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/render/gpaint.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/render/gpaint.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <qualified-type-def type-id='type-id-1893' const='yes' hash='f0eb1b5b632168f0' id='type-id-1920'/>
     <pointer-type-def type-id='type-id-1920' size-in-bits='64' hash='48f7c6cd78490988' id='type-id-1921'/>
     <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-1922'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/render/png_encode.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/render/png_encode.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='Byte' type-id='type-id-171' size-in-bits='8' filepath='/usr/include/zconf.h' line='393' column='1' hash='6ebac62b3366db68' id='type-id-1923'/>
     <typedef-decl name='Bytef' type-id='type-id-1923' size-in-bits='8' filepath='/usr/include/zconf.h' line='402' column='1' hash='6ebac62b3366db68' id='type-id-1924'/>
     <typedef-decl name='uInt' type-id='type-id-38' size-in-bits='32' filepath='/usr/include/zconf.h' line='395' column='1' hash='e66b43f97c38e87a' id='type-id-1925'/>
@@ -15540,7 +15541,7 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/render/stb_image_impl.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/render/stb_image_impl.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-1928'/>
     <function-decl name='fgetc' filepath='/usr/include/stdio.h' line='575' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fgetc' hash='5ac3795bb1331787'>
       <parameter type-id='type-id-556'/>
@@ -15566,7 +15567,7 @@
       <return type-id='type-id-14'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/render/surface.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/render/surface.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_texture_filter' naming-typedef-id='type-id-1929' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_surface.h' line='774' column='1' hash='8333b9169c30eea2' id='type-id-1930'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_FILTER_NEAREST' value='0'/>
@@ -15759,7 +15760,7 @@
       <return type-id='type-id-10'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/render/surface_aa.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/render/surface_aa.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='sqrtf' filepath='/usr/include/x86_64-linux-gnu/bits/mathcalls.h' line='176' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='sqrtf' hash='db8105e6b583cbd0'>
       <parameter type-id='type-id-25'/>
       <return type-id='type-id-25'/>
@@ -15808,7 +15809,7 @@
       <return type-id='type-id-10'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/render/surface_image.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/render/surface_image.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='fdk_image_pixels' is-struct='yes' visibility='default' size-in-bits='192' filepath='include/fdk/fdk_surface.h' line='248' column='1' hash='0f4c38a6f95d39c6' id='type-id-1935'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='pixels' type-id='type-id-310' visibility='default' filepath='include/fdk/fdk_surface.h' line='249' column='1'/>
@@ -15851,7 +15852,7 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/render/surface_transform.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/render/surface_transform.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='__builtin_ceilf' mangled-name='ceilf' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='ceilf' hash='7f32ffea222edbe7'>
       <return type-id='type-id-10'/>
     </function-decl>
@@ -15902,10 +15903,10 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/render/vk_present.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/render/vk_present.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-1944'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/text/attr.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/text/attr.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-403' size-in-bits='64' hash='9525b6affe75cc9d#2' id='type-id-1945'/>
     <function-decl name='strncpy' filepath='/usr/include/string.h' line='144' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='strncpy' hash='2da84c559242300d'>
       <parameter type-id='type-id-36'/>
@@ -16006,7 +16007,7 @@
       <return type-id='type-id-13'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/text/cff.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/text/cff.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-954' size-in-bits='384' hash='074c001392fdf502' id='type-id-1955'>
       <subrange length='6' lower-bound='0' upper-bound='5' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='1c0e592c7ffbdbf5' id='type-id-928'/>
     </array-type-def>
@@ -16122,7 +16123,7 @@
       <return type-id='type-id-403'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/text/emoji.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/text/emoji.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='stbtt__bitmap' is-struct='yes' naming-typedef-id='type-id-1967' visibility='default' size-in-bits='192' filepath='third_party/stb/stb_truetype.h' line='924' column='1' hash='c62c56487cb1173e' id='type-id-1968'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='w' type-id='type-id-26' visibility='default' filepath='third_party/stb/stb_truetype.h' line='926' column='1'/>
@@ -16188,7 +16189,7 @@
       <return type-id='type-id-25'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/text/fontenum.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/text/fontenum.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-1976' size-in-bits='64' id='type-id-1977'/>
     <class-decl name='__dirstream' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1978'/>
     <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-1979'/>
@@ -16216,13 +16217,13 @@
       <return type-id='type-id-393'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/text/fontscan.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/text/fontscan.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-1982' size-in-bits='64' id='type-id-1983'/>
     <class-decl name='__dirstream' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-1984'/>
     <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-1985'/>
     <typedef-decl name='DIR' type-id='type-id-1984' filepath='/usr/include/dirent.h' line='127' column='1' id='type-id-1982'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/text/layout.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/text/layout.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_text_shaping_tier' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_text.h' line='260' column='1' hash='b7b5e51da23adcd7' id='type-id-1986'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_TEXT_SHAPING_LEGACY' value='0'/>
@@ -16319,7 +16320,7 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/text/markup.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/text/markup.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_markup_parse' mangled-name='fdk_markup_parse' filepath='src/text/markup.c' line='1106' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_markup_parse@@FDK_1.0' hash='879c9b800eba31b8'>
       <parameter type-id='type-id-8' name='markup' filepath='src/text/markup.c' line='1106' column='1'/>
       <parameter type-id='type-id-52' name='out_plain' filepath='src/text/markup.c' line='1106' column='1'/>
@@ -16341,7 +16342,7 @@
       <return type-id='type-id-10'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/text/shaping.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/text/shaping.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-1992' size-in-bits='64' hash='445f8812be14b89d' id='type-id-1993'/>
     <qualified-type-def type-id='type-id-1994' const='yes' id='type-id-1995'/>
     <pointer-type-def type-id='type-id-1995' size-in-bits='64' id='type-id-1996'/>
@@ -16363,7 +16364,7 @@
     </function-decl>
     <typedef-decl name='fdk_emoji_font' type-id='type-id-1997' filepath='src/text/text_internal.h' line='103' column='1' id='type-id-1994'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/text/span.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/text/span.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_font_measure_spans_utf8' mangled-name='fdk_font_measure_spans_utf8' filepath='src/text/span.c' line='263' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_font_measure_spans_utf8@@FDK_1.0' hash='0c702feb1ba718a3'>
       <parameter type-id='type-id-1949' name='font' filepath='src/text/span.c' line='263' column='1'/>
       <parameter type-id='type-id-8' name='utf8' filepath='src/text/span.c' line='264' column='1'/>
@@ -16386,7 +16387,7 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/text/stb_truetype_impl.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/text/stb_truetype_impl.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='__builtin_sqrtf' mangled-name='sqrtf' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='sqrtf' hash='7f32ffea222edbe7'>
       <return type-id='type-id-10'/>
     </function-decl>
@@ -16399,7 +16400,7 @@
       <return type-id='type-id-14'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/text/text.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/text/text.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='fdk__sel_span' is-struct='yes' visibility='default' size-in-bits='64' filepath='src/text/text_internal.h' line='527' column='1' hash='043de7ba5723737a' id='type-id-1999'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='x0' type-id='type-id-58' visibility='default' filepath='src/text/text_internal.h' line='528' column='1'/>
@@ -16504,7 +16505,7 @@
     </function-decl>
     <typedef-decl name='fdk_emoji_font' type-id='type-id-2011' filepath='src/text/text_internal.h' line='103' column='1' id='type-id-2007'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/theme/color_scheme.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/theme/color_scheme.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_color_scheme' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_theme.h' line='497' column='1' hash='3f2e75bd92340cfb' id='type-id-2015'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_COLOR_SCHEME_NONE' value='0'/>
@@ -16545,7 +16546,7 @@
       <return type-id='type-id-2017'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/theme/discover.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/theme/discover.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-195' size-in-bits='64' hash='0cb964b5f5d90c44' id='type-id-2025'/>
     <pointer-type-def type-id='type-id-1823' size-in-bits='64' hash='7a747bb8e110932d' id='type-id-2026'/>
     <pointer-type-def type-id='type-id-2027' size-in-bits='64' id='type-id-2028'/>
@@ -16568,25 +16569,51 @@
       <return type-id='type-id-8'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/theme/icon_svg.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
-    <array-type-def dimensions='1' type-id='type-id-2030' size-in-bits='64' hash='dd1965170efbeacf' id='type-id-2031'>
+  <abi-instr address-size='64' path='src/theme/high_contrast.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
+    <enum-decl name='fdk_dbus_type' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_dbus.h' line='67' column='1' hash='204ef9d303326eff' id='type-id-2030'>
+      <underlying-type type-id='type-id-3'/>
+      <enumerator name='FDK_DBUS_TYPE_INVALID' value='0'/>
+      <enumerator name='FDK_DBUS_BYTE' value='121'/>
+      <enumerator name='FDK_DBUS_BOOLEAN' value='98'/>
+      <enumerator name='FDK_DBUS_INT16' value='110'/>
+      <enumerator name='FDK_DBUS_UINT16' value='113'/>
+      <enumerator name='FDK_DBUS_INT32' value='105'/>
+      <enumerator name='FDK_DBUS_UINT32' value='117'/>
+      <enumerator name='FDK_DBUS_INT64' value='120'/>
+      <enumerator name='FDK_DBUS_UINT64' value='116'/>
+      <enumerator name='FDK_DBUS_DOUBLE' value='100'/>
+      <enumerator name='FDK_DBUS_STRING' value='115'/>
+      <enumerator name='FDK_DBUS_OBJECT_PATH' value='111'/>
+      <enumerator name='FDK_DBUS_SIGNATURE' value='103'/>
+      <enumerator name='FDK_DBUS_VARIANT' value='118'/>
+      <enumerator name='FDK_DBUS_ARRAY' value='97'/>
+      <enumerator name='FDK_DBUS_STRUCT' value='114'/>
+      <enumerator name='FDK_DBUS_DICT_ENTRY' value='101'/>
+    </enum-decl>
+    <typedef-decl name='fdk_dbus_type' type-id='type-id-2030' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_dbus.h' line='85' column='1' hash='204ef9d303326eff' id='type-id-791'/>
+    <function-decl name='fdk_system_prefers_high_contrast' mangled-name='fdk_system_prefers_high_contrast' filepath='src/theme/high_contrast.c' line='104' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_system_prefers_high_contrast@@FDK_1.0' hash='c7c710e908194b91'>
+      <return type-id='type-id-13'/>
+    </function-decl>
+  </abi-instr>
+  <abi-instr address-size='64' path='src/theme/icon_svg.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
+    <array-type-def dimensions='1' type-id='type-id-2031' size-in-bits='64' hash='dd1965170efbeacf' id='type-id-2032'>
       <subrange length='1' lower-bound='0' upper-bound='0' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='eba0a2b392137dcb' id='type-id-535'/>
     </array-type-def>
-    <array-type-def dimensions='1' type-id='type-id-1' size-in-bits='512' hash='ea93b43678875247' id='type-id-2032'>
+    <array-type-def dimensions='1' type-id='type-id-1' size-in-bits='512' hash='ea93b43678875247' id='type-id-2033'>
       <subrange length='64' lower-bound='0' upper-bound='63' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='6066f2053fe47763' id='type-id-24'/>
     </array-type-def>
-    <array-type-def dimensions='1' type-id='type-id-25' size-in-bits='128' hash='b3db84c58df322c1' id='type-id-2033'>
+    <array-type-def dimensions='1' type-id='type-id-25' size-in-bits='128' hash='b3db84c58df322c1' id='type-id-2034'>
       <subrange length='4' lower-bound='0' upper-bound='3' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='cee611f4a73e486c' id='type-id-603'/>
     </array-type-def>
-    <array-type-def dimensions='1' type-id='type-id-25' size-in-bits='192' hash='c3d9ae508052e860' id='type-id-2034'>
+    <array-type-def dimensions='1' type-id='type-id-25' size-in-bits='192' hash='c3d9ae508052e860' id='type-id-2035'>
       <subrange length='6' lower-bound='0' upper-bound='5' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='1c0e592c7ffbdbf5' id='type-id-928'/>
     </array-type-def>
-    <array-type-def dimensions='1' type-id='type-id-25' size-in-bits='256' hash='c442e5c69f7df4a9' id='type-id-2035'>
+    <array-type-def dimensions='1' type-id='type-id-25' size-in-bits='256' hash='c442e5c69f7df4a9' id='type-id-2036'>
       <subrange length='8' lower-bound='0' upper-bound='7' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='6e87a8ff484907ad' id='type-id-973'/>
     </array-type-def>
-    <class-decl name='NSVGgradient' is-struct='yes' visibility='default' size-in-bits='384' filepath='third_party/nanosvg/nanosvg.h' line='120' column='1' hash='e00485c6321b26f3' id='type-id-2036'>
+    <class-decl name='NSVGgradient' is-struct='yes' visibility='default' size-in-bits='384' filepath='third_party/nanosvg/nanosvg.h' line='120' column='1' hash='e00485c6321b26f3' id='type-id-2037'>
       <data-member access='public' layout-offset-in-bits='0'>
-        <var-decl name='xform' type-id='type-id-2034' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='121' column='1'/>
+        <var-decl name='xform' type-id='type-id-2035' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='121' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='192'>
         <var-decl name='spread' type-id='type-id-1' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='122' column='1'/>
@@ -16601,10 +16628,10 @@
         <var-decl name='nstops' type-id='type-id-26' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='124' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='320'>
-        <var-decl name='stops' type-id='type-id-2031' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='125' column='1'/>
+        <var-decl name='stops' type-id='type-id-2032' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='125' column='1'/>
       </data-member>
     </class-decl>
-    <class-decl name='NSVGgradientStop' is-struct='yes' visibility='default' size-in-bits='64' filepath='third_party/nanosvg/nanosvg.h' line='115' column='1' hash='b2d7ef8ed4a3126c' id='type-id-2037'>
+    <class-decl name='NSVGgradientStop' is-struct='yes' visibility='default' size-in-bits='64' filepath='third_party/nanosvg/nanosvg.h' line='115' column='1' hash='b2d7ef8ed4a3126c' id='type-id-2038'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='color' type-id='type-id-38' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='116' column='1'/>
       </data-member>
@@ -16612,7 +16639,7 @@
         <var-decl name='offset' type-id='type-id-25' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='117' column='1'/>
       </data-member>
     </class-decl>
-    <class-decl name='NSVGimage' is-struct='yes' visibility='default' size-in-bits='128' filepath='third_party/nanosvg/nanosvg.h' line='169' column='1' hash='ae3f08d4fd317796' id='type-id-2038'>
+    <class-decl name='NSVGimage' is-struct='yes' visibility='default' size-in-bits='128' filepath='third_party/nanosvg/nanosvg.h' line='169' column='1' hash='ae3f08d4fd317796' id='type-id-2039'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='width' type-id='type-id-25' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='171' column='1'/>
       </data-member>
@@ -16620,20 +16647,20 @@
         <var-decl name='height' type-id='type-id-25' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='172' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='64'>
-        <var-decl name='shapes' type-id='type-id-2039' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='173' column='1'/>
+        <var-decl name='shapes' type-id='type-id-2040' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='173' column='1'/>
       </data-member>
     </class-decl>
-    <class-decl name='NSVGpaint' is-struct='yes' visibility='default' size-in-bits='128' filepath='third_party/nanosvg/nanosvg.h' line='128' column='1' hash='8565495c640809a8' id='type-id-2040'>
+    <class-decl name='NSVGpaint' is-struct='yes' visibility='default' size-in-bits='128' filepath='third_party/nanosvg/nanosvg.h' line='128' column='1' hash='8565495c640809a8' id='type-id-2041'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='type' type-id='type-id-538' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='129' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='64'>
-        <var-decl name='' type-id='type-id-2041' visibility='default'/>
+        <var-decl name='' type-id='type-id-2042' visibility='default'/>
       </data-member>
     </class-decl>
-    <class-decl name='NSVGpath' is-struct='yes' visibility='default' size-in-bits='320' filepath='third_party/nanosvg/nanosvg.h' line='136' column='1' hash='578986b44055f17c' id='type-id-2042'>
+    <class-decl name='NSVGpath' is-struct='yes' visibility='default' size-in-bits='320' filepath='third_party/nanosvg/nanosvg.h' line='136' column='1' hash='578986b44055f17c' id='type-id-2043'>
       <data-member access='public' layout-offset-in-bits='0'>
-        <var-decl name='pts' type-id='type-id-2043' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='138' column='1'/>
+        <var-decl name='pts' type-id='type-id-2044' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='138' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='64'>
         <var-decl name='npts' type-id='type-id-26' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='139' column='1'/>
@@ -16642,21 +16669,21 @@
         <var-decl name='closed' type-id='type-id-1' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='140' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='128'>
-        <var-decl name='bounds' type-id='type-id-2033' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='141' column='1'/>
+        <var-decl name='bounds' type-id='type-id-2034' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='141' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='256'>
-        <var-decl name='next' type-id='type-id-2044' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='142' column='1'/>
+        <var-decl name='next' type-id='type-id-2045' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='142' column='1'/>
       </data-member>
     </class-decl>
-    <class-decl name='NSVGshape' is-struct='yes' visibility='default' size-in-bits='2688' filepath='third_party/nanosvg/nanosvg.h' line='145' column='1' hash='74607ac0acd72bb6' id='type-id-2045'>
+    <class-decl name='NSVGshape' is-struct='yes' visibility='default' size-in-bits='2688' filepath='third_party/nanosvg/nanosvg.h' line='145' column='1' hash='74607ac0acd72bb6' id='type-id-2046'>
       <data-member access='public' layout-offset-in-bits='0'>
-        <var-decl name='id' type-id='type-id-2032' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='147' column='1'/>
+        <var-decl name='id' type-id='type-id-2033' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='147' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='512'>
-        <var-decl name='fill' type-id='type-id-2046' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='148' column='1'/>
+        <var-decl name='fill' type-id='type-id-2047' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='148' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='640'>
-        <var-decl name='stroke' type-id='type-id-2046' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='149' column='1'/>
+        <var-decl name='stroke' type-id='type-id-2047' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='149' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='768'>
         <var-decl name='opacity' type-id='type-id-25' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='150' column='1'/>
@@ -16668,7 +16695,7 @@
         <var-decl name='strokeDashOffset' type-id='type-id-25' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='152' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='864'>
-        <var-decl name='strokeDashArray' type-id='type-id-2035' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='153' column='1'/>
+        <var-decl name='strokeDashArray' type-id='type-id-2036' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='153' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1120'>
         <var-decl name='strokeDashCount' type-id='type-id-1' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='154' column='1'/>
@@ -16692,58 +16719,58 @@
         <var-decl name='flags' type-id='type-id-171' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='160' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1216'>
-        <var-decl name='bounds' type-id='type-id-2033' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='161' column='1'/>
+        <var-decl name='bounds' type-id='type-id-2034' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='161' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1344'>
-        <var-decl name='fillGradient' type-id='type-id-2032' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='162' column='1'/>
+        <var-decl name='fillGradient' type-id='type-id-2033' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='162' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1856'>
-        <var-decl name='strokeGradient' type-id='type-id-2032' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='163' column='1'/>
+        <var-decl name='strokeGradient' type-id='type-id-2033' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='163' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='2368'>
-        <var-decl name='xform' type-id='type-id-2034' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='164' column='1'/>
+        <var-decl name='xform' type-id='type-id-2035' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='164' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='2560'>
-        <var-decl name='paths' type-id='type-id-2047' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='165' column='1'/>
+        <var-decl name='paths' type-id='type-id-2048' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='165' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='2624'>
-        <var-decl name='next' type-id='type-id-2048' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='166' column='1'/>
+        <var-decl name='next' type-id='type-id-2049' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='166' column='1'/>
       </data-member>
     </class-decl>
-    <typedef-decl name='NSVGgradient' type-id='type-id-2036' size-in-bits='384' filepath='third_party/nanosvg/nanosvg.h' line='126' column='1' id='type-id-2049'/>
-    <typedef-decl name='NSVGgradientStop' type-id='type-id-2037' size-in-bits='64' filepath='third_party/nanosvg/nanosvg.h' line='118' column='1' id='type-id-2030'/>
-    <typedef-decl name='NSVGimage' type-id='type-id-2038' size-in-bits='128' filepath='third_party/nanosvg/nanosvg.h' line='174' column='1' id='type-id-2050'/>
-    <typedef-decl name='NSVGpaint' type-id='type-id-2040' size-in-bits='128' filepath='third_party/nanosvg/nanosvg.h' line='134' column='1' id='type-id-2046'/>
-    <typedef-decl name='NSVGpath' type-id='type-id-2042' size-in-bits='320' filepath='third_party/nanosvg/nanosvg.h' line='143' column='1' id='type-id-2051'/>
-    <typedef-decl name='NSVGshape' type-id='type-id-2045' size-in-bits='2688' filepath='third_party/nanosvg/nanosvg.h' line='167' column='1' id='type-id-2052'/>
-    <union-decl name='__anonymous_union__' visibility='default' size-in-bits='64' is-anonymous='yes' filepath='third_party/nanosvg/nanosvg.h' line='130' column='1' hash='7f372291d33e4406#7' id='type-id-2041'>
+    <typedef-decl name='NSVGgradient' type-id='type-id-2037' size-in-bits='384' filepath='third_party/nanosvg/nanosvg.h' line='126' column='1' id='type-id-2050'/>
+    <typedef-decl name='NSVGgradientStop' type-id='type-id-2038' size-in-bits='64' filepath='third_party/nanosvg/nanosvg.h' line='118' column='1' id='type-id-2031'/>
+    <typedef-decl name='NSVGimage' type-id='type-id-2039' size-in-bits='128' filepath='third_party/nanosvg/nanosvg.h' line='174' column='1' id='type-id-2051'/>
+    <typedef-decl name='NSVGpaint' type-id='type-id-2041' size-in-bits='128' filepath='third_party/nanosvg/nanosvg.h' line='134' column='1' id='type-id-2047'/>
+    <typedef-decl name='NSVGpath' type-id='type-id-2043' size-in-bits='320' filepath='third_party/nanosvg/nanosvg.h' line='143' column='1' id='type-id-2052'/>
+    <typedef-decl name='NSVGshape' type-id='type-id-2046' size-in-bits='2688' filepath='third_party/nanosvg/nanosvg.h' line='167' column='1' id='type-id-2053'/>
+    <union-decl name='__anonymous_union__' visibility='default' size-in-bits='64' is-anonymous='yes' filepath='third_party/nanosvg/nanosvg.h' line='130' column='1' hash='7f372291d33e4406#7' id='type-id-2042'>
       <data-member access='public'>
         <var-decl name='color' type-id='type-id-38' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='131' column='1'/>
       </data-member>
       <data-member access='public'>
-        <var-decl name='gradient' type-id='type-id-2053' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='132' column='1'/>
+        <var-decl name='gradient' type-id='type-id-2054' visibility='default' filepath='third_party/nanosvg/nanosvg.h' line='132' column='1'/>
       </data-member>
     </union-decl>
-    <pointer-type-def type-id='type-id-2049' size-in-bits='64' hash='2617f27e887ea1ff' id='type-id-2053'/>
-    <pointer-type-def type-id='type-id-2050' size-in-bits='64' hash='9b7aeec71bfd818a' id='type-id-2054'/>
-    <pointer-type-def type-id='type-id-2042' size-in-bits='64' hash='ddd53c60f5a34dce' id='type-id-2044'/>
-    <pointer-type-def type-id='type-id-2051' size-in-bits='64' hash='ddd53c60f5a34dce#2' id='type-id-2047'/>
-    <pointer-type-def type-id='type-id-2045' size-in-bits='64' hash='433d9a56a85dfea6' id='type-id-2048'/>
-    <pointer-type-def type-id='type-id-2052' size-in-bits='64' hash='433d9a56a85dfea6#2' id='type-id-2039'/>
-    <pointer-type-def type-id='type-id-25' size-in-bits='64' hash='5022839615992ac0' id='type-id-2043'/>
-    <pointer-type-def type-id='type-id-2055' size-in-bits='64' id='type-id-2056'/>
-    <class-decl name='NSVGrasterizer' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-2057'/>
-    <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-2058'/>
+    <pointer-type-def type-id='type-id-2050' size-in-bits='64' hash='2617f27e887ea1ff' id='type-id-2054'/>
+    <pointer-type-def type-id='type-id-2051' size-in-bits='64' hash='9b7aeec71bfd818a' id='type-id-2055'/>
+    <pointer-type-def type-id='type-id-2043' size-in-bits='64' hash='ddd53c60f5a34dce' id='type-id-2045'/>
+    <pointer-type-def type-id='type-id-2052' size-in-bits='64' hash='ddd53c60f5a34dce#2' id='type-id-2048'/>
+    <pointer-type-def type-id='type-id-2046' size-in-bits='64' hash='433d9a56a85dfea6' id='type-id-2049'/>
+    <pointer-type-def type-id='type-id-2053' size-in-bits='64' hash='433d9a56a85dfea6#2' id='type-id-2040'/>
+    <pointer-type-def type-id='type-id-25' size-in-bits='64' hash='5022839615992ac0' id='type-id-2044'/>
+    <pointer-type-def type-id='type-id-2056' size-in-bits='64' id='type-id-2057'/>
+    <class-decl name='NSVGrasterizer' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-2058'/>
+    <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-2059'/>
     <function-decl name='fdk_surface_create_from_svg_bytes' mangled-name='fdk_surface_create_from_svg_bytes' filepath='src/theme/icon_svg.c' line='229' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_surface_create_from_svg_bytes@@FDK_1.0' hash='cdda9962d8c20273'>
       <parameter type-id='type-id-8' name='svg_document' filepath='src/theme/icon_svg.c' line='229' column='1'/>
       <parameter type-id='type-id-58' name='size' filepath='src/theme/icon_svg.c' line='230' column='1'/>
       <parameter type-id='type-id-293' name='out_surface' filepath='src/theme/icon_svg.c' line='231' column='1'/>
       <return type-id='type-id-195'/>
     </function-decl>
-    <typedef-decl name='NSVGrasterizer' type-id='type-id-2057' filepath='third_party/nanosvg/nanosvgrast.h' line='36' column='1' id='type-id-2055'/>
+    <typedef-decl name='NSVGrasterizer' type-id='type-id-2058' filepath='third_party/nanosvg/nanosvgrast.h' line='36' column='1' id='type-id-2056'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/theme/icon_theme.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
-    <enum-decl name='fdk_icon_theme_channel' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_theme.h' line='595' column='1' hash='6cc87bb9061a5ca6' id='type-id-2059'>
+  <abi-instr address-size='64' path='src/theme/icon_theme.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
+    <enum-decl name='fdk_icon_theme_channel' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_theme.h' line='615' column='1' hash='6cc87bb9061a5ca6' id='type-id-2060'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_ICON_THEME_NONE' value='0'/>
       <enumerator name='FDK_ICON_THEME_APP_PREFS' value='1'/>
@@ -16754,8 +16781,8 @@
       <enumerator name='FDK_ICON_THEME_ENV' value='6'/>
       <enumerator name='FDK_ICON_THEME_FALLBACK' value='7'/>
     </enum-decl>
-    <typedef-decl name='fdk_icon_theme_channel' type-id='type-id-2059' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_theme.h' line='607' column='1' hash='6cc87bb9061a5ca6' id='type-id-2060'/>
-    <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-2061'/>
+    <typedef-decl name='fdk_icon_theme_channel' type-id='type-id-2060' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_theme.h' line='627' column='1' hash='6cc87bb9061a5ca6' id='type-id-2061'/>
+    <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-2062'/>
     <function-decl name='strtok' filepath='/usr/include/string.h' line='356' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='strtok' hash='e566a45c4b433007'>
       <parameter type-id='type-id-967'/>
       <parameter type-id='type-id-590'/>
@@ -16777,18 +16804,18 @@
       <return type-id='type-id-8'/>
     </function-decl>
     <function-decl name='fdk_icon_theme_source' mangled-name='fdk_icon_theme_source' filepath='src/theme/icon_theme.c' line='1991' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_icon_theme_source@@FDK_1.0' hash='f552da67f7f674c5'>
-      <return type-id='type-id-2060'/>
+      <return type-id='type-id-2061'/>
     </function-decl>
     <function-decl name='fdk_icon_theme_set' mangled-name='fdk_icon_theme_set' filepath='src/theme/icon_theme.c' line='1996' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_icon_theme_set@@FDK_1.0' hash='a53ffef266e42727'>
       <parameter type-id='type-id-8' name='path' filepath='src/desktop/open.c' line='159' column='1'/>
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/theme/nanosvg_impl.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/theme/nanosvg_impl.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='__builtin_calloc' mangled-name='calloc' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='calloc' hash='7f32ffea222edbe7'>
       <return type-id='type-id-10'/>
     </function-decl>
-    <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-2062'/>
+    <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-2063'/>
     <function-decl name='acosf' filepath='/usr/include/x86_64-linux-gnu/bits/mathcalls.h' line='53' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='acosf' hash='db8105e6b583cbd0'>
       <parameter type-id='type-id-25'/>
       <return type-id='type-id-25'/>
@@ -16803,8 +16830,8 @@
       <return type-id='type-id-25'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/theme/parse.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
-    <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-2063'/>
+  <abi-instr address-size='64' path='src/theme/parse.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
+    <qualified-type-def type-id='type-id-9' restrict='yes' id='type-id-2064'/>
     <function-decl name='fdk_theme_parse' mangled-name='fdk_theme_parse' filepath='src/theme/parse.c' line='682' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_theme_parse@@FDK_1.0' hash='ba399593d43f0007'>
       <parameter type-id='type-id-8' name='text' filepath='src/theme/parse.c' line='682' column='1'/>
       <parameter type-id='type-id-6' name='length' filepath='src/theme/parse.c' line='682' column='1'/>
@@ -16817,33 +16844,12 @@
       <return type-id='type-id-2026'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/theme/reduced_motion.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
-    <enum-decl name='fdk_dbus_type' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_dbus.h' line='67' column='1' hash='204ef9d303326eff' id='type-id-2064'>
-      <underlying-type type-id='type-id-3'/>
-      <enumerator name='FDK_DBUS_TYPE_INVALID' value='0'/>
-      <enumerator name='FDK_DBUS_BYTE' value='121'/>
-      <enumerator name='FDK_DBUS_BOOLEAN' value='98'/>
-      <enumerator name='FDK_DBUS_INT16' value='110'/>
-      <enumerator name='FDK_DBUS_UINT16' value='113'/>
-      <enumerator name='FDK_DBUS_INT32' value='105'/>
-      <enumerator name='FDK_DBUS_UINT32' value='117'/>
-      <enumerator name='FDK_DBUS_INT64' value='120'/>
-      <enumerator name='FDK_DBUS_UINT64' value='116'/>
-      <enumerator name='FDK_DBUS_DOUBLE' value='100'/>
-      <enumerator name='FDK_DBUS_STRING' value='115'/>
-      <enumerator name='FDK_DBUS_OBJECT_PATH' value='111'/>
-      <enumerator name='FDK_DBUS_SIGNATURE' value='103'/>
-      <enumerator name='FDK_DBUS_VARIANT' value='118'/>
-      <enumerator name='FDK_DBUS_ARRAY' value='97'/>
-      <enumerator name='FDK_DBUS_STRUCT' value='114'/>
-      <enumerator name='FDK_DBUS_DICT_ENTRY' value='101'/>
-    </enum-decl>
-    <typedef-decl name='fdk_dbus_type' type-id='type-id-2064' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_dbus.h' line='85' column='1' hash='204ef9d303326eff' id='type-id-791'/>
+  <abi-instr address-size='64' path='src/theme/reduced_motion.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_system_prefers_reduced_motion' mangled-name='fdk_system_prefers_reduced_motion' filepath='src/theme/reduced_motion.c' line='106' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_system_prefers_reduced_motion@@FDK_1.0' hash='c7c710e908194b91'>
       <return type-id='type-id-13'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/theme/settings.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/theme/settings.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='inotify_init1' filepath='/usr/include/x86_64-linux-gnu/sys/inotify.h' line='88' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='inotify_init1' hash='d628501fd2223339'>
       <parameter type-id='type-id-26'/>
       <return type-id='type-id-26'/>
@@ -16870,7 +16876,7 @@
       <return type-id='type-id-10'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/theme/theme.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/theme/theme.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_theme_set_default' mangled-name='fdk_theme_set_default' filepath='src/theme/theme.c' line='283' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_theme_set_default@@FDK_1.0' hash='23a004700434cabc'>
       <parameter type-id='type-id-2026'/>
       <return type-id='type-id-10'/>
@@ -16925,7 +16931,7 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/theme/ui_metrics.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/theme/ui_metrics.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_ui_font_size' mangled-name='fdk_ui_font_size' filepath='src/theme/ui_metrics.c' line='476' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_ui_font_size@@FDK_1.0' hash='388da3fa973fde78'>
       <return type-id='type-id-26'/>
     </function-decl>
@@ -16936,7 +16942,7 @@
       <return type-id='type-id-26'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/a11y.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/a11y.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_a11y_event_kind' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_a11y.h' line='195' column='1' hash='9e2533c8f21a454e' id='type-id-2066'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_A11Y_CHILDREN_CHANGED' value='1'/>
@@ -17137,7 +17143,7 @@
     <var-decl name='fdk_entry_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/widgets_internal.h' line='729' column='1'/>
     <var-decl name='fdk_textview_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/widgets_internal.h' line='730' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/a11y_narrator.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/a11y_narrator.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk_a11y_speak_fn' type-id='type-id-2081' size-in-bits='64' filepath='include/fdk/fdk_a11y.h' line='540' column='1' hash='fd7a63c0c6c822c4' id='type-id-2082'/>
     <typedef-decl name='fdk_catalog' type-id='type-id-929' size-in-bits='128' filepath='include/fdk/fdk_a11y.h' line='536' column='1' id='type-id-933'/>
     <qualified-type-def type-id='type-id-933' const='yes' hash='8349f9db7b35a876' id='type-id-2083'/>
@@ -17177,7 +17183,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/animation.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/animation.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_ease_kind' naming-typedef-id='type-id-2085' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_animation.h' line='84' column='1' hash='2dadd1c67e20f420' id='type-id-2086'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_EASE_LINEAR' value='0'/>
@@ -17282,7 +17288,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/calendar.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/calendar.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-8' size-in-bits='768' hash='bd6ad5b1517405a5' id='type-id-2098'>
       <subrange length='12' lower-bound='0' upper-bound='11' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='236058707b75e5fc' id='type-id-2099'/>
     </array-type-def>
@@ -17619,7 +17625,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/canvas.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/canvas.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk_canvas_paint_fn' type-id='type-id-2132' size-in-bits='64' filepath='include/fdk/fdk_widgets.h' line='1552' column='1' hash='fd7a63c0c6c822c4' id='type-id-2133'/>
     <pointer-type-def type-id='type-id-1861' size-in-bits='64' hash='fd7a63c0c6c822c4' id='type-id-2132'/>
     <var-decl name='fdk_canvas_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/canvas.c' line='41' column='1'/>
@@ -17641,7 +17647,7 @@
       <return type-id='type-id-10'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/choosers.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/choosers.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_button_role' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_widgets.h' line='185' column='1' hash='f7b035d053738fb8' id='type-id-2134'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_BUTTON_ROLE_NORMAL' value='0'/>
@@ -18050,7 +18056,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/combo.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/combo.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk_combo_changed_fn' type-id='type-id-2196' size-in-bits='64' filepath='include/fdk/fdk_widgets.h' line='1773' column='1' hash='fd7a63c0c6c822c4' id='type-id-2197'/>
     <typedef-decl name='fdk_entry_changed_fn' type-id='type-id-2152' size-in-bits='64' filepath='include/fdk/fdk_widgets.h' line='348' column='1' hash='fd7a63c0c6c822c4' id='type-id-2198'/>
     <typedef-decl name='fdk_menu' type-id='type-id-836' size-in-bits='576' filepath='include/fdk/fdk_widgets.h' line='1639' column='1' id='type-id-2199'/>
@@ -18117,7 +18123,7 @@
       <return type-id='type-id-10'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/controls.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/controls.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_slider_orientation' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_widgets.h' line='2182' column='1' hash='e3d6812fbea766a8' id='type-id-2203'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_SLIDER_HORIZONTAL' value='0'/>
@@ -18311,7 +18317,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/dialog.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/dialog.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_dialog_buttons' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_dialog.h' line='51' column='1' hash='43a38ec3f29f8d68' id='type-id-2217'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_DIALOG_BUTTONS_OK' value='0'/>
@@ -18398,7 +18404,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/entry.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/entry.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_entry_icon' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_widgets.h' line='499' column='1' hash='07fc46d2f6c25ad0' id='type-id-2236'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_ENTRY_ICON_NONE' value='0'/>
@@ -18908,7 +18914,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/expander.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/expander.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk_expander_changed_fn' type-id='type-id-2205' size-in-bits='64' filepath='include/fdk/fdk_widgets.h' line='1903' column='1' hash='fd7a63c0c6c822c4' id='type-id-2276'/>
     <function-decl name='fdk_expander_create' mangled-name='fdk_expander_create' filepath='src/widget/expander.c' line='464' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_expander_create@@FDK_1.0' hash='a377338aa4357159'>
       <parameter type-id='type-id-390'/>
@@ -18942,7 +18948,7 @@
       <return type-id='type-id-10'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/file_dialog.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/file_dialog.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-1' size-in-bits='2048' hash='b1acd4e4c2ca8eab' id='type-id-715'>
       <subrange length='256' lower-bound='0' upper-bound='255' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='5cb16198282e86c6' id='type-id-875'/>
     </array-type-def>
@@ -19134,7 +19140,7 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/gl_viewport.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/gl_viewport.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk_gl_context_lost_fn' type-id='type-id-2152' size-in-bits='64' filepath='include/fdk/fdk_gl.h' line='263' column='1' hash='fd7a63c0c6c822c4' id='type-id-2314'/>
     <typedef-decl name='fdk_gl_render_fn' type-id='type-id-2315' size-in-bits='64' filepath='include/fdk/fdk_gl.h' line='256' column='1' hash='fd7a63c0c6c822c4' id='type-id-2316'/>
     <pointer-type-def type-id='type-id-2317' size-in-bits='64' hash='fd7a63c0c6c822c4' id='type-id-2315'/>
@@ -19176,7 +19182,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/iconview.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/iconview.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='fdk_iconview_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/iconview.c' line='138' column='1'/>
     <function-decl name='fdk_iconview_create' mangled-name='fdk_iconview_create' filepath='src/widget/iconview.c' line='991' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_iconview_create@@FDK_1.0' hash='bff73c99088fd2a8'>
       <parameter type-id='type-id-390'/>
@@ -19308,7 +19314,7 @@
       <return type-id='type-id-13'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/levelbar.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/levelbar.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_levelbar_mode' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_widgets.h' line='1975' column='1' hash='6026712d3157ee9b' id='type-id-2320'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_LEVELBAR_DISCRETE' value='0'/>
@@ -19357,7 +19363,7 @@
     </function-decl>
     <var-decl name='fdk_levelbar_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/widgets_internal.h' line='46' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/list.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/list.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <class-decl name='fdk_list_column' is-struct='yes' visibility='default' size-in-bits='128' filepath='include/fdk/fdk_widgets.h' line='885' column='1' hash='baaf41b49a0075db' id='type-id-2322'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='title' type-id='type-id-8' visibility='default' filepath='include/fdk/fdk_widgets.h' line='886' column='1'/>
@@ -19576,7 +19582,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/menu.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/menu.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_menu_item_kind' size-in-bits='32' alignment-in-bits='32' filepath='src/widget/menu.c' line='77' column='1' hash='8ed7a9ad8ebd6b69' id='type-id-2334'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_MIK_NORMAL' value='0'/>
@@ -19831,7 +19837,7 @@
     <var-decl name='fdk_menu_view_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/menu_internal.h' line='18' column='1'/>
     <var-decl name='fdk_menu_bar_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/menu_internal.h' line='19' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/menubutton.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/menubutton.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_menu_button_arrow' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_widgets.h' line='2288' column='1' hash='2b77562757df59e7' id='type-id-2347'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_MENU_BUTTON_ARROW_NONE' value='0'/>
@@ -19868,7 +19874,7 @@
       <return type-id='type-id-13'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/model.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/model.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_model_change' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_model.h' line='100' column='1' hash='41a4db82f0c0f9da' id='type-id-2349'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_MODEL_ROW_INSERTED' value='1'/>
@@ -20264,7 +20270,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/model_bind.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/model_bind.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk_tree_node' type-id='type-id-6' size-in-bits='64' filepath='include/fdk/fdk_widgets.h' line='1304' column='1' hash='8fdc5eea2983a729' id='type-id-2390'/>
     <pointer-type-def type-id='type-id-2390' size-in-bits='64' hash='1ebc64979e89b5c8' id='type-id-2391'/>
     <function-decl name='fdk_list_bind_model' mangled-name='fdk_list_bind_model' filepath='src/widget/model_bind.c' line='290' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_list_bind_model@@FDK_1.0' hash='58ba5d1d91a0b883'>
@@ -20315,7 +20321,7 @@
       <return type-id='type-id-6'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/notebook.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/notebook.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk_notebook_reorder_fn' type-id='type-id-2392' size-in-bits='64' filepath='include/fdk/fdk_widgets.h' line='1465' column='1' hash='fd7a63c0c6c822c4' id='type-id-2393'/>
     <typedef-decl name='fdk_notebook_switch_fn' type-id='type-id-2196' size-in-bits='64' filepath='include/fdk/fdk_widgets.h' line='1459' column='1' hash='fd7a63c0c6c822c4' id='type-id-2394'/>
     <pointer-type-def type-id='type-id-2395' size-in-bits='64' hash='fd7a63c0c6c822c4' id='type-id-2392'/>
@@ -20397,7 +20403,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/paned.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/paned.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_orientation' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_layout.h' line='48' column='1' hash='33776bb266c5f07f' id='type-id-2396'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_HORIZONTAL' value='1'/>
@@ -20428,7 +20434,7 @@
       <return type-id='type-id-10'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/picture.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/picture.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_picture_fit' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_widgets.h' line='1238' column='1' hash='70bc72511f7e1035' id='type-id-2397'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_PICTURE_FIT_NONE' value='0'/>
@@ -20492,7 +20498,7 @@
       <return type-id='type-id-13'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/revealer.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/revealer.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_revealer_transition' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_widgets.h' line='2023' column='1' hash='c23bca7491b6a1b8' id='type-id-2402'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_REVEAL_NONE' value='0'/>
@@ -20547,7 +20553,7 @@
       <return type-id='type-id-10'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/scroll.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/scroll.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_scroll_bar_mode' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_widgets.h' line='596' column='1' hash='e51b836c7cadf268' id='type-id-2405'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_SCROLL_BARS_CLASSIC' value='0'/>
@@ -20601,7 +20607,7 @@
       <return type-id='type-id-13'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/slider.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/slider.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <var-decl name='fdk_slider_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/slider.c' line='76' column='1'/>
     <function-decl name='fdk_slider_create' mangled-name='fdk_slider_create' filepath='src/widget/slider.c' line='558' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_slider_create@@FDK_1.0' hash='e898e85e9caa8a69'>
       <parameter type-id='type-id-390'/>
@@ -20661,7 +20667,7 @@
       <return type-id='type-id-2211'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/spin.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/spin.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_spin_create' mangled-name='fdk_spin_create' filepath='src/widget/spin.c' line='456' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_spin_create@@FDK_1.0' hash='8805e1d0bc296b02'>
       <parameter type-id='type-id-390'/>
       <parameter type-id='type-id-393'/>
@@ -20703,7 +20709,7 @@
     </function-decl>
     <var-decl name='fdk_spin_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/widgets_internal.h' line='731' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/spinner.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/spinner.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_spinner_create' mangled-name='fdk_spinner_create' filepath='src/widget/spinner.c' line='157' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_spinner_create@@FDK_1.0' hash='30224db6c02be1e2'>
       <parameter type-id='type-id-390'/>
       <parameter type-id='type-id-411'/>
@@ -20723,7 +20729,7 @@
     </function-decl>
     <var-decl name='fdk_spinner_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/widgets_internal.h' line='42' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/stack.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/stack.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk_stack_changed_fn' type-id='type-id-2407' size-in-bits='64' filepath='include/fdk/fdk_widgets.h' line='2123' column='1' hash='fd7a63c0c6c822c4' id='type-id-2408'/>
     <pointer-type-def type-id='type-id-2409' size-in-bits='64' hash='fd7a63c0c6c822c4' id='type-id-2407'/>
     <function-decl name='fdk_stack_create' mangled-name='fdk_stack_create' filepath='src/widget/stack.c' line='168' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_stack_create@@FDK_1.0' hash='30224db6c02be1e2'>
@@ -20805,7 +20811,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/stackswitcher.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/stackswitcher.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_stackswitcher_create' mangled-name='fdk_stackswitcher_create' filepath='src/widget/stackswitcher.c' line='423' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_stackswitcher_create@@FDK_1.0' hash='bff73c99088fd2a8'>
       <parameter type-id='type-id-390'/>
       <parameter type-id='type-id-393'/>
@@ -20823,7 +20829,7 @@
     </function-decl>
     <var-decl name='fdk_stackswitcher_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/widgets_internal.h' line='49' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/statics.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/statics.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-2254' size-in-bits='64' hash='3b44426638eccabe' id='type-id-2410'/>
     <pointer-type-def type-id='type-id-2410' size-in-bits='64' hash='6f39e387add545cb' id='type-id-2411'/>
     <function-decl name='fdk_label_create' mangled-name='fdk_label_create' filepath='src/widget/statics.c' line='816' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_label_create@@FDK_1.0' hash='a377338aa4357159'>
@@ -20928,7 +20934,7 @@
     <var-decl name='fdk_separator_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/widgets_internal.h' line='38' column='1'/>
     <var-decl name='fdk_frame_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/widgets_internal.h' line='39' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/statusbar.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/statusbar.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_statusbar_create' mangled-name='fdk_statusbar_create' filepath='src/widget/statusbar.c' line='170' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_statusbar_create@@FDK_1.0' hash='bff73c99088fd2a8'>
       <parameter type-id='type-id-390'/>
       <parameter type-id='type-id-393'/>
@@ -20963,7 +20969,7 @@
     </function-decl>
     <var-decl name='fdk_statusbar_class_def' type-id='type-id-467' visibility='default' filepath='src/widget/widgets_internal.h' line='45' column='1'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/textview.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/textview.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_attr_kind' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_attr.h' line='68' column='1' hash='aa2b63cf99e04e1e' id='type-id-2412'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_ATTR_SIZE_PT' value='1'/>
@@ -21184,7 +21190,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/toolbar.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/toolbar.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_toolbar_create' mangled-name='fdk_toolbar_create' filepath='src/widget/toolbar.c' line='126' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_toolbar_create@@FDK_1.0' hash='bff73c99088fd2a8'>
       <parameter type-id='type-id-390'/>
       <parameter type-id='type-id-393'/>
@@ -21204,12 +21210,12 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/tooltip.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/tooltip.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <pointer-type-def type-id='type-id-2426' size-in-bits='64' id='type-id-2427'/>
     <class-decl name='fdk_platform_window' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-2428'/>
     <typedef-decl name='fdk_platform_window' type-id='type-id-2428' filepath='src/platform/platform_internal.h' line='35' column='1' id='type-id-2426'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/tree.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/tree.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_tree_selection_mode' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_widgets.h' line='2324' column='1' hash='03353240e988f4a0' id='type-id-2429'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_TREE_SELECTION_SINGLE' value='0'/>
@@ -21314,7 +21320,7 @@
       <return type-id='type-id-6'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/widget/widget.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/widget/widget.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <function-decl name='fdk_widget_create' mangled-name='fdk_widget_create' filepath='src/widget/widget.c' line='928' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_widget_create@@FDK_1.0' hash='6fdb33b0ee3c83ca'>
       <parameter type-id='type-id-390'/>
       <parameter type-id='type-id-410'/>
@@ -21601,7 +21607,7 @@
       <return type-id='type-id-9'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/window/dnd.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/window/dnd.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_drag_status' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_dnd.h' line='231' column='1' hash='d2794099d2ebc33d' id='type-id-2432'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_DRAG_FAILED' value='-1'/>
@@ -21657,9 +21663,9 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/window/dnd_uri.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/window/dnd_uri.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
   </abi-instr>
-  <abi-instr address-size='64' path='src/window/ext_gl.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/window/ext_gl.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <typedef-decl name='fdk_ext_gl_frame_fn' type-id='type-id-1268' size-in-bits='64' filepath='include/fdk/fdk_extend.h' line='1008' column='1' hash='fd7a63c0c6c822c4' id='type-id-2445'/>
     <pointer-type-def type-id='type-id-2446' size-in-bits='64' id='type-id-2447'/>
     <class-decl name='fdk_platform_window' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-2448'/>
@@ -21689,7 +21695,7 @@
       <return type-id='type-id-195'/>
     </function-decl>
   </abi-instr>
-  <abi-instr address-size='64' path='src/window/extend.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/window/extend.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_cursor_shape' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_window.h' line='298' column='1' hash='42e99b5cda813e6a' id='type-id-2449'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_CURSOR_DEFAULT' value='0'/>
@@ -22050,7 +22056,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/window/gesture.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/window/gesture.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_gesture_direction' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_gesture.h' line='77' column='1' hash='bd6e35593c57dbaa' id='type-id-2471'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_GESTURE_DIR_LEFT' value='1'/>
@@ -22330,7 +22336,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/window/touch.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/window/touch.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-2497' size-in-bits='3200' hash='b35ba46f04569be6' id='type-id-522'>
       <subrange length='10' lower-bound='0' upper-bound='9' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='4e72a2f569b234f4' id='type-id-1346'/>
     </array-type-def>
@@ -22362,7 +22368,7 @@
     <typedef-decl name='fdk_touch_slot' type-id='type-id-2498' size-in-bits='320' filepath='src/window/touch.c' line='70' column='1' id='type-id-2497'/>
     <pointer-type-def type-id='type-id-2499' size-in-bits='64' hash='4743de10775f6e48#2' id='type-id-2500'/>
   </abi-instr>
-  <abi-instr address-size='64' path='src/window/window.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/window/window.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <enum-decl name='fdk_a11y_action' size-in-bits='32' alignment-in-bits='32' filepath='include/fdk/fdk_a11y.h' line='253' column='1' hash='762cdc0559d38e1c' id='type-id-2501'>
       <underlying-type type-id='type-id-3'/>
       <enumerator name='FDK_A11Y_ACTION_ACTIVATE' value='1'/>
@@ -22755,15 +22761,15 @@
       <return type-id='type-id-195'/>
     </function-decl>
     <function-decl name='fdk_window_is_maximized' mangled-name='fdk_window_is_maximized' filepath='src/window/window.c' line='1562' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_is_maximized@@FDK_1.0' hash='99a864f076ca9588'>
-      <parameter type-id='type-id-2437' name='window' filepath='src/window/window.c' line='2995' column='1'/>
+      <parameter type-id='type-id-2437' name='window' filepath='src/window/window.c' line='2998' column='1'/>
       <return type-id='type-id-13'/>
     </function-decl>
     <function-decl name='fdk_window_is_fullscreen' mangled-name='fdk_window_is_fullscreen' filepath='src/window/window.c' line='1566' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_is_fullscreen@@FDK_1.0' hash='99a864f076ca9588'>
-      <parameter type-id='type-id-2437' name='window' filepath='src/window/window.c' line='2995' column='1'/>
+      <parameter type-id='type-id-2437' name='window' filepath='src/window/window.c' line='2998' column='1'/>
       <return type-id='type-id-13'/>
     </function-decl>
     <function-decl name='fdk_window_is_minimized' mangled-name='fdk_window_is_minimized' filepath='src/window/window.c' line='1570' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_is_minimized@@FDK_1.0' hash='99a864f076ca9588'>
-      <parameter type-id='type-id-2437' name='window' filepath='src/window/window.c' line='2995' column='1'/>
+      <parameter type-id='type-id-2437' name='window' filepath='src/window/window.c' line='2998' column='1'/>
       <return type-id='type-id-13'/>
     </function-decl>
     <function-decl name='fdk_window_set_resizable' mangled-name='fdk_window_set_resizable' filepath='src/window/window.c' line='1576' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_set_resizable@@FDK_1.0' hash='9a430994f415280c'>
@@ -22772,7 +22778,7 @@
       <return type-id='type-id-10'/>
     </function-decl>
     <function-decl name='fdk_window_get_resizable' mangled-name='fdk_window_get_resizable' filepath='src/window/window.c' line='1591' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_get_resizable@@FDK_1.0' hash='99a864f076ca9588'>
-      <parameter type-id='type-id-2437' name='window' filepath='src/window/window.c' line='2995' column='1'/>
+      <parameter type-id='type-id-2437' name='window' filepath='src/window/window.c' line='2998' column='1'/>
       <return type-id='type-id-13'/>
     </function-decl>
     <function-decl name='fdk_window_set_event_callback' mangled-name='fdk_window_set_event_callback' filepath='src/window/window.c' line='1889' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_set_event_callback@@FDK_1.0' hash='f35e6163794f477b'>
@@ -22806,34 +22812,34 @@
       <parameter type-id='type-id-159' name='window' filepath='src/window/window.c' line='2609' column='1'/>
       <return type-id='type-id-195'/>
     </function-decl>
-    <function-decl name='fdk_window_set_content' mangled-name='fdk_window_set_content' filepath='src/window/window.c' line='2856' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_set_content@@FDK_1.0' hash='7883bd5562c9ac36'>
+    <function-decl name='fdk_window_set_content' mangled-name='fdk_window_set_content' filepath='src/window/window.c' line='2859' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_set_content@@FDK_1.0' hash='7883bd5562c9ac36'>
       <parameter type-id='type-id-159'/>
       <parameter type-id='type-id-390'/>
       <return type-id='type-id-10'/>
     </function-decl>
-    <function-decl name='fdk_window_set_decorated' mangled-name='fdk_window_set_decorated' filepath='src/window/window.c' line='2888' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_set_decorated@@FDK_1.0' hash='f467c00e4d4fe351'>
+    <function-decl name='fdk_window_set_decorated' mangled-name='fdk_window_set_decorated' filepath='src/window/window.c' line='2891' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_set_decorated@@FDK_1.0' hash='f467c00e4d4fe351'>
       <parameter type-id='type-id-159'/>
       <parameter type-id='type-id-13'/>
       <return type-id='type-id-195'/>
     </function-decl>
-    <function-decl name='fdk_window_get_decorated' mangled-name='fdk_window_get_decorated' filepath='src/window/window.c' line='2995' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_get_decorated@@FDK_1.0' hash='99a864f076ca9588'>
-      <parameter type-id='type-id-2437' name='window' filepath='src/window/window.c' line='2995' column='1'/>
+    <function-decl name='fdk_window_get_decorated' mangled-name='fdk_window_get_decorated' filepath='src/window/window.c' line='2998' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_get_decorated@@FDK_1.0' hash='99a864f076ca9588'>
+      <parameter type-id='type-id-2437' name='window' filepath='src/window/window.c' line='2998' column='1'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='fdk_window_set_decoration_font' mangled-name='fdk_window_set_decoration_font' filepath='src/window/window.c' line='2999' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_set_decoration_font@@FDK_1.0' hash='b7c150de40a97cfb'>
-      <parameter type-id='type-id-159' name='window' filepath='src/window/window.c' line='2999' column='1'/>
-      <parameter type-id='type-id-393' name='font' filepath='src/window/window.c' line='3000' column='1'/>
+    <function-decl name='fdk_window_set_decoration_font' mangled-name='fdk_window_set_decoration_font' filepath='src/window/window.c' line='3002' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_set_decoration_font@@FDK_1.0' hash='b7c150de40a97cfb'>
+      <parameter type-id='type-id-159' name='window' filepath='src/window/window.c' line='3002' column='1'/>
+      <parameter type-id='type-id-393' name='font' filepath='src/window/window.c' line='3003' column='1'/>
       <return type-id='type-id-195'/>
     </function-decl>
-    <function-decl name='fdk_window_layout' mangled-name='fdk_window_layout' filepath='src/window/window.c' line='3017' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_layout@@FDK_1.0' hash='6f73195670a5374e'>
+    <function-decl name='fdk_window_layout' mangled-name='fdk_window_layout' filepath='src/window/window.c' line='3020' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_layout@@FDK_1.0' hash='6f73195670a5374e'>
       <parameter type-id='type-id-159'/>
       <return type-id='type-id-10'/>
     </function-decl>
-    <function-decl name='fdk_window_render_mode' mangled-name='fdk_window_render_mode' filepath='src/window/window.c' line='3169' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_render_mode@@FDK_1.0' hash='867d0881a3854d37'>
-      <parameter type-id='type-id-2437' name='window' filepath='src/window/window.c' line='3169' column='1'/>
+    <function-decl name='fdk_window_render_mode' mangled-name='fdk_window_render_mode' filepath='src/window/window.c' line='3172' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_render_mode@@FDK_1.0' hash='867d0881a3854d37'>
+      <parameter type-id='type-id-2437' name='window' filepath='src/window/window.c' line='3172' column='1'/>
       <return type-id='type-id-446'/>
     </function-decl>
-    <function-decl name='fdk_window_set_idle_inhibited' mangled-name='fdk_window_set_idle_inhibited' filepath='src/window/window.c' line='3177' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_set_idle_inhibited@@FDK_1.0' hash='33032ee21e6956a8'>
+    <function-decl name='fdk_window_set_idle_inhibited' mangled-name='fdk_window_set_idle_inhibited' filepath='src/window/window.c' line='3180' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='fdk_window_set_idle_inhibited@@FDK_1.0' hash='33032ee21e6956a8'>
       <parameter type-id='type-id-159' name='window' filepath='src/window/dnd.c' line='23' column='1'/>
       <parameter type-id='type-id-26' name='formats' filepath='src/window/dnd.c' line='23' column='1'/>
       <return type-id='type-id-195'/>
@@ -22884,7 +22890,7 @@
       <return type-id='type-id-10'/>
     </function-type>
   </abi-instr>
-  <abi-instr address-size='64' path='src/window/window_gl.c' comp-dir-path='/home/z/my-project/fdk-repo' language='LANG_C11'>
+  <abi-instr address-size='64' path='src/window/window_gl.c' comp-dir-path='/home/z/my-project/fdk-qg' language='LANG_C11'>
     <array-type-def dimensions='1' type-id='type-id-1' size-in-bits='64' hash='e1c8b625c73024c4' id='type-id-2110'>
       <subrange length='8' lower-bound='0' upper-bound='7' type-id='type-id-5' size-in-bits='64' is-anonymous='yes' hash='6e87a8ff484907ad' id='type-id-973'/>
     </array-type-def>

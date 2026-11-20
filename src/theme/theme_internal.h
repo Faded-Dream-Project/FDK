@@ -243,6 +243,14 @@ void fdk__reduced_motion_portal_tick(fdk_context *ctx);
 void fdk__reduced_motion_shutdown(void);
 void fdk__reduced_motion_reset_for_tests(void);
 
+/* The high-contrast preference (high_contrast.c; the same shape
+ * as color-scheme/reduced-motion — see the file header). */
+void fdk__high_contrast_poll_x11(void);
+bool fdk__high_contrast_x11_spoke(void);
+void fdk__high_contrast_portal_tick(fdk_context *ctx);
+void fdk__high_contrast_shutdown(void);
+void fdk__high_contrast_reset_for_tests(void);
+
 /* Test seam: full module-state reset. */
 void fdk__color_scheme_reset_for_tests(void);
 

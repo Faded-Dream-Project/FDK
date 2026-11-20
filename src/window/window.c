@@ -2769,6 +2769,7 @@ void fdk__window_theme_settings_shutdown(void) {
      * it would dangle the module's handle past the sweep). */
     fdk__color_scheme_shutdown();
     fdk__reduced_motion_shutdown();
+    fdk__high_contrast_shutdown();
     fdk__atspi_shutdown();
     fdk__ui_metrics_shutdown();
     fdk__theme_settings_shutdown();
@@ -2781,6 +2782,7 @@ void fdk__window_theme_settings_shutdown(void) {
 void fdk__window_theme_settings_notify(void) {
     fdk__color_scheme_poll_x11();
     fdk__reduced_motion_poll_x11();
+    fdk__high_contrast_poll_x11();
     fdk__ui_metrics_poll_x11();
     fdk__theme_settings_recheck();
 }
@@ -2792,6 +2794,7 @@ void fdk__window_theme_settings_notify(void) {
 void fdk__window_theme_scheme_tick(fdk_context *ctx) {
     fdk__color_scheme_portal_tick(ctx);
     fdk__reduced_motion_portal_tick(ctx);
+    fdk__high_contrast_portal_tick(ctx);
     fdk__ui_metrics_portal_tick(ctx);
     /* 1.0.0, S-8: the AT-SPI bridge's attach point — the same pump
      * tick shape (throttled internally to one attempt; degrades

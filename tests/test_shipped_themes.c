@@ -133,14 +133,17 @@ static void test_faded_dream_is_the_default(void) {
 static void test_folder_ships_exactly_one(void) {
     /* The 1.0.0 alignment, pinned structurally: opendir the
      * .FDKThemes/ folder itself and count .fdk entries — exactly
-     * one, and it is faded-dream.fdk. A second face (a stray
-     * drop, a half-finished experiment) fails HERE, in the test
-     * battery, instead of riding into a release through a
-     * wildcard install. */
+     * two: faded-dream.fdk and its accessibility sibling
+     * faded-dream-highcontrast.fdk (H2: the desktop's high-
+     * contrast statement selects it; it is never the default).
+     * Anything else (a stray drop, a half-finished experiment)
+     * fails HERE, in the test battery, instead of riding into a
+     * release through a wildcard install. */
+    int have_base = 0;
+    int have_hc = 0;
     DIR *d = opendir(g_folder);
     assert(d != NULL);
     int count = 0;
-    char only[256] = "";
     struct dirent *ent;
     while ((ent = readdir(d)) != NULL) {
         size_t n = strlen(ent->d_name);
@@ -148,29 +151,40 @@ static void test_folder_ships_exactly_one(void) {
             continue; /* not a theme file */
         }
         count++;
-        snprintf(only, sizeof only, "%s", ent->d_name);
+        if (strcmp(ent->d_name, "faded-dream.fdk") == 0) {
+            have_base = 1;
+        }
+        if (strcmp(ent->d_name,
+                   "faded-dream-highcontrast.fdk") == 0) {
+            have_hc = 1;
+        }
     }
     closedir(d);
-    if (count != 1 || strcmp(only, "faded-dream.fdk") != 0) {
+    if (count != 2 || !have_base || !have_hc) {
         fprintf(stderr,
-                "FAIL: .FDKThemes/ carries %d .fdk file(s) (first: %s) "
-                "— the 1.0.0 contract is EXACTLY ONE: "
-                "faded-dream.fdk\n",
-                count, count > 0 ? only : "(none)");
-        assert(!"the shipped folder re-bloated past the one face");
+                "FAIL: .FDKThemes/ carries %d .fdk file(s); the "
+                "contract is EXACTLY TWO: faded-dream.fdk and its "
+                "accessibility sibling "
+                "faded-dream-highcontrast.fdk\n",
+                count);
+        assert(!"the shipped folder must hold exactly the base face and its high-contrast sibling");
     }
 
     /* Enumeration agrees: pointed at the shipped folder with a
-     * clean environment, exactly the one stem lists. */
+     * clean environment, exactly the two stems list. */
     fdk__theme_scan_reset_for_tests();
     assert(setenv("FDK_THEME_DIR", g_folder, 1) == 0);
     assert(setenv("XDG_DATA_HOME", "/nonexistent-fdk-shipped", 1) == 0);
     assert(setenv("XDG_DATA_DIRS", "/nonexistent-fdk-shipped", 1) == 0);
     assert(setenv("HOME", "/nonexistent-fdk-shipped", 1) == 0);
-    assert(fdk_theme_available_count() == 1);
+    assert(fdk_theme_available_count() == 2);
     assert(strcmp(fdk_theme_available_name(0), "faded-dream") == 0);
     assert(strcmp(fdk_theme_available_path(0),
                   theme_file(g_folder, "faded-dream")) == 0);
+    assert(strcmp(fdk_theme_available_name(1),
+                  "faded-dream-highcontrast") == 0);
+    assert(strcmp(fdk_theme_available_path(1),
+                  theme_file(g_folder, "faded-dream-highcontrast")) == 0);
 
     /* The quoted name of the one shipped face resolves. */
     fdk_result r = FDK_ERR_UNKNOWN;
