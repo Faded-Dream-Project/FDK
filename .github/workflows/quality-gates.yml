@@ -54,7 +54,7 @@ jobs:
       - name: install deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libabigail-dev \
+          sudo apt-get install -y -qq abigail-tools \
             libx11-dev libxext-dev libxrandr-dev libxrender-dev \
             libxi-dev libwayland-dev libxkbcommon-dev zlib1g-dev
       - name: build the shared library
@@ -133,6 +133,6 @@ jobs:
           sudo apt-get install -y -qq \
             libx11-dev libxext-dev libxrandr-dev libxrender-dev \
             libxi-dev libwayland-dev libxkbcommon-dev zlib1g-dev \
-            fontconfig fonts-dejavu-core
+            fontconfig fonts-urw-base35 fonts-noto-core
       - name: build + run the suite
         run: make -j"$(nproc)" test
