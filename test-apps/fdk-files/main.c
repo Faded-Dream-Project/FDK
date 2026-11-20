@@ -39,6 +39,17 @@
 
 files_app fapp;
 
+/* Checked system() — see files.h. The rig commands are setup whose
+ * failure is better surfaced here (with the command) than silently
+ * ignored; the assertions downstream catch a broken rig anyway. */
+void files_run_cmd(const char *cmd) {
+    int rc = system(cmd);
+    if (rc != 0) {
+        fprintf(stderr, "fdk-files rig cmd failed (rc=%d): %s\n", rc,
+                cmd != NULL ? cmd : "(null)");
+    }
+}
+
 /* the tray's click menu (round 50): the model lives as long as the
  * item; the node ids are stable handles for the click dispatch. */
 static fdk_tray_menu *g_tray_menu = NULL;
@@ -680,7 +691,7 @@ static void rig_script(void) {
         char cmd[256];
         snprintf(cmd, sizeof cmd, "rm -rf /tmp/ffs-%d /tmp/ffs-copy-%d",
                  (int)getpid(), (int)getpid());
-        (void)system(cmd);
+        files_run_cmd(cmd);
     }
 }
 
@@ -747,14 +758,14 @@ int main(int argc, char **argv) {
         setenv("FDK_TESTAPP_FRAMES", "20000", 1);
     }
     if (drig) {
-        (void)system("rm -rf /tmp/fdk-drig && mkdir -p "
-                     "/tmp/fdk-drig/left /tmp/fdk-drig/right");
+        files_run_cmd("rm -rf /tmp/fdk-drig && mkdir -p "
+                 "/tmp/fdk-drig/left /tmp/fdk-drig/right");
         FILE *af = fopen("/tmp/fdk-drig/left/alpha.txt", "w");
         if (af != NULL) { fputs("alpha\n", af); fclose(af); }
-        (void)system("mkdir -p /tmp/fdk-drig/left/beta-dir");
+        files_run_cmd("mkdir -p /tmp/fdk-drig/left/beta-dir");
         setenv("XDG_CONFIG_HOME", "/tmp/fdk-drig-cfg", 1);
-        (void)system("rm -rf /tmp/fdk-drig-cfg && mkdir -p "
-                     "/tmp/fdk-drig-cfg/fdk-files");
+        files_run_cmd("rm -rf /tmp/fdk-drig-cfg && mkdir -p "
+                 "/tmp/fdk-drig-cfg/fdk-files");
         FILE *bf = fopen("/tmp/fdk-drig-bookmarks", "w");
         if (bf != NULL) {
             fputs("# fdk-files bookmarks (order = display order)\n"
@@ -763,8 +774,8 @@ int main(int argc, char **argv) {
         }
         /* the bookmarks loader reads XDG_CONFIG_HOME; copy the seed
          * into place before load */
-        (void)system("cp /tmp/fdk-drig-bookmarks "
-                     "/tmp/fdk-drig-cfg/fdk-files/bookmarks");
+        files_run_cmd("cp /tmp/fdk-drig-bookmarks "
+                 "/tmp/fdk-drig-cfg/fdk-files/bookmarks");
     }
 
     bookmarks_load(); /* before the sidebar builds (§26/3a) */
@@ -777,8 +788,8 @@ int main(int argc, char **argv) {
     ops_init(); /* the worker engine (§25/4b)                   */
 
     if (drig) {
-        (void)system("cp /tmp/fdk-drig-bookmarks "
-                     "/tmp/fdk-drig-cfg/fdk-files/bookmarks");
+        files_run_cmd("cp /tmp/fdk-drig-bookmarks "
+                 "/tmp/fdk-drig-cfg/fdk-files/bookmarks");
         bookmarks_load();
         bookmarks_refresh();
         pane_navigate(fapp.panes[0], "/tmp/fdk-drig/left");

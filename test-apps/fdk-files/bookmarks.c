@@ -70,7 +70,10 @@ void bookmarks_save(void) {
         }
         memcpy(dir, path, n);
         dir[n] = '\0';
-        (void)system(NULL); /* no mkdir -p dependency: use the C way */
+        /* no mkdir -p dependency: the C way below (the historic
+         * system(NULL) shell probe was dead — its result was never
+         * read, and it broke -Werror builds: gcc marks system()
+         * warn_unused_result and (void) does not silence it) */
         char step[FI_PATH_MAX];
         ta_copy(step, sizeof step, dir);
         for (char *s = step + 1; *s != '\0'; s++) {

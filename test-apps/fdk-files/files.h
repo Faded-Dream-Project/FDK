@@ -192,4 +192,13 @@ enum {
     CTX_SIDEBAR_PLACE,
 };
 
+/* system() with the result CHECKED (gcc/glibc mark it
+ * warn_unused_result; a bare (void) cast does not silence that
+ * under -Werror, which broke `make release` on Ubuntu 24.04 /
+ * gcc 13.3). The rig scripts here are best-effort setup — a
+ * failure means the rig's expectations will fail loudly in the
+ * assertions that follow, so this warns and carries on rather
+ * than aborting the app. Defined in files.c. */
+void files_run_cmd(const char *cmd);
+
 #endif /* FILES_APP_H */
