@@ -49,8 +49,15 @@ for AT users. The internal a11y tree HAS the data (actions,
 values ride the describe/notification path); it is the wire
 surface that is missing.
 
-**H2 — No reduced-motion, high-contrast, or font-scaling
-accessibility settings anywhere in the API or theme grammar.**
+**H2 — No reduced-motion or high-contrast accessibility settings
+anywhere in the API or theme grammar.** (CORRECTED 2026-11-20:
+the original text also named font scaling — WRONG. `fdk_ui_font_px()`
+/ `fdk_ui_scale()` (fdk_theme.h) already resolve XSETTINGS
+Gtk/FontName, the portal's font-name + text-scaling-factor, and
+env overrides, live-followed — the audit's API-surface grep missed
+the ui_metrics module. Reduced motion now EXISTS too:
+`fdk_system_prefers_reduced_motion()`, commit 8a9f1d0. What
+remains of H2 is high-contrast only.)
 `grep reduced-motion|high-contrast` across `include/` and
 `src/theme/` → 0. The animation engine has no way to say "tone it
 down"; themes cannot declare a high-contrast variant; text size
