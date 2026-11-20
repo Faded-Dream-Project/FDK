@@ -14,6 +14,9 @@
 *.a
 *.so
 *.so.*
+# The ABI baseline is an XML that merely NAMES like a library —
+# abidw's output, deliberately versioned (tools/abi/).
+!tools/abi/libfdk.so.1.baseline.xml
 
 # Core dumps (any depth — a tracked test-apps/core once slipped past the
 # root-anchored form)
