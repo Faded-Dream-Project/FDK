@@ -7,6 +7,7 @@
 #include "core/context_internal.h"
 #include "core/log_internal.h"
 #include "window/window_internal.h"
+#include "render/surface_internal.h" /* the image budget lifecycle hooks */
 
 #include <errno.h>
 #include <poll.h>
@@ -581,6 +582,7 @@ fdk_result fdk_init_ex(fdk_context **out_ctx,
 
     *out_ctx = ctx;
     g_active_context = ctx; /* the active-context seam (image budget) */
+    fdk__image_budget_init(ctx->image_max_pixels);
     return FDK_OK;
 #undef OPT_HAS
 }
@@ -964,9 +966,13 @@ void fdk_shutdown(fdk_context *ctx) {
 
     /* The active-context seam: this context is going away, so any
      * later image decode (tests, atexit handlers) must fall back to
-     * the built-in budget, never read a freed struct. */
+     * the built-in budget, never read a freed struct. The budget
+     * reset is the twin: a LATER init (possibly with a different
+     * image_max_pixels) must re-resolve rather than inherit this
+     * context's override. */
     if (g_active_context == ctx) {
         g_active_context = NULL;
+        fdk__image_budget_shutdown();
     }
 
     /* The G-2 post queue FIRST (§25): flip dead + drop queued posts

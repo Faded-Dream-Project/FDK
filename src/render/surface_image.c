@@ -39,6 +39,8 @@
  * stb_image_impl.c; only the prototype surface is included here). */
 #include "stb_image.h"
 
+#include <stdatomic.h> /* the budget atomics */
+
 /* Hard ceiling on input file size. Real images are megabytes; this
  * bound exists so a corrupt/hostile "image" cannot make FDK allocate
  * by file size at all (stb allocates by header dimensions, this caps
@@ -74,29 +76,64 @@
 /* The override's floor and the GIF:PNG ratio it preserves. */
 #define FDK_IMAGE_BUDGET_RATIO_GIF 6u
 
-/* The process-wide effective caps, resolved once at first use
- * (fdk_init sets the context field before any decode can run;
- * single-context processes are every FDK app today — see the
- * context_internal.h note). 0,0 = not yet resolved. */
-static unsigned int g_budget_png_jpeg = 0;
-static unsigned int g_budget_gif = 0;
+/* The process-wide effective caps (2026-11-20 rework): resolved
+ * EAGERLY by fdk_init (fdk__image_budget_init below), reset by
+ * fdk_shutdown (fdk__image_budget_shutdown), and stored as C11
+ * ATOMICS — the read side (every decode, including the
+ * any-thread pixel decoder of §25/G-4) takes no lock and no
+ * lazy-init branch; the write side happens exactly at context
+ * bring-up/teardown on the thread that owns the context.
+ *
+ * The resolved value is stable for a context's lifetime by
+ * design: changing a budget mid-flight would make two decodes of
+ * the SAME file disagree for no caller-visible reason. A fresh
+ * fdk_init with different image_max_pixels is the supported way
+ * to change it — fdk_shutdown resets to the built-in defaults,
+ * and the next init resolves again.
+ *
+ * SENTINEL: 0 means "not resolved" (no context ever inited). The
+ * read side then falls back to the built-in defaults — decodes
+ * before fdk_init (a thumbnail service warming its cache, the
+ * test suites) keep working with the default budget, exactly as
+ * they did under the lazy regime. */
+static _Atomic unsigned int g_budget_png_jpeg = 0;
+static _Atomic unsigned int g_budget_gif = 0;
 
-static void budget_resolve(void) {
-    if (g_budget_png_jpeg != 0) {
-        return;
-    }
+/* Called by fdk_init once the context (and its image_max_pixels)
+ * exists; also safe to call directly by the test rigs. Declared
+ * in render/surface_internal.h. */
+void fdk__image_budget_init(unsigned int override_max_pixels) {
     unsigned int cap = FDK_IMAGE_MAX_PIXELS_PNG_JPEG;
     unsigned int gif = FDK_IMAGE_MAX_PIXELS_GIF;
-    const fdk_context *ctx = fdk__context_active();
-    if (ctx != NULL && ctx->image_max_pixels != 0) {
-        cap = ctx->image_max_pixels;
+    if (override_max_pixels != 0) {
+        cap = override_max_pixels;
         gif = cap / FDK_IMAGE_BUDGET_RATIO_GIF;
         if (gif < (1u << 20)) {
             gif = 1u << 20; /* never below the init floor */
         }
     }
-    g_budget_png_jpeg = cap;
-    g_budget_gif = gif;
+    atomic_store(&g_budget_png_jpeg, cap);
+    atomic_store(&g_budget_gif, gif);
+}
+
+/* Called by fdk_shutdown: back to "not resolved" so a LATER init
+ * (possibly with a different image_max_pixels) re-resolves, and
+ * post-shutdown decodes see the defaults, not a dead context's
+ * override. */
+void fdk__image_budget_shutdown(void) {
+    atomic_store(&g_budget_png_jpeg, 0);
+    atomic_store(&g_budget_gif, 0);
+}
+
+/* The read side: the defaults when nothing is resolved. */
+static unsigned int budget_png_jpeg(void) {
+    unsigned int v = atomic_load(&g_budget_png_jpeg);
+    return v != 0 ? v : FDK_IMAGE_MAX_PIXELS_PNG_JPEG;
+}
+
+static unsigned int budget_gif(void) {
+    unsigned int v = atomic_load(&g_budget_gif);
+    return v != 0 ? v : FDK_IMAGE_MAX_PIXELS_GIF;
 }
 
 /* Which budget a stream falls under. stbi_info does not report the
@@ -109,21 +146,19 @@ static bool is_gif_header(const void *buf, int len) {
 }
 
 static unsigned int budget_for(const void *buf, int len) {
-    budget_resolve();
-    return is_gif_header(buf, len) ? g_budget_gif : g_budget_png_jpeg;
+    return is_gif_header(buf, len) ? budget_gif() : budget_png_jpeg();
 }
 
 static unsigned int budget_for_file(FILE *f) {
     unsigned char head[6];
     size_t got = fread(head, 1, sizeof head, f);
     rewind(f);
-    budget_resolve();
     if (got >= 6 && head[0] == 'G' && head[1] == 'I' &&
         head[2] == 'F' && head[3] == '8' &&
         (head[4] == '7' || head[4] == '9') && head[5] == 'a') {
-        return g_budget_gif;
+        return budget_gif();
     }
-    return g_budget_png_jpeg;
+    return budget_png_jpeg();
 }
 
 static fdk_result fdk__image_header_budget_ok(const void *buf,

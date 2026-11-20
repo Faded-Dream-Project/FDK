@@ -207,4 +207,14 @@ fdk_result fdk__surface_blit_alpha(fdk_surface *dst, fdk_i32 dst_x,
 fdk_result fdk__png_encode(const fdk_surface *surface,
                            unsigned char **out, size_t *out_len);
 
+/* The image decode budget (surface_image.c; the per-format policy
+ * and its init-option override are documented in fdk_core.h and
+ * docs/quality-gates.md). Wired from the context lifecycle:
+ * fdk_init resolves the effective caps from the context's
+ * image_max_pixels, fdk_shutdown resets them to the built-in
+ * defaults so a later init re-resolves. Atomics inside — the any-
+ * thread pixel decoder (§25/G-4) reads them lock-free. */
+void fdk__image_budget_init(unsigned int override_max_pixels);
+void fdk__image_budget_shutdown(void);
+
 #endif /* FDK_SURFACE_INTERNAL_H */
