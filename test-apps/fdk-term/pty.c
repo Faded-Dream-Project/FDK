@@ -53,8 +53,14 @@ bool pty_spawn(pty *p, const char *shell, const char *cwd, bool login,
         /* child */
         const char *dir = cwd != NULL && cwd[0] != '\0' ? cwd
                          : (login ? getenv("HOME") : NULL);
-        if (dir != NULL) {
-            chdir(dir);
+        if (dir != NULL && chdir(dir) != 0) {
+            /* Checked (the sibling of the files_run_cmd fix): a
+             * failed cwd change is worth one line on the child's
+             * stderr before the shell starts in the wrong place —
+             * and glibc marks chdir warn_unused_result, which a
+             * (void) cast does not silence under -Werror (CI
+             * caught it on Ubuntu 24.04 / gcc 13.3). */
+            perror("fdk-term: chdir");
         }
         setenv("TERM", "xterm-256color", 1);
         setenv("COLORTERM", "truecolor", 1);
