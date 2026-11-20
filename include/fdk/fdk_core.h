@@ -91,6 +91,18 @@ typedef struct fdk_init_options {
      * Nonzero OVERRIDES the FDK_RENDER environment variable. Values
      * outside the enum refuse fdk_init with FDK_ERR_INVALID_ARGUMENT. */
     int render_mode;
+
+    /* 1.0.0-dev appended (zero-init = the built-in per-format budget):
+     * the maximum pixels fdk_surface_create_from_image* accepts, in
+     * ADDITION to (not instead of) the per-format policy — the value
+     * here is the cap for the LARGEST format budget (PNG/JPEG); the
+     * stricter GIF budget scales with it. 0 keeps the defaults
+     * (see docs/quality-gates.md: 96 Mi pixels PNG/JPEG, 16 Mi GIF).
+     * A value smaller than 1 Mi pixels refuses fdk_init with
+     * FDK_ERR_INVALID_ARGUMENT (a budget that rejects a 1024x1024
+     * icon cannot be intended). Append-only: existing zero-init
+     * callers see no change. */
+    unsigned int image_max_pixels;
 } fdk_init_options;
 
 /* Reports the context's ACTIVE render mode and, when it differs from

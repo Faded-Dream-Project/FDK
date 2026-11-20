@@ -765,6 +765,7 @@ static void test_blit_blend(void) {
  * transparent pixel at (5,5). Written to a temp file at runtime so the
  * decoder exercises the real file path. */
 #include "test_png_bytes.h"
+#include <zlib.h> /* the budget test's fixture writer */
 
 static void test_image_decode(void) {
     /* Failure paths first. */
@@ -814,6 +815,155 @@ static void test_image_decode(void) {
     remove("build/test_image_decode.png");
     printf("[ok] image decode: PNG -> ARGB surface, known pixels, "
            "failure codes, compositing\n");
+}
+
+/* Minimal PNG writer: 8-bit RGB, filter 0, solid black. zlib
+ * (already linked, -lz) does the IDAT compression. Returns 0 on
+ * success. Used by the budget test to synthesize images of any
+ * dimension without a Python runtime. */
+static void write_png_chunk(FILE *f, const char *type,
+                            const unsigned char *data, size_t len) {
+    unsigned char hdr[8];
+    unsigned long lenbe = (unsigned long)len;
+    hdr[0] = (unsigned char)(lenbe >> 24);
+    hdr[1] = (unsigned char)(lenbe >> 16);
+    hdr[2] = (unsigned char)(lenbe >> 8);
+    hdr[3] = (unsigned char)lenbe;
+    memcpy(hdr + 4, type, 4);
+    fwrite(hdr, 1, 8, f);
+    if (len > 0) {
+        fwrite(data, 1, len, f);
+    }
+    unsigned long crc = crc32(0L, hdr + 4, 4);
+    crc = crc32(crc, data, (uInt)len);
+    unsigned char tail[4];
+    tail[0] = (unsigned char)(crc >> 24);
+    tail[1] = (unsigned char)(crc >> 16);
+    tail[2] = (unsigned char)(crc >> 8);
+    tail[3] = (unsigned char)crc;
+    fwrite(tail, 1, 4, f);
+}
+
+static int write_black_png(const char *path, int w, int h) {
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) {
+        return -1;
+    }
+    static const unsigned char sig[8] = {0x89, 'P', 'N', 'G', '\r',
+                                         '\n', 0x1A, '\n'};
+    fwrite(sig, 1, 8, f);
+
+    /* IHDR */
+    unsigned char ihdr[13];
+    ihdr[0] = (unsigned char)((unsigned)w >> 24);
+    ihdr[1] = (unsigned char)((unsigned)w >> 16);
+    ihdr[2] = (unsigned char)((unsigned)w >> 8);
+    ihdr[3] = (unsigned char)w;
+    ihdr[4] = (unsigned char)((unsigned)h >> 24);
+    ihdr[5] = (unsigned char)((unsigned)h >> 16);
+    ihdr[6] = (unsigned char)((unsigned)h >> 8);
+    ihdr[7] = (unsigned char)h;
+    ihdr[8] = 8;  /* bit depth */
+    ihdr[9] = 2;  /* color type: truecolor RGB */
+    ihdr[10] = 0; /* deflate */
+    ihdr[11] = 0; /* adaptive filtering */
+    ihdr[12] = 0; /* no interlace */
+    write_png_chunk(f, "IHDR", ihdr, sizeof ihdr);
+
+    /* IDAT: one filter-0 black row, compressed once for ALL rows
+     * (identical rows compress to almost nothing). */
+    size_t rowlen = 1 + (size_t)w * 3;
+    unsigned char *row = calloc(rowlen, 1); /* filter byte 0 + zeros */
+    if (row == NULL) {
+        fclose(f);
+        return -1;
+    }
+    uLongf comp_len = compressBound(rowlen * (size_t)h);
+    unsigned char *comp = malloc(comp_len);
+    if (comp == NULL) {
+        free(row);
+        fclose(f);
+        return -1;
+    }
+    /* compress row*h as one stream: replicate the row in chunks so
+     * a 120 MP image needs only rowlen bytes of memory. */
+    z_stream zs = {0};
+    if (deflateInit(&zs, 6) != Z_OK) {
+        free(row); free(comp); fclose(f);
+        return -1;
+    }
+    zs.next_out = comp;
+    zs.avail_out = (uInt)comp_len;
+    for (int y = 0; y < h; y++) {
+        zs.next_in = row;
+        zs.avail_in = (uInt)rowlen;
+        int flush = (y == h - 1) ? Z_FINISH : Z_NO_FLUSH;
+        int rc = deflate(&zs, flush);
+        if (rc != Z_OK && rc != Z_BUF_ERROR && rc != Z_STREAM_END) {
+            deflateEnd(&zs); free(row); free(comp); fclose(f);
+            return -1;
+        }
+    }
+    deflateEnd(&zs);
+    write_png_chunk(f, "IDAT", comp, zs.total_out);
+    free(row);
+    free(comp);
+
+    /* IEND */
+    write_png_chunk(f, "IEND", (const unsigned char *)"", 0);
+    fclose(f);
+    return 0;
+}
+
+/* 1.0.0-dev (per-format budget): 24 MP photos and 8K wallpapers
+ * are NORMAL images the 16 Mi global cap rejected. The budget is
+ * per-format now: PNG/JPEG 96 Mi pixels, GIF 16 Mi (its decoder
+ * allocates three full-frame buffers). These fixtures are minimal
+ * solid-color PNGs (a 24 MP photo is 70 KB of zlib), so the test
+ * proves the POLICY, not the decoder's speed. */
+static void test_image_budget_per_format(void) {
+    /* Generated here in C (zlib is a build dependency, -lz): a
+     * filter-0 solid-black RGB PNG of any size, ~3 bytes/pixel
+     * pre-compression and a few hundred per line after — the
+     * POLICY is what's under test, not decode speed. */
+    assert(write_black_png("/tmp/fdk-24mp.png", 6000, 4000) == 0);
+    assert(write_black_png("/tmp/fdk-8k.png", 7680, 4320) == 0);
+    assert(write_black_png("/tmp/fdk-120mp.png", 12000, 10000) == 0);
+
+    fdk_surface *s = NULL;
+    /* 24 MP photo: ACCEPTED (24,000,000 < 96 Mi = 100,663,296). */
+    assert(fdk_ok(fdk_surface_create_from_image("/tmp/fdk-24mp.png", &s)));
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    assert(info.width == 6000 && info.height == 4000);
+    fdk_surface_destroy(s);
+    s = NULL;
+
+    /* 8K wallpaper (33.2 Mi): ACCEPTED. */
+    assert(fdk_ok(fdk_surface_create_from_image("/tmp/fdk-8k.png", &s)));
+    fdk_surface_destroy(s);
+    s = NULL;
+
+    /* 120 MP (114.4 Mi): over the PNG budget — REJECTED CLEANLY,
+     * no allocation, the documented refusal code. */
+    assert(fdk_surface_create_from_image("/tmp/fdk-120mp.png", &s) ==
+           FDK_ERR_UNSUPPORTED);
+    assert(s == NULL);
+
+    /* The GIF side stays strict: a 16 Mi+ GIF is refused even
+     * though the same pixel count passes for PNG (the seeds from
+     * the fuzz finding, kept as regression fixtures in the corpus
+     * dir). 16132x16191 = 262 Mi pixels > 16 Mi GIF budget. */
+    assert(fdk_surface_create_from_image(
+        "tests/fuzz/corpus/fuzz_image/gif-oom-16132x16191.gif",
+        &s) == FDK_ERR_UNSUPPORTED);
+    assert(s == NULL);
+
+    remove("/tmp/fdk-24mp.png");
+    remove("/tmp/fdk-8k.png");
+    remove("/tmp/fdk-120mp.png");
+    printf("[ok] image budget: per-format (24MP/8K in, 120MP out, "
+           "GIF strict)\n");
 }
 
 /* §25/G-4: the any-thread pixel decoder. Worker-side thumbnail
@@ -1329,6 +1479,7 @@ int main(void) {
     test_argb_surface_and_blending();
     test_blit_blend();
     test_image_decode();
+    test_image_budget_per_format();
     test_image_decode_pixels();
     test_matrix_algebra();
     test_blit_transformed();

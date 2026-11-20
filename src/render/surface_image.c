@@ -29,6 +29,7 @@
 #include "surface_internal.h"
 
 #include "core/log_internal.h"
+#include "core/context_internal.h" /* fdk__context_active: budget override */
 
 #include <errno.h>
 #include <string.h>
@@ -44,25 +45,86 @@
  * the read side). */
 #define FDK_IMAGE_MAX_FILE_BYTES (512u * 1024u * 1024u)
 
-/* Pixel budget (fuzz-lane finding, 2026-11-20): stb's GIF decoder
- * allocates up to THREE full-frame buffers (out + background +
- * history), so per-side caps alone under-bound the worst case — a
- * 27-byte GIF claiming 24836x14080 OOMed the process inside the
- * decoder before the post-decode check could run, and a "legal"
- * 16132x16191 frame (both sides under 16384) still sums to ~2.2 GB.
+/* Pixel budget (fuzz-lane finding, 2026-11-20; per-format 1.0.0-dev):
+ * stb's GIF decoder allocates up to THREE full-frame buffers (out +
+ * background + history), while PNG/JPEG decode into ONE — so a
+ * single global limit either strangles real photos or leaves the
+ * GIF worst case at hundreds of MiB. A 27-byte GIF claiming
+ * 24836x14080 OOMed the process inside the decoder before any
+ * post-decode check could run, and a "legal" 16132x16191 frame
+ * (both sides under 16384) still summed to ~2.2 GB.
  * stbi_info_from_memory/stbi_info parse ONLY the header (no frame
  * allocation), so this pre-flight rejects by total pixels before
- * any buffer exists.
+ * any buffer exists — per FORMAT:
  *
- * The number: 16 Mi pixels (e.g. 4096x4096) bounds the GIF triple
- * buffer at 192 MiB and PNG/JPEG single buffers at 64 MiB. The
- * first cut used 64 Mi, but that leaves a 768 MiB GIF worst case
- * — too much headroom for an input that arrived as a 27-byte file.
- * 4096x4096 covers every icon, screenshot thumbnail and photo the
- * widget paths were designed for; anything larger is a workload
- * the caller should decode off the UI thread with its own policy.
- * Named, not magic: FDK_IMAGE_MAX_PIXELS. */
-#define FDK_IMAGE_MAX_PIXELS (16u * 1024u * 1024u)
+ *   PNG / JPEG / others: 96 Mi pixels — a 24 MP photo, an 8K
+ *     wallpaper (33.2 Mi), full-frame 12 MP + margin. Single
+ *     buffer: 384 MiB worst case at the cap.
+ *   GIF: 16 Mi pixels — the triple buffer bounds at 192 MiB.
+ *     Real GIFs are banners and short clips; 16 Mi is generous
+ *     and the hostile-input headroom stays tight.
+ *
+ * Named, not magic. The app override (fdk_init_options.
+ * image_max_pixels) sets the PNG/JPEG class cap directly and the
+ * GIF class to one sixth of it, keeping the 6:1 worst-case ratio;
+ * 0 (zero-init) keeps these defaults. */
+#define FDK_IMAGE_MAX_PIXELS_PNG_JPEG \
+    (96u * 1024u * 1024u)
+#define FDK_IMAGE_MAX_PIXELS_GIF (16u * 1024u * 1024u)
+/* The override's floor and the GIF:PNG ratio it preserves. */
+#define FDK_IMAGE_BUDGET_RATIO_GIF 6u
+
+/* The process-wide effective caps, resolved once at first use
+ * (fdk_init sets the context field before any decode can run;
+ * single-context processes are every FDK app today — see the
+ * context_internal.h note). 0,0 = not yet resolved. */
+static unsigned int g_budget_png_jpeg = 0;
+static unsigned int g_budget_gif = 0;
+
+static void budget_resolve(void) {
+    if (g_budget_png_jpeg != 0) {
+        return;
+    }
+    unsigned int cap = FDK_IMAGE_MAX_PIXELS_PNG_JPEG;
+    unsigned int gif = FDK_IMAGE_MAX_PIXELS_GIF;
+    const fdk_context *ctx = fdk__context_active();
+    if (ctx != NULL && ctx->image_max_pixels != 0) {
+        cap = ctx->image_max_pixels;
+        gif = cap / FDK_IMAGE_BUDGET_RATIO_GIF;
+        if (gif < (1u << 20)) {
+            gif = 1u << 20; /* never below the init floor */
+        }
+    }
+    g_budget_png_jpeg = cap;
+    g_budget_gif = gif;
+}
+
+/* Which budget a stream falls under. stbi_info does not report the
+ * format; a cheap magic sniff does (GIF87a/GIF89a are the only
+ * multi-buffer codecs on the stb path). */
+static bool is_gif_header(const void *buf, int len) {
+    const unsigned char *b = buf;
+    return len >= 6 && b[0] == 'G' && b[1] == 'I' && b[2] == 'F' &&
+           b[3] == '8' && (b[4] == '7' || b[4] == '9') && b[5] == 'a';
+}
+
+static unsigned int budget_for(const void *buf, int len) {
+    budget_resolve();
+    return is_gif_header(buf, len) ? g_budget_gif : g_budget_png_jpeg;
+}
+
+static unsigned int budget_for_file(FILE *f) {
+    unsigned char head[6];
+    size_t got = fread(head, 1, sizeof head, f);
+    rewind(f);
+    budget_resolve();
+    if (got >= 6 && head[0] == 'G' && head[1] == 'I' &&
+        head[2] == 'F' && head[3] == '8' &&
+        (head[4] == '7' || head[4] == '9') && head[5] == 'a') {
+        return g_budget_gif;
+    }
+    return g_budget_png_jpeg;
+}
 
 static fdk_result fdk__image_header_budget_ok(const void *buf,
                                               int len) {
@@ -72,11 +134,12 @@ static fdk_result fdk__image_header_budget_ok(const void *buf,
         return FDK_OK; /* not a parseable header: let the decoder
                         * produce its honest refusal below */
     }
+    unsigned int budget = budget_for(buf, len);
     if (w > 0 && h > 0 &&
         (unsigned long long)w * (unsigned long long)h >
-            (unsigned long long)FDK_IMAGE_MAX_PIXELS) {
+            (unsigned long long)budget) {
         FDK_WARN("image dimensions exceed pixel budget (%dx%d, max "
-                 "%u pixels)", w, h, FDK_IMAGE_MAX_PIXELS);
+                 "%u pixels)", w, h, budget);
         return FDK_ERR_UNSUPPORTED;
     }
     return FDK_OK;
@@ -84,14 +147,21 @@ static fdk_result fdk__image_header_budget_ok(const void *buf,
 
 static fdk_result fdk__image_header_budget_ok_file(const char *path) {
     int w = 0, h = 0;
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) {
+        return FDK_OK; /* the caller's stat/decode reports the real
+                        * error; budget-check nothing here */
+    }
+    unsigned int budget = budget_for_file(f);
+    fclose(f);
     if (stbi_info(path, &w, &h, NULL) == 0) {
         return FDK_OK;
     }
     if (w > 0 && h > 0 &&
         (unsigned long long)w * (unsigned long long)h >
-            (unsigned long long)FDK_IMAGE_MAX_PIXELS) {
+            (unsigned long long)budget) {
         FDK_WARN("image dimensions exceed pixel budget (%dx%d, max "
-                 "%u pixels): %s", w, h, FDK_IMAGE_MAX_PIXELS, path);
+                 "%u pixels): %s", w, h, budget, path);
         return FDK_ERR_UNSUPPORTED;
     }
     return FDK_OK;

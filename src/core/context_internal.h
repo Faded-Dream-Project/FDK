@@ -44,6 +44,12 @@ struct fdk_context {
     int render_mode;
     int render_active;          /* the mode fdk_context_render_mode reports */
     const char *render_reason;  /* static string, NULL when same       */
+    /* 1.0.0-dev: the caller's image decode budget override (0 = the
+     * built-in per-format defaults). Set from fdk_init_options.
+     * image_max_pixels is a PROCESS-WIDE effective value resolved at
+     * init (see render/surface_image.c) — contexts are singletons
+     * per fdk_init in every FDK app today. */
+    unsigned int image_max_pixels;
 
     int running;            /* nonzero while inside fdk_run() */
     int quit_requested;     /* set by fdk_quit() */
@@ -222,5 +228,11 @@ void fdk_context_unregister_window(fdk_context *ctx, fdk_window *window);
  * already destroyed, or for one a backend delivered by mistake). */
 fdk_window *fdk_context_find_window_by_pwindow(fdk_context *ctx,
                                                 fdk_platform_window *pwindow);
+
+/* 1.0.0-dev (image budget override): the ACTIVE context, or NULL
+ * before fdk_init / after fdk_context_destroy. Single-context is
+ * every FDK app today; the accessor keeps the lookup honest if a
+ * second context ever exists (returns the most recent init). */
+fdk_context *fdk__context_active(void);
 
 #endif /* FDK_CONTEXT_INTERNAL_H */

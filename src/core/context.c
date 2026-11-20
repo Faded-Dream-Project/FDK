@@ -411,6 +411,16 @@ static fdk_result select_and_connect(
 
 static int render_mode_from_env(void);
 
+/* The active context (see context_internal.h). fdk_init sets it,
+ * fdk_context_destroy clears it; single-context processes are the
+ * only supported shape today, and this makes that assumption
+ * visible instead of implicit. */
+static fdk_context *g_active_context = NULL;
+
+fdk_context *fdk__context_active(void) {
+    return g_active_context;
+}
+
 fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     if (out_ctx == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
@@ -443,6 +453,7 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     ctx->render_mode = FDK_RENDER_AUTO;
     ctx->render_active = FDK_RENDER_AUTO;
     ctx->render_reason = NULL;
+    ctx->image_max_pixels = 0;
 
     fdk_platform_backend requested = FDK_PLATFORM_AUTO;
     if (options != NULL) {
@@ -454,6 +465,15 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
             fdk_free(ctx);
             return FDK_ERR_INVALID_ARGUMENT;
         }
+        if (options->image_max_pixels != 0 &&
+            options->image_max_pixels < (1u << 20)) {
+            /* A budget that rejects a 1024x1024 icon cannot be an
+             * intended value; refuse loudly rather than silently
+             * breaking every icon load. */
+            fdk_free(ctx);
+            return FDK_ERR_INVALID_ARGUMENT;
+        }
+        ctx->image_max_pixels = options->image_max_pixels;
         if (options->app_id != NULL) {
             ctx->app_id = dup_string(options->app_id);
             if (ctx->app_id == NULL) {
@@ -537,6 +557,7 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
              ctx->app_id ? ctx->app_id : "(none)");
 
     *out_ctx = ctx;
+    g_active_context = ctx; /* the active-context seam (image budget) */
     return FDK_OK;
 }
 
@@ -898,6 +919,13 @@ void fdk_shutdown(fdk_context *ctx) {
     }
 
     FDK_INFO("shutting down");
+
+    /* The active-context seam: this context is going away, so any
+     * later image decode (tests, atexit handlers) must fall back to
+     * the built-in budget, never read a freed struct. */
+    if (g_active_context == ctx) {
+        g_active_context = NULL;
+    }
 
     /* The G-2 post queue FIRST (§25): flip dead + drop queued posts
      * + close the wake fd before anything else dies, so a worker
