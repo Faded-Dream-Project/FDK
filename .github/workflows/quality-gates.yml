@@ -8,7 +8,12 @@ name: quality-gates
 
 on:
   push:
-    branches: [main]
+    # main plus the development lanes this workflow itself lives
+    # on — GitHub only registers a workflow once its file is on
+    # the default branch, so the dev/** pattern is what lets the
+    # gates run on dev/quality-gates pushes and PRs before any
+    # merge to main.
+    branches: [main, "dev/**"]
   pull_request:
   workflow_dispatch:
 
