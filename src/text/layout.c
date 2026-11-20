@@ -29,9 +29,14 @@
 #include "text_internal.h"
 
 #include "core/alloc_internal.h" /* the span wrappers free flattened runs */
+#include "uax14.h"               /* the UAX #14 pair-table core */
 
+/* The wrap walk's "space" is UAX #14's SP glue class — the run of
+ * spaces (and only spaces) that may precede a break. Tab folded
+ * in: the historic 0x09 behavior (a break opportunity after) is
+ * SP's behavior for the walker. */
 static bool is_wrap_space(fdk_u32 cp) {
-    return cp == 0x20u || cp == 0x09u; /* space, tab */
+    return fdk__uax14_is_space_class(cp);
 }
 
 /* A line's reported advance uses the same rounding as measure. */
@@ -210,6 +215,18 @@ fdk_result fdk__break_lines_runs(const fdk_font *font,
             ws.committed_end_k = ws.nonspace_end_k;
             ws.pen_after_committed = ws.pen_after_nonspace;
             ws.break_at = next_byte;
+        } else if (k > 0 && fdk__uax14_break_between(cp[k - 1], c)) {
+            /* UAX #14 break opportunity that is not a space — the
+             * CJK case (ID x ID breaks, ideograph against Latin
+             * breaks): freeze exactly as a space-run boundary
+             * would, so the overflow path below can move the next
+             * "word" to its own line whole. The boundary between
+             * the PREVIOUS cp and THIS one has just been passed;
+             * the next line may start AT this cp's byte. */
+            ws.committed_end = ws.nonspace_end;
+            ws.committed_end_k = ws.nonspace_end_k;
+            ws.pen_after_committed = ws.pen_after_nonspace;
+            ws.break_at = byte;
         }
 
         /* Overflow? The pen is rounded exactly as a line's advance

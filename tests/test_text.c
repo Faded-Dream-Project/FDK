@@ -769,9 +769,131 @@ static void test_break_lines(void) {
         assert(n == 0);
     }
 
+    /* 8. UAX #14: CJK breaks between ideographs; Latin text inside
+     * CJK breaks at every ideograph boundary; the pinned historic
+     * behaviors (hard breaks, space-only wraps, ellipsize
+     * agreement) are re-proven above and below. The CJK test
+     * strings use common Han ideographs and kana (U+4E00 block +
+     * 0x3042/0x3044) — every adjacent pair there is ID x ID or
+     * ID x AL, both legal break opportunities. */
+    {
+        /* Five ideographs, no spaces at all. */
+        const char *cjk = "\xE6\xBC\xA2\xE5\xAD\x97\xE6\xB5\x8B"
+                          "\xE8\xA9\xA6\xE7\xB5\x82"; /* 漢字試験終 */
+        size_t cjk_len = strlen(cjk);
+        fdk_text_metrics one, cjk_whole;
+        assert(fdk_ok(fdk_font_measure_utf8(f, cjk, cjk_len, &cjk_whole)));
+        assert(fdk_ok(fdk_font_measure_utf8(
+            f, "\xE6\xBC\xA2", 3, &one))); /* 漢 alone */
+        assert(one.advance_width > 0);
+
+        /* Width for exactly two ideographs: the break must fall
+         * BETWEEN ideographs (byte boundary at a cp start, 3-byte
+         * UTF-8 steps), never mid-codepoint. */
+        fdk_i32 two_w = one.advance_width * 2;
+        fdk_text_line l[8];
+        size_t n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, cjk, cjk_len,
+                                                 two_w, l, 8, &n,
+                                                 NULL)));
+        assert(n >= 2 && n <= 5); /* at least one interior break */
+        for (size_t i = 0; i < n; i++) {
+            assert(l[i].byte_len % 3 == 0); /* cp-aligned */
+            assert(l[i].advance_width <= two_w);
+        }
+        /* Every byte accounted for (nothing dropped). */
+        size_t total = 0;
+        for (size_t i = 0; i < n; i++) {
+            total += l[i].byte_len;
+        }
+        assert(total == cjk_len);
+
+        /* Narrower: one ideograph per line. */
+        fdk_i32 one_w = one.advance_width;
+        n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, cjk, cjk_len,
+                                                 one_w, l, 8, &n,
+                                                 NULL)));
+        assert(n == 5); /* one per line, cp-aligned */
+        for (size_t i = 0; i < n; i++) {
+            assert(l[i].byte_len == 3);
+        }
+
+        /* Mixed: Latin word + ideographs. The Latin word is one
+         * unbreakable run; breaks at the ID boundaries and at the
+         * AL/ID seam. */
+        const char *mixed = "abc\xE6\xBC\xA2\xE5\xAD\x97"
+                            "xyz\xE7\xB5\x82";
+        /*            a b c 漢  字   x y z  終 */
+        size_t mixed_len = strlen(mixed);
+        fdk_text_metrics mw2;
+        assert(fdk_ok(fdk_font_measure_utf8(f, mixed, mixed_len, &mw2)));
+        fdk_i32 half = mw2.advance_width / 2;
+        n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, mixed, mixed_len,
+                                                 half, l, 8, &n,
+                                                 NULL)));
+        assert(n >= 2);
+        for (size_t i = 0; i < n; i++) {
+            assert(l[i].byte_len % 1 == 0);
+            assert(l[i].advance_width <= half);
+            /* each line starts at a cp boundary: ASCII or 0xE6 lead */
+            size_t off = l[i].byte_offset;
+            assert((unsigned char)mixed[off] < 0x80 ||
+                   ((unsigned char)mixed[off] >= 0xE0 &&
+                    (unsigned char)mixed[off] < 0xF0));
+        }
+        total = 0;
+        for (size_t i = 0; i < n; i++) {
+            total += l[i].byte_len;
+        }
+        assert(total == mixed_len);
+
+        /* The Latin run must NOT break internally even under
+         * extreme width: "abc" moves whole to its own line. */
+        fdk_text_metrics abc;
+        assert(fdk_ok(fdk_font_measure_utf8(f, "abc", 3, &abc)));
+        fdk_i32 abc_w = abc.advance_width;
+        n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, mixed, mixed_len,
+                                                 abc_w, l, 8, &n,
+                                                 NULL)));
+        for (size_t i = 0; i < n; i++) {
+            /* no line starts mid-"abc" and none starts mid-"xyz":
+             * every line's first byte is a cp start whose run is
+             * whole. Cheap pin: byte 1 or 2 of "abc" ("b"/"c")
+             * never appears as a line start. */
+            size_t off = l[i].byte_offset;
+            assert(!(mixed[off] == 'b' || mixed[off] == 'c' ||
+                     mixed[off] == 'y' || mixed[off] == 'z'));
+        }
+
+        /* The kana case: hiragana (CJ-folded NS in the fold set,
+         * glued to ideographs per the pair table's LB13 no-break
+         * before NS) — あい as one glued run when it follows an
+         * ideograph. Pinned loosely: no crash, cp-aligned, all
+         * bytes kept. */
+        const char *kana = "\xE6\xBC\xA2\xE3\x81\x82\xE3\x81\x84";
+        /*               漢    あ     い      */
+        size_t kana_len = strlen(kana);
+        n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, kana, kana_len,
+                                                 one_w, l, 8, &n,
+                                                 NULL)));
+        total = 0;
+        for (size_t i = 0; i < n; i++) {
+            total += l[i].byte_len;
+        }
+        assert(total == kana_len);
+        for (size_t i = 0; i < n; i++) {
+            assert(l[i].byte_len % 3 == 0);
+        }
+    }
+
     fdk_font_destroy(f);
     printf("[ok] break_lines: greedy wrap fits/agrees, hard breaks, "
-           "mid-word, trimming, truncation flag, arg safety\n");
+           "mid-word, trimming, truncation flag, arg safety, "
+           "UAX#14 CJK/mixed\n");
 }
 
 /* ---- ellipsis ---- */
