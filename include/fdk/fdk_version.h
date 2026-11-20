@@ -9,15 +9,20 @@
 #define FDK_VERSION_H
 
 /*
- * THE PUBLIC VERSION IS 1.0.0 — THE OWNER'S DECISION OF 2026-11-08
- * (docs/versioning.md): the FIRST RELEASE. The 1.0.0-rcN candidate
- * numbering is retired (its rc1/rc2 candidates never shipped; the
- * cycle labels across the tree now read 1.0.0), the pre-release
- * suffix is dropped (the release is final), and MINOR goes to 0 —
- * the first release is the clean 1.0.0, not a minor bump. The
- * earlier history (the 2026-10-25 candidate decision and the
- * re-published repository with zero tags) is recorded in
- * docs/versioning.md.
+ * THE PUBLIC VERSION IS 1.0.0-dev — DEVELOPMENT POSTURE AGAIN
+ * (docs/versioning.md). The 1.0.0 release was cut THREE times and
+ * withdrawn three times (2026-11-09, 2026-11-12, 2026-11-19); the
+ * last withdrawal (commit 8ecd83f, recorded in CHANGELOG.md) came
+ * after the 2026-11-18 re-release shipped six GL defects found
+ * downstream. NO TAG EXISTS and no release is published — the
+ * project is in development until the owner says otherwise. The
+ * 2026-11-19 suffix decision records why "-dev" and not another
+ * "-rcN": an rc implies a candidate standing for release review;
+ * development on main is not that. The suffix makes every build
+ * from main self-identify as unreleased ("1.0.0-dev" in the
+ * version string, pkg-config, and package metadata) so a bug
+ * report against a withdrawn number can never be mistaken for a
+ * bug in a shipped release.
  *
  * History, recorded in full in docs/versioning.md: the number was
  * a deliberate joke (0.0.1, "this absurdly capable toolkit is still
@@ -41,12 +46,14 @@
 #define FDK_VERSION_MINOR 0
 #define FDK_VERSION_PATCH 0
 
-/* "1.0.0" style string, generated from the numeric components
- * plus the pre-release suffix (empty when the release is final —
- * and 1.0.0 IS the final first release). The suffix lives here,
- * next to the numeric triple it decorates. */
-#define FDK_VERSION_SUFFIX ""
-#define FDK_VERSION_STRING "1.0.0"
+/* "1.0.0-dev" style string, generated from the numeric components
+ * plus the pre-release suffix. The suffix is "-dev" while main is
+ * in development (no tag, no release); it returns to "" only by
+ * the owner's release decision, recorded in docs/versioning.md
+ * first. The suffix lives here, next to the numeric triple it
+ * decorates. */
+#define FDK_VERSION_SUFFIX "-dev"
+#define FDK_VERSION_STRING "1.0.0-dev"
 
 /* Encode major/minor/patch into a single comparable integer:
  * (major * 1000000) + (minor * 1000) + patch */

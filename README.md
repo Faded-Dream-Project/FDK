@@ -180,11 +180,16 @@ suite (`docs/testing.md`).
 
 ## Installation
 
-FDK **1.0.0** is released — the first official release ships as
-native distro packages for five families, built and verified by the
-release pipeline (`docs/packaging.md`). No release is currently
-published (the 1.0.0 re-release was withdrawn 2026-11-19); the table
-shows what the channel produces on the next `v*` tag:
+FDK is **in development — no stable release exists.** The 1.0.0
+re-release was withdrawn on 2026-11-19 (it shipped six GL defects
+found by the first downstream integrator; see CHANGELOG.md and
+`docs/versioning.md`), no tag exists, and builds from main
+self-identify as `1.0.0-dev`. The supported consumption path today
+is building from source (below). The packaging channel stays wired:
+the table shows what the five distro families produce on the next
+`v*` tag the owner cuts (package versions then carry the tag's
+pre-release spelling per family grammar — e.g. `1.0.0~rc1` on
+deb/rpm):
 
 | Family | Runtime package | Development package |
 |---|---|---|
