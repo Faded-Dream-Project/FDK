@@ -126,7 +126,7 @@ jobs:
       - name: bench + compare (2x tolerance, print-only)
         run: make perf-gate
 
-  arm64:
+  x11-soak:
     name: x11 flake soak (test-x11 x20, loaded)
     runs-on: ubuntu-24.04
     steps:
@@ -173,6 +173,7 @@ jobs:
           path: soak-fail-*.log
           if-no-files-found: ignore
 
+  arm64:
     name: arm64 (make test)
     runs-on: ubuntu-24.04-arm
     steps:
