@@ -42,6 +42,7 @@
 #include <X11/extensions/XTest.h>  /* XTEST real pointer events (S-4) */
 
 #include <assert.h>
+#include <sys/stat.h> /* the budget-lifecycle seed's existence gate */
 #include <signal.h>
 #include <stdint.h> /* uintptr_t — the hostile-cookie rig's wild pointers */
 #include <stdio.h>
@@ -130,6 +131,119 @@ static void test_connect_and_shutdown(void) {
     assert(ctx != NULL);
     fdk_shutdown(ctx);
     printf("[ok] X11 connect + shutdown\n");
+}
+
+/* 1.0.0-dev (image budget lifecycle): the budget is resolved by
+ * fdk_init from image_max_pixels, reset by fdk_shutdown, and a
+ * LATER init with a DIFFERENT override re-resolves — the whole
+ * point of moving the state out of the lazy first-use cache.
+ *
+ * Two probes, three states:
+ *   - the corpus's 16132x16191 seed (262 Mi px, a REFUSAL
+ *     fixture by design — its decode is a 3.1 GB allocation):
+ *     refused under the default 16 Mi GIF budget;
+ *   - a synthesized 2000x2000 GIF header (4,000,000 px, ~1 KB of
+ *     real black pixels via a 250x250 repeated 256-color frame —
+ *     kept tiny, the policy is the subject): 4 MP > the 1 Mi
+ *     floor override, but far under the high override's GIF cap.
+ * Phase 1 (floor override): mid GIF refused. Phase 2 (high
+ * override, fresh init): the SAME mid GIF decodes — re-resolution
+ * proven by outcome flip. Phase 3 (plain init after shutdown):
+ * defaults again; the seed stays refused and the mid GIF passes
+ * (4 MP < 16 Mi) — defaults restored, not the floor inherited. */
+static void test_image_budget_lifecycle(void) {
+    const char *seed = "tests/fuzz/corpus/fuzz_image/"
+                       "gif-oom-16132x16191.gif";
+    const char *mid = "/tmp/fdk-budget-mid.gif";
+    struct stat st;
+    if (stat(seed, &st) != 0) {
+        printf("[skip] image budget lifecycle: fuzz seed not "
+               "present\n");
+        return;
+    }
+    /* Synthesize the mid-size GIF by PATCHING a valid corpus seed:
+     * single_gif.gif decodes green (its 4x4 frame's LZW stream is
+     * real); rewriting ONLY the logical-screen dimension bytes
+     * (6..9) to 2000x2000 keeps the stream valid — stb's header
+     * probe (stbi_info, the budget gate's input) reads the LOGICAL
+     * SCREEN, and the decode itself allocates per-frame. Result: a
+     * 4,000,000-px-header GIF that actually decodes, built in four
+     * byte writes (a hand-rolled LZW stream was tried and stb
+     * called it corrupt — correctly; this way there is no encoder
+     * to get wrong). */
+    {
+        const char *donor = "tests/fuzz/corpus/fuzz_image/"
+                            "single_gif.gif";
+        if (stat(donor, &st) != 0) {
+            printf("[skip] image budget lifecycle: donor GIF not "
+                   "present\n");
+            return;
+        }
+        unsigned char buf[64];
+        FILE *f = fopen(donor, "rb");
+        assert(f != NULL);
+        size_t n = fread(buf, 1, sizeof buf, f);
+        fclose(f);
+        assert(n >= 10);
+        buf[6] = 0xD0; buf[7] = 0x07; /* 2000 = 0x07D0, le */
+        buf[8] = 0xD0; buf[9] = 0x07;
+        f = fopen(mid, "wb");
+        assert(f != NULL);
+        assert(fwrite(buf, 1, n, f) == n);
+        fclose(f);
+    }
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    /* Phase 1: the 1 Mi floor override — GIF budget = 1 Mi. The
+     * mid GIF (4 MP) must be refused, and the corpus seed too. */
+    opts.image_max_pixels = (1u << 20);
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_surface *s = NULL;
+    assert(fdk_surface_create_from_image(mid, &s) ==
+           FDK_ERR_UNSUPPORTED);
+    assert(s == NULL);
+    assert(fdk_surface_create_from_image(seed, &s) ==
+           FDK_ERR_UNSUPPORTED);
+    assert(s == NULL);
+    fdk_shutdown(ctx);
+
+    /* Phase 2: a fresh init with a high override — 0x09000000
+     * (150 Mi px; GIF cap = 25 Mi, above the mid GIF's 4 MP, and
+     * the seed's 262 Mi stays refused: the override is not
+     * unlimited, it is a DIFFERENT number). The SAME mid GIF must
+     * now DECODE — the re-resolution proof: had shutdown not
+     * reset the budget, phase 1's floor would still refuse it. */
+    opts.image_max_pixels = 0x09000000u;
+    ctx = NULL;
+    s = NULL;
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    assert(fdk_ok(fdk_surface_create_from_image(mid, &s)));
+    fdk_surface_destroy(s);
+    s = NULL;
+    assert(fdk_surface_create_from_image(seed, &s) ==
+           FDK_ERR_UNSUPPORTED); /* still refused: 262 Mi > 25 Mi */
+    assert(s == NULL);
+    fdk_shutdown(ctx);
+
+    /* Phase 3: after the second shutdown, a plain init — the
+     * built-in defaults: the seed refused (262 Mi > 16 Mi GIF),
+     * the mid GIF passes (4 MP < 16 Mi). Defaults restored, not
+     * the phase-1 floor or the phase-2 override inherited. */
+    ctx = NULL;
+    s = NULL;
+    fdk_init_options plain = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &plain)));
+    assert(fdk_surface_create_from_image(seed, &s) ==
+           FDK_ERR_UNSUPPORTED);
+    assert(s == NULL);
+    assert(fdk_ok(fdk_surface_create_from_image(mid, &s)));
+    fdk_surface_destroy(s);
+    fdk_shutdown(ctx);
+    remove(mid);
+    printf("[ok] image budget lifecycle: floor override refuses, "
+           "fresh init with a high override decodes the same file, "
+           "defaults restored after shutdown\n");
 }
 
 static void test_init_with_app_id(void) {
@@ -413,6 +527,60 @@ static void x11_frame_settle(fdk_context *ctx) {
     for (int i = 0; i < 4; i++) {
         (void)fdk_pump_events(ctx, 25);
     }
+}
+
+/* Deadline-polled readback (the 2026-11-20 flake-hunt fix): the
+ * fixed 4x25ms settle above loses the present->server race on a
+ * loaded runner (reproduced: 2 failures in 16 loaded iterations,
+ * one in test_widget_layout_reflow_on_resize, one in
+ * test_ext_subsurface_x11 — both read a pixel the frame had not
+ * landed yet, both from the SAME race the 2026-10-26 comment
+ * documents). Polling the EXPECTED value with a generous deadline
+ * makes the wait exactly as long as the frame needs and no longer:
+ * fast machines finish in the first probe, loaded ones keep trying,
+ * and only a genuinely wrong pixel survives to the assert. */
+static unsigned long x11_readback_pixel_poll(
+    Display **out_dpy, fdk_context *ctx, unsigned long xid,
+    int x, int y, unsigned long expect, const char *what) {
+    unsigned long px = 0;
+    for (int i = 0; i < 40; i++) { /* ~40 x (25ms pump + read) —
+                                    * tens of seconds of headroom */
+        px = x11_readback_pixel(out_dpy, xid, x, y);
+        if (px == expect) {
+            return px;
+        }
+        (void)fdk_pump_events(ctx, 25);
+    }
+    /* The deadline expired with the wrong pixel: report what we
+     * actually see — the assert message names the expectation. */
+    fprintf(stderr,
+            "readback poll exhausted (%s): got 0x%08lX, expected "
+            "0x%08lX at (%d,%d)\n",
+            what, px, expect, x, y);
+    return px;
+}
+
+/* Deadline-polled map state (the IsUnmapped flake, same hunt):
+ * XUnmapWindow is asynchronous; a fixed 200ms pump can return
+ * before the server processes it under load. Poll until the state
+ * matches or the deadline expires, then let the caller assert. */
+static int x11_map_state_poll(Display **out_dpy, fdk_context *ctx,
+                              unsigned long xid, int expect_unmapped) {
+    for (int i = 0; i < 40; i++) {
+        XWindowAttributes wa;
+        if (XGetWindowAttributes(*out_dpy, (Window)xid, &wa)) {
+            int is_unmapped = (wa.map_state == IsUnmapped);
+            if (is_unmapped == expect_unmapped) {
+                return wa.map_state;
+            }
+        }
+        (void)fdk_pump_events(ctx, 25);
+    }
+    XWindowAttributes wa;
+    if (XGetWindowAttributes(*out_dpy, (Window)xid, &wa)) {
+        return wa.map_state;
+    }
+    return -1; /* the attributes read itself failed */
 }
 
 typedef struct {
@@ -863,7 +1031,7 @@ static void test_resize_storm_backlog_drains(void) {
     Display *rb_dpy = NULL;
     assert(x11_readback_pixel(&rb_dpy, xid, expect_w - 8,
                               expect_h - 8) == 0x003CC878u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 8, 8) == 0x003CC878u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 8, 8, 0x003CC878u, "pixel") == 0x003CC878u);
     XCloseDisplay(rb_dpy);
 
     /* 3. Liveness: a NEW event after the storm processes promptly. */
@@ -878,7 +1046,7 @@ static void test_resize_storm_backlog_drains(void) {
     alarm(0);
     /* ...and its repaint landed too. */
     rb_dpy = NULL;
-    assert(x11_readback_pixel(&rb_dpy, xid, 436, 325) == 0x003CC878u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 436, 325, 0x003CC878u, "pixel") == 0x003CC878u);
     XCloseDisplay(rb_dpy);
 
     XCloseDisplay(storm_dpy);
@@ -1065,8 +1233,8 @@ static void test_surface_damage_partial_present(void) {
 
     Display *rb_dpy = NULL;
     unsigned long xid = fdk_window_xid(win);
-    assert(x11_readback_pixel(&rb_dpy, xid, 20, 20) == 0x00FF0000u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 270, 150) == 0x00FF0000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 20, 20, 0x00FF0000u, "pixel") == 0x00FF0000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 270, 150, 0x00FF0000u, "pixel") == 0x00FF0000u);
 
     /* Frame 2: a small blue rect — ONLY that region is damaged, so
      * ONLY that sub-image may change on screen. The region outside
@@ -1080,9 +1248,9 @@ static void test_surface_damage_partial_present(void) {
     assert(fdk_ok(fdk_surface_present(surface)));
     (void)fdk_pump_events(ctx, 100);
 
-    assert(x11_readback_pixel(&rb_dpy, xid, 120, 95) == 0x000000FFu);
-    assert(x11_readback_pixel(&rb_dpy, xid, 20, 20) == 0x00FF0000u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 270, 150) == 0x00FF0000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 120, 95, 0x000000FFu, "pixel") == 0x000000FFu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 20, 20, 0x00FF0000u, "pixel") == 0x00FF0000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 270, 150, 0x00FF0000u, "pixel") == 0x00FF0000u);
 
     /* Raw write WITHOUT invalidate: present() must skip it entirely —
      * the framebuffer holds white, the server keeps red. */
@@ -1091,19 +1259,19 @@ static void test_surface_damage_partial_present(void) {
     info.pixels[180 * info.stride + 200] = 0x00FFFFFFu; /* (200,180) */
     assert(fdk_ok(fdk_surface_present(surface)));       /* no-op */
     (void)fdk_pump_events(ctx, 100);
-    assert(x11_readback_pixel(&rb_dpy, xid, 200, 180) == 0x00FF0000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 200, 180, 0x00FF0000u, "pixel") == 0x00FF0000u);
 
     /* Declaring the damage makes it arrive. */
     fdk_surface_invalidate(surface, (fdk_rect){ .x = 200, .y = 180,
                                                 .width = 1, .height = 1 });
     assert(fdk_ok(fdk_surface_present(surface)));
     (void)fdk_pump_events(ctx, 100);
-    assert(x11_readback_pixel(&rb_dpy, xid, 200, 180) == 0x00FFFFFFu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 200, 180, 0x00FFFFFFu, "pixel") == 0x00FFFFFFu);
 
     /* Empty-damage present after a pure re-acquire: still a no-op. */
     assert(fdk_ok(fdk_surface_get_info(surface, &info)));
     assert(fdk_ok(fdk_surface_present(surface)));
-    assert(x11_readback_pixel(&rb_dpy, xid, 20, 20) == 0x00FF0000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 20, 20, 0x00FF0000u, "pixel") == 0x00FF0000u);
 
     XCloseDisplay(rb_dpy);
     fdk_window_destroy(win);
@@ -1151,23 +1319,23 @@ static void test_surface_primitives_readback(void) {
     Display *rb_dpy = NULL;
     unsigned long xid = fdk_window_xid(win);
 
-    assert(x11_readback_pixel(&rb_dpy, xid, 50, 10) == 0x00FFFFFFu);
-    assert(x11_readback_pixel(&rb_dpy, xid, 50, 11) == 0x00000000u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 9, 10) == 0x00000000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 50, 10, 0x00FFFFFFu, "pixel") == 0x00FFFFFFu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 50, 11, 0x00000000u, "pixel") == 0x00000000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 9, 10, 0x00000000u, "pixel") == 0x00000000u);
 
     /* Circle: center is white (outline over fill at exact center is
      * fill green — center is interior, not on the ring), +x cardinal
      * is the white ring, just outside is black. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 200, 100) == 0x0000FF00u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 240, 100) == 0x00FFFFFFu);
-    assert(x11_readback_pixel(&rb_dpy, xid, 200, 60) == 0x00FFFFFFu);
-    assert(x11_readback_pixel(&rb_dpy, xid, 245, 100) == 0x00000000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 200, 100, 0x0000FF00u, "pixel") == 0x0000FF00u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 240, 100, 0x00FFFFFFu, "pixel") == 0x00FFFFFFu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 200, 60, 0x00FFFFFFu, "pixel") == 0x00FFFFFFu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 245, 100, 0x00000000u, "pixel") == 0x00000000u);
 
     /* Rounded rect: middle filled, bounding-box corner cut away,
      * right edge filled at the bottom corner-center row. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 90, 180) == 0x000000FFu);
-    assert(x11_readback_pixel(&rb_dpy, xid, 50, 150) == 0x00000000u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 129, 194) == 0x000000FFu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 90, 180, 0x000000FFu, "pixel") == 0x000000FFu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 50, 150, 0x00000000u, "pixel") == 0x00000000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 129, 194, 0x000000FFu, "pixel") == 0x000000FFu);
 
     /* X11 has no frame-callback feedback: frame_ready is always true. */
     assert(fdk_surface_frame_ready(surface));
@@ -1214,11 +1382,11 @@ static void test_offscreen_blit_to_window(void) {
 
     Display *rb_dpy = NULL;
     unsigned long xid = fdk_window_xid(win);
-    assert(x11_readback_pixel(&rb_dpy, xid, 40, 50) == 0x0000FF00u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 50, 60) == 0x00FF0000u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 99, 89) == 0x0000FF00u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 39, 49) == 0x00000000u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 100, 90) == 0x00000000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 40, 50, 0x0000FF00u, "pixel") == 0x0000FF00u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 50, 60, 0x00FF0000u, "pixel") == 0x00FF0000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 99, 89, 0x0000FF00u, "pixel") == 0x0000FF00u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 39, 49, 0x00000000u, "pixel") == 0x00000000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 100, 90, 0x00000000u, "pixel") == 0x00000000u);
 
     /* Partial-source blit: just the red square, placed elsewhere. */
     assert(fdk_ok(fdk_surface_blit(surface, 200, 120, sprite,
@@ -1226,10 +1394,10 @@ static void test_offscreen_blit_to_window(void) {
                                                .width = 20, .height = 20 })));
     assert(fdk_ok(fdk_surface_present(surface)));
     (void)fdk_pump_events(ctx, 100);
-    assert(x11_readback_pixel(&rb_dpy, xid, 210, 130) == 0x00FF0000u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 219, 139) == 0x00FF0000u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 199, 129) == 0x00000000u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 220, 140) == 0x00000000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 210, 130, 0x00FF0000u, "pixel") == 0x00FF0000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 219, 139, 0x00FF0000u, "pixel") == 0x00FF0000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 199, 129, 0x00000000u, "pixel") == 0x00000000u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 220, 140, 0x00000000u, "pixel") == 0x00000000u);
 
     XCloseDisplay(rb_dpy);
     fdk_surface_destroy(sprite);
@@ -1346,23 +1514,23 @@ static void test_widget_tree_paint_readback(void) {
 
     Display *rb_dpy = NULL;
     unsigned long xid = fdk_window_xid(win);
-    assert(x11_readback_pixel(&rb_dpy, xid, 25, 25) == 0x00DC3232u);   /* red    */
-    assert(x11_readback_pixel(&rb_dpy, xid, 200, 120) == 0x0032C832u); /* green  */
-    assert(x11_readback_pixel(&rb_dpy, xid, 110, 60) == 0x00DC3232u);  /* red    */
-    assert(x11_readback_pixel(&rb_dpy, xid, 70, 70) == 0x003C5AE6u);   /* blue   */
-    assert(x11_readback_pixel(&rb_dpy, xid, 100, 100) == 0x0032C832u); /* green over red */
-    assert(x11_readback_pixel(&rb_dpy, xid, 30, 110) == 0x00FAFA3Cu);  /* poke   */
-    assert(x11_readback_pixel(&rb_dpy, xid, 30, 125) == 0x00141414u);  /* poke clipped:
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 25, 25, 0x00DC3232u, "pixel") == 0x00DC3232u);   /* red    */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 200, 120, 0x0032C832u, "pixel") == 0x0032C832u); /* green  */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 110, 60, 0x00DC3232u, "pixel") == 0x00DC3232u);  /* red    */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 70, 70, 0x003C5AE6u, "pixel") == 0x003C5AE6u);   /* blue   */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 100, 100, 0x0032C832u, "pixel") == 0x0032C832u); /* green over red */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 30, 110, 0x00FAFA3Cu, "pixel") == 0x00FAFA3Cu);  /* poke   */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 30, 125, 0x00141414u, "pixel") == 0x00141414u);  /* poke clipped:
                                                                             root bg */
-    assert(x11_readback_pixel(&rb_dpy, xid, 10, 10) == 0x00141414u);   /* root bg */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 10, 10, 0x00141414u, "pixel") == 0x00141414u);   /* root bg */
 
     /* Hiding a subtree removes it from the next paint (full damage). */
     fdk_widget_set_visible(red, false);
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    assert(x11_readback_pixel(&rb_dpy, xid, 25, 25) == 0x00141414u);  /* red gone */
-    assert(x11_readback_pixel(&rb_dpy, xid, 70, 70) == 0x00141414u);  /* child gone with it */
-    assert(x11_readback_pixel(&rb_dpy, xid, 200, 120) == 0x0032C832u); /* green stays */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 25, 25, 0x00141414u, "pixel") == 0x00141414u);  /* red gone */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 70, 70, 0x00141414u, "pixel") == 0x00141414u);  /* child gone with it */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 200, 120, 0x0032C832u, "pixel") == 0x0032C832u); /* green stays */
 
     XCloseDisplay(rb_dpy);
     fdk_window_destroy(win); /* frees the whole tree — ASan verifies */
@@ -1740,8 +1908,8 @@ static void test_widget_layout_reflow_on_resize(void) {
     Display *rb_dpy = NULL;
     unsigned long xid = fdk_window_xid(win);
     /* header band on top, panel filling the rest */
-    assert(x11_readback_pixel(&rb_dpy, xid, 150, 20) == 0x00DCA028u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 150, 100) == 0x003278DCu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 150, 20, 0x00DCA028u, "pixel") == 0x00DCA028u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 150, 100, 0x003278DCu, "pixel") == 0x003278DCu);
 
     /* Resize: the content box must REFLOW (header still 40 tall, the
      * expanding panel owns all the new space) with zero app code. */
@@ -1756,11 +1924,11 @@ static void test_widget_layout_reflow_on_resize(void) {
     (void)fdk_pump_events(ctx, 200);
 
     /* header unchanged (40px), panel extends into the new geometry */
-    assert(x11_readback_pixel(&rb_dpy, xid, 200, 20) == 0x00DCA028u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 390, 290) == 0x003278DCu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 200, 20, 0x00DCA028u, "pixel") == 0x00DCA028u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 390, 290, 0x003278DCu, "pixel") == 0x003278DCu);
     /* and the boundary is exactly where layout says (y=40) */
-    assert(x11_readback_pixel(&rb_dpy, xid, 200, 39) == 0x00DCA028u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 200, 40) == 0x003278DCu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 200, 39, 0x00DCA028u, "pixel") == 0x00DCA028u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 200, 40, 0x003278DCu, "pixel") == 0x003278DCu);
 
     /* destroying the content deactivates the association cleanly */
     fdk_widget_destroy(panel);
@@ -1839,9 +2007,9 @@ static void test_grid_layout_gui(void) {
     unsigned long xid = fdk_window_xid(win);
     /* 360x240: col0 [10,200) gap col1 [210,350); row0 [10,170) gap
      * row1 [180,230). */
-    assert(x11_readback_pixel(&rb_dpy, xid, 100, 50) == 0x00DC3232u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 300, 50) == 0x0032B450u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 200, 205) == 0x003C64DCu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 100, 50, 0x00DC3232u, "pixel") == 0x00DC3232u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 300, 50, 0x0032B450u, "pixel") == 0x0032B450u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 200, 205, 0x003C64DCu, "pixel") == 0x003C64DCu);
     assert(x11_readback_pixel(&rb_dpy, xid, 205, 50) ==
            theme_window_bg_pixel());
     assert(x11_readback_pixel(&rb_dpy, xid, 100, 175) ==
@@ -1860,9 +2028,9 @@ static void test_grid_layout_gui(void) {
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
 
-    assert(x11_readback_pixel(&rb_dpy, xid, 150, 50) == 0x00DC3232u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 400, 100) == 0x0032B450u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 200, 260) == 0x003C64DCu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 150, 50, 0x00DC3232u, "pixel") == 0x00DC3232u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 400, 100, 0x0032B450u, "pixel") == 0x0032B450u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 200, 260, 0x003C64DCu, "pixel") == 0x003C64DCu);
     assert(x11_readback_pixel(&rb_dpy, xid, 305, 100) ==
            theme_window_bg_pixel());
     assert(x11_readback_pixel(&rb_dpy, xid, 150, 235) ==
@@ -2717,11 +2885,11 @@ static void test_theme_switch_gui(void) {
     /* Faded Dream defaults (1.0.0): control fill #33333C; border
      * #464653; radius 8 cuts the corner pixel; 1px rule at
      * y = 70 + 10/2 = 75. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x0033333Cu);
-    assert(x11_readback_pixel(&rb_dpy, xid, 21, 21) == 0x00141414u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 75) == 0x00464653u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 74) == 0x00141414u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 76) == 0x00141414u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 80, 35, 0x0033333Cu, "pixel") == 0x0033333Cu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 21, 21, 0x00141414u, "pixel") == 0x00141414u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 80, 75, 0x00464653u, "pixel") == 0x00464653u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 80, 74, 0x00141414u, "pixel") == 0x00141414u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 80, 76, 0x00141414u, "pixel") == 0x00141414u);
 
     /* A contrasting theme from the .fdk grammar: light fill, square
      * corners, 3px separator band. */
@@ -2742,23 +2910,23 @@ static void test_theme_switch_gui(void) {
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
 
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x00E8E8E8u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 80, 35, 0x00E8E8E8u, "pixel") == 0x00E8E8E8u);
     /* radius 0: the corner pixel IS the fill now. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 21, 21) == 0x00E8E8E8u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 21, 21, 0x00E8E8E8u, "pixel") == 0x00E8E8E8u);
     /* thickness 3: band centered on the same line, 74..76. */
     for (int y = 74; y <= 76; y++) {
         assert(x11_readback_pixel(&rb_dpy, xid, 80, y) == 0x00777777u);
     }
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 73) == 0x00141414u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 77) == 0x00141414u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 80, 73, 0x00141414u, "pixel") == 0x00141414u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 80, 77, 0x00141414u, "pixel") == 0x00141414u);
 
     /* Back to the built-in: the Modern pixels return exactly. */
     fdk_theme_set_default(NULL);
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x0033333Cu);
-    assert(x11_readback_pixel(&rb_dpy, xid, 21, 21) == 0x00141414u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 75) == 0x00464653u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 80, 35, 0x0033333Cu, "pixel") == 0x0033333Cu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 21, 21, 0x00141414u, "pixel") == 0x00141414u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 80, 75, 0x00464653u, "pixel") == 0x00464653u);
 
     fdk_theme_destroy(light);
     XCloseDisplay(rb_dpy);
@@ -2855,7 +3023,7 @@ static void test_decorations_gui(void) {
     (void)fdk_pump_events(ctx, 200);
     Display *rb_dpy = NULL;
     unsigned long xid = fdk_window_xid(win);
-    assert(x11_readback_pixel(&rb_dpy, xid, 10, 5) == 0x003C78C8u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 10, 5, 0x003C78C8u, "pixel") == 0x003C78C8u);
     assert(!motif_hints_present(rb_dpy, xid));
 
     /* Decorate: the band paints, content shifts below it. */
@@ -2865,15 +3033,15 @@ static void test_decorations_gui(void) {
     (void)fdk_pump_events(ctx, 200);
     /* Band fill (Faded Dream control bg via the titlebar fallback) and
      * its themed 1px bottom rule. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x0033333Cu);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 27) == 0x00464653u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 5, 0x0033333Cu, "pixel") == 0x0033333Cu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 27, 0x00464653u, "pixel") == 0x00464653u);
     /* The close button (22x20 at x=292..314): fill at its left edge,
      * vertically centered - clear of the radius-8 corners and of the
      * centered glyph. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 295, 14) == 0x0033333Cu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 295, 14, 0x0033333Cu, "pixel") == 0x0033333Cu);
     /* Content now starts BELOW the 28px band. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 10, 50) == 0x003C78C8u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 10, 5) == 0x0033333Cu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 10, 50, 0x003C78C8u, "pixel") == 0x003C78C8u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 10, 5, 0x0033333Cu, "pixel") == 0x0033333Cu);
     /* The WM has been asked to drop its chrome. */
     assert(motif_hints_present(rb_dpy, xid));
 
@@ -2921,14 +3089,14 @@ static void test_decorations_gui(void) {
     assert(fdk_window_get_decorated(win) == false);
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x003C78C8u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 5, 0x003C78C8u, "pixel") == 0x003C78C8u);
     assert(!motif_hints_present(rb_dpy, xid));
 
     /* Round trip back on. */
     assert(fdk_ok(fdk_window_set_decorated(win, true)));
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x0033333Cu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 5, 0x0033333Cu, "pixel") == 0x0033333Cu);
 
     /* ---- Phase 8 completion: band buttons + double-click ---- */
     {
@@ -3009,9 +3177,8 @@ static void test_decorations_gui(void) {
         assert(fdk_window_is_minimized(win));
         assert(deco_state_events == states0 + 3);
         {
-            XWindowAttributes wa;
-            assert(XGetWindowAttributes(rb_dpy, (Window)xid, &wa));
-            assert(wa.map_state == IsUnmapped);
+            assert(x11_map_state_poll(&rb_dpy, ctx, xid, 1) ==
+                   IsUnmapped);
         }
         assert(fdk_ok(fdk_window_restore(win)));
         (void)fdk_pump_events(ctx, 200);
@@ -3029,8 +3196,7 @@ static void test_decorations_gui(void) {
          * back cleanly. ---- */
         assert(fdk_ok(fdk_window_paint(win)));
         (void)fdk_pump_events(ctx, 200);
-        assert(x11_readback_pixel(&rb_dpy, xid, 160, 38) ==
-               0x003C78C8u); /* content at 38: below the 28px band */
+        assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 38, 0x003C78C8u, "pixel") == 0x003C78C8u); /* content at 38: below the 28px band */
         fdk_theme *tall = fdk_theme_create_default();
         assert(tall != NULL);
         assert(fdk_ok(fdk_theme_set_metric(
@@ -3038,21 +3204,17 @@ static void test_decorations_gui(void) {
         fdk_theme_set_default(tall);
         assert(fdk_ok(fdk_window_paint(win)));
         (void)fdk_pump_events(ctx, 200);
-        assert(x11_readback_pixel(&rb_dpy, xid, 160, 38) ==
-               0x0033333Cu); /* band fill: the band now covers 0..39 */
-        assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) ==
-               0x0033333Cu);
+        assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 38, 0x0033333Cu, "pixel") == 0x0033333Cu); /* band fill: the band now covers 0..39 */
+        assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 5, 0x0033333Cu, "pixel") == 0x0033333Cu);
         /* Content moved down: row 50 was content before (28px band),
          * still content (below 40) — and the band's bottom rule moved
          * from y=27 to y=39. */
-        assert(x11_readback_pixel(&rb_dpy, xid, 160, 39) ==
-               0x00464653u); /* themed rule at the new band bottom */
+        assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 39, 0x00464653u, "pixel") == 0x00464653u); /* themed rule at the new band bottom */
         fdk_theme_set_default(NULL); /* revert to built-in */
         fdk_theme_destroy(tall);
         assert(fdk_ok(fdk_window_paint(win)));
         (void)fdk_pump_events(ctx, 200);
-        assert(x11_readback_pixel(&rb_dpy, xid, 160, 38) ==
-               0x003C78C8u); /* back to the 28px band */
+        assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 38, 0x003C78C8u, "pixel") == 0x003C78C8u); /* back to the 28px band */
     }
 
     XCloseDisplay(rb_dpy);
@@ -3110,9 +3272,8 @@ static void test_titlebar_theming_gui(void) {
 
     /* Baseline: the built-in Faded Dream — the band reads the
      * control fill through the unset titlebar family. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x0033333Cu);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 100) ==
-           0x00232329u); /* themed root: window_background */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 5, 0x0033333Cu, "pixel") == 0x0033333Cu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 100, 0x00232329u, "pixel") == 0x00232329u); /* themed root: window_background */
 
     /* Mono Chromatic: black band over white content, black rule. */
     fdk_result r = FDK_ERR_UNKNOWN;
@@ -3121,11 +3282,9 @@ static void test_titlebar_theming_gui(void) {
     fdk_theme_set_default(mono);
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x000A0A0Au);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 100) ==
-           0x00FFFFFFu); /* the white half of the pairing */
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 35) ==
-           0x00000000u); /* titlebar_border: the black rule (36px band) */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 5, 0x000A0A0Au, "pixel") == 0x000A0A0Au);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 100, 0x00FFFFFFu, "pixel") == 0x00FFFFFFu); /* the white half of the pairing */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 35, 0x00000000u, "pixel") == 0x00000000u); /* titlebar_border: the black rule (36px band) */
 
     /* Pink Rave: hot-pink band over plum, the deep-pink rule. */
     fdk_theme *rave = fdk_theme_load(rave_path, &r);
@@ -3133,11 +3292,9 @@ static void test_titlebar_theming_gui(void) {
     fdk_theme_set_default(rave);
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x00FF2D9Au);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 100) ==
-           0x002E0F22u); /* the plum floor */
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 31) ==
-           0x00C2187Fu); /* titlebar_border at the 32px band bottom */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 5, 0x00FF2D9Au, "pixel") == 0x00FF2D9Au);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 100, 0x002E0F22u, "pixel") == 0x002E0F22u); /* the plum floor */
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 31, 0x00C2187Fu, "pixel") == 0x00C2187Fu); /* titlebar_border at the 32px band bottom */
 
     /* Back to the built-in: the fallback band again, byte-exact. */
     fdk_theme_set_default(NULL);
@@ -3145,8 +3302,8 @@ static void test_titlebar_theming_gui(void) {
     fdk_theme_destroy(rave);
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x0033333Cu);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 100) == 0x00232329u);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 5, 0x0033333Cu, "pixel") == 0x0033333Cu);
+    assert(x11_readback_pixel_poll(&rb_dpy, ctx, xid, 160, 100, 0x00232329u, "pixel") == 0x00232329u);
 
     XCloseDisplay(rb_dpy);
     fdk_window_destroy(win);
@@ -3245,9 +3402,8 @@ static void test_window_state_gui(void) {
     assert(state_gui_last_max == 0 && state_gui_last_min == 1);
     (void)fdk_pump_events(ctx, 200);
     {
-        XWindowAttributes wa;
-        assert(XGetWindowAttributes(rb_dpy, (Window)xid, &wa));
-        assert(wa.map_state == IsUnmapped);
+        assert(x11_map_state_poll(&rb_dpy, ctx, xid, 1) ==
+               IsUnmapped);
     }
 
     /* Restore: map + event. */
@@ -14076,12 +14232,10 @@ static void test_ext_subsurface_x11(void) {
 
         Display *rb_dpy = NULL;
         /* Inside the child (child-local 60, 45): red. */
-        assert(x11_readback_pixel(&rb_dpy, sub_xid, 60, 45) ==
-               0x00FF0000u);
+        assert(x11_readback_pixel_poll(&rb_dpy, ctx, sub_xid, 60, 45, 0x00FF0000u, "pixel") == 0x00FF0000u);
         /* The parent's own pixels, OUTSIDE the child region: blue —
          * read through the PARENT's window (the child clips there). */
-        assert(x11_readback_pixel(&rb_dpy, parent_xid, 5, 5) ==
-               0x000000FFu);
+        assert(x11_readback_pixel_poll(&rb_dpy, ctx, parent_xid, 5, 5, 0x000000FFu, "pixel") == 0x000000FFu);
         /* ...and where the child SITS, the parent window's pixels
          * are COVERED: the readback through the parent at the child's
          * position shows the child's red (children render over the
@@ -15620,6 +15774,7 @@ int main(void) {
     test_dbus_unavailable_logged_once();
     test_foreign_toplevels();
     test_init_with_app_id();
+    test_image_budget_lifecycle();
     test_quit_before_run_is_safe();
     test_run_returns_when_no_windows_open();
     test_window_create_show_destroy();
@@ -16295,10 +16450,8 @@ static void test_modern_widgets_gui(void) {
          * pending damage first — the pump alone never presents.) */
         assert(fdk_ok(fdk_window_paint(win)));
         x11_frame_settle(ctx); /* drain + let the server land the frame */
-        assert(x11_readback_pixel(&dpy, xid, 40, 110) ==
-               0x00C84646u);
-        assert(x11_readback_pixel(&dpy, xid, 250, 110) ==
-               0x004678DCu);
+        assert(x11_readback_pixel_poll(&dpy, ctx, xid, 40, 110, 0x00C84646u, "pixel") == 0x00C84646u);
+        assert(x11_readback_pixel_poll(&dpy, ctx, xid, 250, 110, 0x004678DCu, "pixel") == 0x004678DCu);
 
         /* Real drag: press inside the band [90, 96), move, release. */
         x11_send_pointer_event(dpy, xid, ButtonPress,
@@ -16316,10 +16469,8 @@ static void test_modern_widgets_gui(void) {
         assert(fdk_paned_get_position(p) == 167);
         assert(fdk_ok(fdk_window_paint(win)));
         x11_frame_settle(ctx); /* drain + let the server land the frame */
-        assert(x11_readback_pixel(&dpy, xid, 150, 110) ==
-               0x00C84646u);
-        assert(x11_readback_pixel(&dpy, xid, 250, 110) ==
-               0x004678DCu);
+        assert(x11_readback_pixel_poll(&dpy, ctx, xid, 150, 110, 0x00C84646u, "pixel") == 0x00C84646u);
+        assert(x11_readback_pixel_poll(&dpy, ctx, xid, 250, 110, 0x004678DCu, "pixel") == 0x004678DCu);
 
         /* Keyboard: Right twice steps +16 (167 -> 183). */
         assert(fdk_widget_focus(p));
@@ -16336,8 +16487,7 @@ static void test_modern_widgets_gui(void) {
         assert(fdk_paned_get_position(p) == 183);
         assert(fdk_ok(fdk_window_paint(win)));
         x11_frame_settle(ctx); /* drain + let the server land the frame */
-        assert(x11_readback_pixel(&dpy, xid, 175, 110) ==
-               0x00C84646u);
+        assert(x11_readback_pixel_poll(&dpy, ctx, xid, 175, 110, 0x00C84646u, "pixel") == 0x00C84646u);
 
         XCloseDisplay(dpy);
         fdk_window_destroy(win);
@@ -16661,8 +16811,7 @@ static void test_app_furniture_gui(void) {
         /* Page 1 (red) is current. */
         assert(fdk_ok(fdk_window_paint(win)));
         x11_frame_settle(ctx); /* drain + let the server land the frame */
-        assert(x11_readback_pixel(&dpy, xid, 150, 150) ==
-               0x00C84646u);
+        assert(x11_readback_pixel_poll(&dpy, ctx, xid, 150, 150, 0x00C84646u, "pixel") == 0x00C84646u);
 
         /* The pill 2 rect, then a REAL click at its center. */
         fdk_a11y_info pinfo;
@@ -16679,8 +16828,7 @@ static void test_app_furniture_gui(void) {
         FURNITURE_WAIT(fdk_stack_get_visible_child(stack) == pg2);
         assert(fdk_ok(fdk_window_paint(win)));
         x11_frame_settle(ctx); /* drain + let the server land the frame */
-        assert(x11_readback_pixel(&dpy, xid, 150, 150) ==
-               0x004678DCu);
+        assert(x11_readback_pixel_poll(&dpy, ctx, xid, 150, 150, 0x004678DCu, "pixel") == 0x004678DCu);
 
         XCloseDisplay(dpy);
         fdk_window_destroy(win);
@@ -16730,8 +16878,7 @@ static void test_app_furniture_gui(void) {
         FURNITURE_WAIT(fdk_revealer_get_child_revealed(rv));
         assert(fdk_ok(fdk_window_paint(win)));
         x11_frame_settle(ctx); /* drain + let the server land the frame */
-        assert(x11_readback_pixel(&dpy, xid, 100, 120) ==
-               0x0046A05Au); /* wcol(70,160,90): the drawer's green */
+        assert(x11_readback_pixel_poll(&dpy, ctx, xid, 100, 120, 0x0046A05Au, "pixel") == 0x0046A05Au); /* wcol(70,160,90): the drawer's green */
 
         /* Close: bounded wait until fully hidden, then the room is
          * the window background again. */
