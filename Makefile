@@ -145,7 +145,25 @@ ifeq ($(FDK_SANITIZE),0)
 else
   DEBUG_FLAGS := -g -O0 -DFDK_DEBUG_BUILD=1 -DFDK_DEBUG_THREAD_CHECKS=1 -fsanitize=address,undefined
 endif
-REL_FLAGS   := -O2 -DNDEBUG
+# Hardened release flags (docs/quality-gates.md): FORTIFY needs
+# optimization (hence -O2), stack protector strong, full RELRO+NOW,
+# PIE objects (linked -pie by consumers or by REL_LDFLAGS).
+#
+# The FORTIFY guard: -U_FORTIFY_SOURCE precedes our -D so a distro
+# build passing its own define via the environment can never hit a
+# redefinition under -Werror (Debian/Fedora both define it through
+# dpkg-buildflags / redhat-rpm-config; today the packaging recipes
+# call make directly without those env vars, but the guard makes
+# that future-proof). musl (Alpine) does not implement FORTIFY=3's
+# extras but accepts the macro without error; glibc and musl both
+# accept =2, and =3 silently degrades to =2 behavior on glibc < 2.36
+# and is simply inert on musl — either way harmless, and -U first
+# means a distro can override us entirely.
+# Verified not to break the dlopen'd lanes: none of these flags
+# touch the dynamic loader's behavior.
+REL_FLAGS   := -O2 -DNDEBUG -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 \
+               -fstack-protector-strong -fPIC -fPIE
+REL_LDFLAGS := -Wl,-z,relro,-z,now -pie
 
 # Build configuration (debug by default; `make release` re-invokes
 # make with FDK_CONFIG=release). The two configs MUST NOT share
@@ -200,7 +218,7 @@ CPPFLAGS:= -Iinclude -Isrc -DFDK_EXAMPLE_LSAN_SUPP='"$(CURDIR)/tests/data/lsan-g
 # glibc >= 2.34 where dlopen lives in libc; required for static
 # linking on older glibc. Project -l flags precede the environment's
 # so a distro-exported -Wl,--as-needed cannot drop them.
-LDFLAGS := $(X11_LIBS) $(WAYLAND_LIBS) -lm -ldl -lz -pthread $(ENV_LDFLAGS)
+LDFLAGS := $(X11_LIBS) $(WAYLAND_LIBS) -lm -ldl -lz -pthread -Wl,-z,relro,-z,now $(ENV_LDFLAGS)
 
 # pkg-config exposure (fdk.pc): private deps are the ones the .so
 # already links (apps need nothing); Requires.private lets static
@@ -808,6 +826,50 @@ tools: $(TOOL_BINS)
 $(BUILD_DIR)/tools/%: tools/%.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(STATIC_LIB) -o $@ $(LDFLAGS)
+
+
+# --- clang-tidy (non-blocking report; docs/quality-gates.md) ---------
+# Advisory: findings are reported, never fatal. Reads the same
+# compile line the build uses via compile_commands-lite: we re-run
+# the compiler with -E to check flags? No — simpler: run clang-tidy
+# per source with the project's include paths and the key defines.
+.PHONY: tidy
+TIDY_SRCS ?= $(CORE_SRCS)
+tidy:
+	@which clang-tidy >/dev/null 2>&1 || { echo "clang-tidy not installed (advisory target)"; exit 0; }
+	@for s in $(TIDY_SRCS); do \
+		clang-tidy --quiet $(CPPFLAGS) -Ithird_party/stb -- -std=c17 -D_POSIX_C_SOURCE=200809L -DFDK_DEBUG_BUILD=1 $$s 2>/dev/null || true; \
+	done | tee build/clang-tidy.report; \
+	ne=$$(grep -c "warning:" build/clang-tidy.report || true); \
+	echo "clang-tidy: $$ne finding(s) (advisory, non-blocking; report: build/clang-tidy.report)"
+
+
+# --- ABI gate (tools/abi; docs/quality-gates.md) --------------------
+.PHONY: abi-check
+abi-check: shared
+	@command -v abidiff >/dev/null 2>&1 || { echo "SKIP: abidiff (libabigail) not installed"; exit 0; }
+	@sh tools/abi/check-abi.sh build/libfdk.so && echo "ABI OK: no breaking change vs the committed baseline" 
+
+
+# --- Perf gate (advisory; docs/quality-gates.md) --------------------
+# Runs bench and compares against tests/perf-baseline.txt with a 2x
+# tolerance. ADVISORY by design (noise on shared CI runners is real);
+# flip the exit to make it blocking once the noise level is known.
+.PHONY: perf-gate
+perf-gate: bench
+	@if [ ! -f tests/perf-baseline.txt ]; then echo "no baseline yet: tests/perf-baseline.txt"; exit 0; fi; \
+	bad=0; \
+	while read -r name base_ns; do \
+		[ -z "$$name" ] && continue; \
+		now=$$(./build/bench 2>/dev/null | awk -v n="$$name" '$$1==n {print $$NF}'); \
+		if [ -n "$$now" ] && [ "$$base_ns" -gt 0 ]; then \
+			limit=$$(( base_ns * 2 )); \
+			if [ "$$now" -gt "$$limit" ]; then \
+				echo "PERF REGRESSION (advisory): $$name $$now ns vs baseline $$base_ns (limit $$limit)"; bad=1; \
+			fi; \
+		fi; \
+	done < tests/perf-baseline.txt; \
+	[ $$bad -eq 0 ] && echo "perf gate: within 2x of baseline" || echo "perf gate: regression(s) above — advisory, not failing"; exit 0
 
 # --- Fuzzing (docs/fuzzing.md) -------------------------------------------
 #

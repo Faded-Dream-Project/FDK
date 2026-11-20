@@ -1,0 +1,13 @@
+tree-churn 23961944
+tree-churn-batch 124859
+layout-sweep 34424
+paint-full 838260
+paint-damage 3721
+text-measure 144
+text-break 25327
+event-motion 86
+theme-switch 1197
+i18n-fmt-int 38
+i18n-fmt-double 230
+i18n-plural 22
+i18n-catalog 2
