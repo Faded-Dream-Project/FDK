@@ -499,8 +499,13 @@ static unsigned long theme_window_bg_pixel(void) {
  * SEPARATE X connection from FDK's (so the readback cannot be
  * satisfied from any FDK-side cache). Helper-owned display, opened
  * lazily. */
+/* fwd: defined after the display helpers; used by every
+ * second-connection read path (see its comment). */
+static void lib_sync(void);
+
 static unsigned long x11_readback_pixel(Display **out_dpy, unsigned long xid,
                                          int x, int y) {
+    lib_sync(); /* second-connection read */
     if (*out_dpy == NULL) {
         *out_dpy = x11_open_display_timeout();
         assert(*out_dpy != NULL);
@@ -568,6 +573,7 @@ static int x11_map_state_poll(Display **out_dpy, fdk_context *ctx,
                               unsigned long xid, int expect_unmapped) {
     for (int i = 0; i < 40; i++) {
         XWindowAttributes wa;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         if (XGetWindowAttributes(*out_dpy, (Window)xid, &wa)) {
             int is_unmapped = (wa.map_state == IsUnmapped);
             if (is_unmapped == expect_unmapped) {
@@ -577,6 +583,7 @@ static int x11_map_state_poll(Display **out_dpy, fdk_context *ctx,
         (void)fdk_pump_events(ctx, 25);
     }
     XWindowAttributes wa;
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     if (XGetWindowAttributes(*out_dpy, (Window)xid, &wa)) {
         return wa.map_state;
     }
@@ -613,10 +620,23 @@ static unsigned long fdk_window_xid(fdk_window *win) {
  * our pid, WM_CLIENT_MACHINE equals our hostname, WM_WINDOW_ROLE
  * follows set_role (and the create-time defaults), and _NET_WM_ICON
  * round-trips the EXACT ARGB pixels (dims header + every word). */
+/* Sync the LIBRARY's connection before any second-connection read
+ * (the deterministic fix for the race the polling band-aid chased):
+ * XSync blocks until the server has handled every library request,
+ * so the read below observes the mutation. Syncing inside the
+ * helpers (not at each call site) means no site can be forgotten. */
+static void lib_sync(void) {
+    fdk_context *lctx = fdk__context_active();
+    if (lctx != NULL) {
+        fdk_x11_test_sync(lctx);
+    }
+}
+
 static unsigned char *x11_read_property(Display *dpy, unsigned long xid,
                                         const char *name, Atom *out_type,
                                         int *out_fmt,
                                         unsigned long *out_nitems) {
+    lib_sync(); /* second-connection read */
     Atom prop = XInternAtom(dpy, name, False);
     unsigned char *data = NULL;
     unsigned long left = 0;
@@ -3064,6 +3084,7 @@ static void test_decorations_gui(void) {
     {
         Window child = 0;
         int px = 0, py = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XTranslateCoordinates(rb_dpy, (Window)xid,
                                      DefaultRootWindow(rb_dpy), 0, 0,
                                      &px, &py, &child));
@@ -3122,6 +3143,7 @@ static void test_decorations_gui(void) {
             Window root_ret = 0, child = 0;
             int px = 0, py = 0;
             unsigned int bw = 0, depth = 0, w = 0, h = 0;
+            lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
             assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px,
                                 &py, &w, &h, &bw, &depth));
             (void)child;
@@ -3154,6 +3176,7 @@ static void test_decorations_gui(void) {
             Window root_ret = 0, child = 0;
             int px = 0, py = 0;
             unsigned int bw = 0, depth = 0, w = 0, h = 0;
+            lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
             assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px,
                                 &py, &w, &h, &bw, &depth));
             (void)child;
@@ -3186,6 +3209,7 @@ static void test_decorations_gui(void) {
         assert(deco_state_events == states0 + 4);
         {
             XWindowAttributes wa;
+            lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
             assert(XGetWindowAttributes(rb_dpy, (Window)xid, &wa));
             assert(wa.map_state == IsViewable);
         }
@@ -3370,6 +3394,7 @@ static void test_window_state_gui(void) {
         Window root_ret = 0;
         int px = 0, py = 0;
         unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
                             &w, &h, &bw, &depth));
         assert(px == 0 && py == 0);
@@ -3390,6 +3415,7 @@ static void test_window_state_gui(void) {
         Window root_ret = 0;
         int px = 0, py = 0;
         unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
                             &w, &h, &bw, &depth));
         assert(px == 0 && py == 0 && w == 300 && h == 200);
@@ -3413,6 +3439,7 @@ static void test_window_state_gui(void) {
     (void)fdk_pump_events(ctx, 200);
     {
         XWindowAttributes wa;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetWindowAttributes(rb_dpy, (Window)xid, &wa));
         assert(wa.map_state == IsViewable);
     }
@@ -3436,6 +3463,7 @@ static void test_window_state_gui(void) {
         Window root_ret = 0;
         int px = 0, py = 0;
         unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
                             &w, &h, &bw, &depth));
         assert(px == 0 && py == 0);
@@ -3455,6 +3483,7 @@ static void test_window_state_gui(void) {
         Window root_ret = 0;
         int px = 0, py = 0;
         unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
                             &w, &h, &bw, &depth));
         assert(px == 0 && py == 0 && w == 300 && h == 200);
@@ -3550,6 +3579,7 @@ static void test_resize_edges_gui(void) {
         Window root_ret = 0;
         int px = 0, py = 0;
         unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
                             &w, &h, &bw, &depth));
         assert(px == 0 && py == 0 && w == 230 && h == 130);
@@ -3569,6 +3599,7 @@ static void test_resize_edges_gui(void) {
         Window root_ret = 0;
         int px = 0, py = 0;
         unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
                             &w, &h, &bw, &depth));
         assert(px == 0 && py == 0 && w == 270 && h == 130);
@@ -3589,6 +3620,7 @@ static void test_resize_edges_gui(void) {
         Window root_ret = 0;
         int px = 0, py = 0;
         unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
                             &w, &h, &bw, &depth));
         assert(px == 0 && py == 20 && w == 270 && h == 110);
@@ -3612,6 +3644,7 @@ static void test_resize_edges_gui(void) {
         Window root_ret = 0;
         int px = 0, py = 0;
         unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
                             &w, &h, &bw, &depth));
         assert(px == 0 && py == 20 && w == 120 && h == 80);
@@ -3677,6 +3710,7 @@ static void test_resize_retains_pixels(void) {
 
     /* The bit-gravity half of the contract, directly: */
     XWindowAttributes attrs;
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     assert(XGetWindowAttributes(rb_dpy, (Window)xid, &attrs) != 0);
     assert(attrs.bit_gravity == NorthWestGravity);
 
@@ -4611,6 +4645,7 @@ static void fake_wm_apply_state(fake_wm *wm, Window w, long action,
         Window root_ret = 0;
         int x = 0, y = 0;
         unsigned int bw = 0, depth = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(wm->dpy, w, &root_ret, &x, &y,
                             &wm->saved_w, &wm->saved_h, &bw, &depth));
         wm->saved_x = x;
@@ -4811,6 +4846,7 @@ static void test_ewmh_fake_wm(void) {
         unsigned int bw = 0, depth = 0, w = 0, h = 0;
         Display *d = x11_open_display_timeout();
         assert(d != NULL);
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(d, (Window)xid, &root_ret, &px, &py, &w,
                             &h, &bw, &depth));
         XCloseDisplay(d);
@@ -4833,6 +4869,7 @@ static void test_ewmh_fake_wm(void) {
         unsigned int bw = 0, depth = 0, w = 0, h = 0;
         Display *d = x11_open_display_timeout();
         assert(d != NULL);
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(d, (Window)xid, &root_ret, &px, &py, &w,
                             &h, &bw, &depth));
         XCloseDisplay(d);
@@ -4853,6 +4890,7 @@ static void test_ewmh_fake_wm(void) {
      * point through the window's position at press time. */
     Window child = 0;
     int press_rx = 0, press_ry = 0;
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     assert(XTranslateCoordinates(wm.dpy, (Window)xid, wm.root,
                                  100, 10, &press_rx, &press_ry, &child));
     assert(fake_wm_wait(&wm, &wm.saw_moveresize, 1));
@@ -6847,6 +6885,7 @@ static void test_popup_window(void) {
     unsigned long parent_xid = fdk_window_xid(win);
     rb_dpy = x11_open_display_timeout();
     assert(rb_dpy != NULL);
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     assert(XTranslateCoordinates(rb_dpy, (Window)parent_xid,
                                  DefaultRootWindow(rb_dpy), 0, 0, &px,
                                  &py, &child_ret));
@@ -7096,6 +7135,7 @@ static void test_menu_gui(void) {
         Window root_ret;
         int gx, gy;
         unsigned int pw, ph, bw, dep;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(send, (Window)popup, &root_ret, &gx, &gy,
                             &pw, &ph, &bw, &dep));
         unsigned long px =
@@ -7286,6 +7326,7 @@ static void test_combo_gui(void) {
         Window root_ret;
         int gx, gy;
         unsigned int pw, ph, bw, dep;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(send, pop, &root_ret, &gx, &gy, &pw, &ph,
                             &bw, &dep));
         unsigned long px =
@@ -7449,8 +7490,10 @@ static void test_scale_button_gui(void) {
         Window rw, cw;
         int wx, wy;
         unsigned int ww, wh, wb, wd;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(send, xid, &rw, &wx, &wy, &ww, &wh, &wb,
                             &wd));
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         XTranslateCoordinates(send, xid, root_scr, 0, 0, &wx, &wy, &cw);
         int bx = wx + 20 + (int)nat.width / 2;
         int by = wy + 20 + (int)nat.height / 2;
@@ -7469,6 +7512,7 @@ static void test_scale_button_gui(void) {
         /* Onto the trough (popup-local (24, 76) = the middle), in
          * motion steps — the approach the SendEvent clicks skip. */
         int px, py;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         XTranslateCoordinates(send, drag_pop, root_scr, 0, 0, &px, &py,
                               &cw);
         XTestFakeMotionEvent(send, 0, px + 24, py + 76, CurrentTime);
@@ -7684,6 +7728,7 @@ static void test_date_picker_gui(void) {
         Window root_ret;
         int gx, gy;
         unsigned int pw, ph, bw, dep;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(send, pop, &root_ret, &gx, &gy, &pw, &ph,
                             &bw, &dep));
         Display *rb = NULL;
@@ -9805,6 +9850,7 @@ static void test_dnd_receiver_gui(void) {
      * (0,0) under bare Xvfb, but asking the server is the truth). */
     int lx = 0, ly = 0;
     Window junk = None;
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
                           80, 60, &lx, &ly, &junk);
     char cmd[512];
@@ -9887,6 +9933,7 @@ static void test_dnd_receiver_incr_gui(void) {
     unsigned long xid = fdk_window_xid(win);
     int lx = 0, ly = 0;
     Window junk = None;
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
                           80, 60, &lx, &ly, &junk);
     char cmd[512];
@@ -9973,6 +10020,7 @@ static void test_dnd_receiver_gtk_gui(void) {
     unsigned long xid = fdk_window_xid(win);
     int lx = 0, ly = 0;
     Window junk = None;
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
                           80, 60, &lx, &ly, &junk);
     char cmd[512];
@@ -10269,6 +10317,7 @@ static Window s9_find_icon_window(Display *d, int *out_x, int *out_y) {
     if (XQueryTree(d, DefaultRootWindow(d), &r, &p, &ch, &n)) {
         for (unsigned int i = 0; i < n; i++) {
             XWindowAttributes wa;
+            lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
             if (XGetWindowAttributes(d, ch[i], &wa) &&
                 wa.override_redirect && wa.map_state == IsViewable &&
                 wa.width == S9_ICON_W && wa.height == S9_ICON_H) {
@@ -10346,6 +10395,7 @@ static void test_dnd_drag_icon_gui(void) {
     assert(probe != NULL);
     int wx = 0, wy = 0;
     Window junk = None;
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
                           60, 40, &wx, &wy, &junk);
     const char *libprefix = getenv("FDK_XLIB_PREFIX");
@@ -10550,8 +10600,10 @@ static void test_dnd_widget_targets_gui(void) {
      * region (below the zone). */
     int zone_rx = 0, zone_ry = 0, fall_rx = 0, fall_ry = 0;
     Window junk = None;
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
                           140, 100, &zone_rx, &zone_ry, &junk);
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
                           140, 210, &fall_rx, &fall_ry, &junk);
 
@@ -11005,6 +11057,7 @@ static void test_dnd_source_gui(void) {
     assert(probe != NULL);
     int wx = 0, wy = 0, sx = 0, sy = 0;
     Window junk = None;
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
                           60, 40, &wx, &wy, &junk);
     XCloseDisplay(probe);
@@ -11254,6 +11307,7 @@ static unsigned long find_tooltip_child(Display *dpy, unsigned long owner) {
             continue;
         }
         XWindowAttributes wa;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         if (XGetWindowAttributes(dpy, k, &wa) == 0) {
             continue;
         }
@@ -11520,6 +11574,7 @@ static void test_tooltip_gui(void) {
      * y=h-3 (below them). Sampled mid-width, away from both. */
     {
         XWindowAttributes wa;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetWindowAttributes(send_dpy, (Window)tip, &wa) != 0);
         assert(wa.width >= 24 && wa.height >= 12);
         Display *rb_dpy = NULL;
@@ -11883,6 +11938,7 @@ static void test_modern_batch_gui(void) {
              * left with a 10-px gap (both ~84 wide, ~30 tall) — OK's
              * center is ~150 px off the right edge. */
             XWindowAttributes wa;
+            lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
             assert(XGetWindowAttributes(send, chooser, &wa) != 0);
             int ok_x = wa.width - 150;
             int ok_y = wa.height - 24;
@@ -13242,6 +13298,7 @@ static void ext_test_destroy(fdk_ext_surface *surface, void *user) {
                  * BEFORE the role teardown */
                 XWindowAttributes attrs;
                 Display *dpy = (Display *)nd.display;
+                lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
                 assert(XGetWindowAttributes(dpy, (Window)nh.xid,
                                             &attrs) != 0);
             }
@@ -13377,6 +13434,7 @@ static void test_ext_surface_lifecycle(void) {
     assert(own_dpy != NULL);
 
     XWindowAttributes attrs;
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     assert(XGetWindowAttributes(own_dpy, (Window)xid, &attrs) != 0);
     assert(attrs.width == 200 && attrs.height == 60);
     assert(attrs.map_state == IsUnmapped); /* show() has not run */
@@ -13399,6 +13457,7 @@ static void test_ext_surface_lifecycle(void) {
     /* Show + render through the PUBLIC fdk_surface path. */
     fdk_ext_surface_show(surf);
     (void)fdk_pump_events(ctx, 100);
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     assert(XGetWindowAttributes(own_dpy, (Window)xid, &attrs) != 0);
     assert(attrs.map_state == IsViewable);
 
@@ -13793,9 +13852,11 @@ static void test_ext_popup_x11(void) {
     Window child_ret = None;
     int parent_x = 0, parent_y = 0;
     int pop_x = 0, pop_y = 0;
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     assert(XTranslateCoordinates(own_dpy, (Window)parent_xid,
                                  DefaultRootWindow(own_dpy), 0, 0,
                                  &parent_x, &parent_y, &child_ret));
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     assert(XTranslateCoordinates(own_dpy, (Window)pop_xid,
                                  DefaultRootWindow(own_dpy), 0, 0,
                                  &pop_x, &pop_y, &child_ret));
@@ -13804,6 +13865,7 @@ static void test_ext_popup_x11(void) {
     assert(pop_x == parent_x + 30);
     assert(pop_y == parent_y + 20);
     XWindowAttributes pattrs;
+    lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
     assert(XGetWindowAttributes(own_dpy, (Window)pop_xid, &pattrs) != 0);
     assert(pattrs.override_redirect != 0);
     assert(pattrs.map_state == IsViewable);
@@ -14199,11 +14261,13 @@ static void test_ext_subsurface_x11(void) {
         Window root_ret = None;
         int gx = 0, gy = 0;
         unsigned int gw = 0, gh = 0, gb = 0, gd = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(own_dpy, (Window)sub_xid, &root_ret, &gx, &gy,
                             &gw, &gh, &gb, &gd));
         assert(gw == 120 && gh == 90);
         Window child_ret = None;
         int lx = 0, ly = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XTranslateCoordinates(own_dpy, (Window)sub_xid,
                                      (Window)parent_xid, 0, 0, &lx, &ly,
                                      &child_ret));
@@ -14255,6 +14319,7 @@ static void test_ext_subsurface_x11(void) {
     {
         Window child_ret = None;
         int lx = 0, ly = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XTranslateCoordinates(own_dpy, (Window)sub_xid,
                                      (Window)parent_xid, 0, 0, &lx, &ly,
                                      &child_ret));
@@ -14270,6 +14335,7 @@ static void test_ext_subsurface_x11(void) {
         Window root_ret = None;
         int gx = 0, gy = 0;
         unsigned int gw = 0, gh = 0, gb = 0, gd = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XGetGeometry(own_dpy, (Window)sub_xid, &root_ret, &gx, &gy,
                             &gw, &gh, &gb, &gd));
         assert(gw == 140 && gh == 60);
@@ -14374,6 +14440,7 @@ static void test_ext_subsurface_x11(void) {
     {
         Window root_ret = None, child_ret = None;
         int px = 0, py = 0;
+        lib_sync(); /* 2nd-conn read: see x11_readback_pixel */
         assert(XTranslateCoordinates(own_dpy, (Window)parent_xid,
                                      DefaultRootWindow(own_dpy), 0, 0, &px,
                                      &py, &child_ret));

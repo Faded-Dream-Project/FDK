@@ -4,6 +4,7 @@
 #include "render/vk_present.h"
 
 #include "core/alloc_internal.h"
+#include "core/context_internal.h" /* fdk_x11_test_sync reads ctx->conn */
 #include "core/log_internal.h"
 
 #include <X11/Xutil.h>
@@ -602,4 +603,18 @@ int fdk_x11_get_event_fd(fdk_platform_connection *conn) {
         return -1;
     }
     return ConnectionNumber(conn->display);
+}
+
+/* TEST-ONLY: the second-connection race fix's hook (the header
+ * comment is the contract). XSync blocks until the server has
+ * handled every request THIS connection sent — after it returns,
+ * any read on a second connection observes the mutation. */
+void fdk_x11_test_sync(fdk_context *ctx) {
+    if (ctx == NULL || ctx->conn == NULL) {
+        return;
+    }
+    fdk_platform_connection *conn = ctx->conn;
+    if (conn->display != NULL) {
+        XSync(conn->display, False);
+    }
 }

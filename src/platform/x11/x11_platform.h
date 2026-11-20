@@ -1286,3 +1286,17 @@ fdk_result fdk_x11_drag_begin(fdk_platform_window *origin, int formats,
 fdk_result fdk_x11_set_event_filter_impl(fdk_platform_connection *conn,
                                          int (*filter)(void *, void *),
                                          void *user);
+
+/* TEST-ONLY (2026-11-20, the second-connection race fix): force a
+ * real round trip on the LIBRARY's connection — XSync(dpy, False)
+ * blocks until the server has processed every request this client
+ * sent. The integration tests read X state (properties, shape,
+ * geometry, pixels) through their OWN Display*, and the server
+ * handles requests per connection: without this sync a read on the
+ * test connection can be processed BEFORE the library's preceding
+ * mutation. Calling this after every library mutation makes those
+ * reads deterministic — the replacement for the polling band-aid
+ * wherever no WM round trip is involved. Never exported from the
+ * .so (no FDK_ prefix-symbols from here; the static archive and
+ * the test binary link it directly). */
+void fdk_x11_test_sync(fdk_context *ctx);
