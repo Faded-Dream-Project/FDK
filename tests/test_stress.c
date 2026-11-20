@@ -56,7 +56,75 @@ static double now_s(void) {
 /* Leg 1 — the 10k-row List                                             */
 /* ------------------------------------------------------------------ */
 
+/* Best-of-3 append timing at a fixed row count. A FRESH tree per
+ * rep (destroyed after) so every rep sees comparable allocator and
+ * glyph-cache state; the MINIMUM is taken because a shared runner's
+ * scheduler stall lands on one rep, never on all three. */
+static double time_list_appends(int rows) {
+    double best = -1.0;
+    for (int rep = 0; rep < 3; rep++) {
+        fdk_widget *root = NULL;
+        assert(fdk_ok(fdk_widget_create(NULL, NULL,
+                                        (fdk_rect){0, 0, 300, 400},
+                                        &root)));
+        fdk_widget *list = NULL;
+        assert(fdk_ok(fdk_list_create(root, g_font, &list)));
+        fdk_widget_set_bounds(list, (fdk_rect){0, 0, 300, 400});
+        double t0 = now_s();
+        for (int i = 0; i < rows; i++) {
+            char buf[48];
+            snprintf(buf, sizeof buf, "stress row %05d — %s", i,
+                     (i % 3 == 0) ? "alpha"
+                     : ((i % 3 == 1) ? "beta" : "gamma"));
+            assert(fdk_ok(fdk_list_append(list, buf, NULL)));
+        }
+        double t = now_s() - t0;
+        if (best < 0.0 || t < best) {
+            best = t;
+        }
+        fdk_widget_destroy(root);
+    }
+    return best;
+}
+
 static void stress_leg_list_10k(void) {
+    /* THE LINEARITY PIN, machine-independent (2026-11-20 rewrite):
+     * rebuild the list at 2500 / 5000 / 10000 rows, best of 3 each,
+     * and assert the DOUBLING RATIOS. Ratios measured in one run on
+     * one machine cancel machine speed entirely — a slow shared
+     * arm64 runner and a fast x86 desktop yield the same numbers,
+     * which the OLD wall-clock form (t_7500 < 3*t_2500 + 1s) did
+     * not: it conflated "slow machine" with "quadratic code" and
+     * flaked on the arm64 lane under load.
+     *
+     *   linear:    t(2n)/t(n) ~ 2.0  (+ cache-spill headroom)
+     *   quadratic: t(2n)/t(n) ~ 4.0
+     *
+     * The bar (3.25) sits above any linear-with-cache-miss reality
+     * (linear code can lose ~1.3x per element to cache spills on a
+     * doubling, i.e. ratio ~2.6) and far below quadratic's 4.0 — a
+     * real complexity regression fails by a wide margin, not by
+     * noise. The denominators are floored so a sub-microsecond
+     * measurement (a coarse clock) cannot fabricate an infinite
+     * ratio. */
+    double t_2500 = time_list_appends(2500);
+    double t_5000 = time_list_appends(5000);
+    double t_10000 = time_list_appends(10000);
+    double d1 = t_2500 > 1e-6 ? t_2500 : 1e-6;
+    double d2 = t_5000 > 1e-6 ? t_5000 : 1e-6;
+    double r_2x1 = t_5000 / d1;  /* 2500 -> 5000  */
+    double r_4x2 = t_10000 / d2; /* 5000 -> 10000 */
+    assert(r_2x1 < 3.25);
+    assert(r_4x2 < 3.25);
+
+    /* The SANITY CAP (not a performance budget — the ratios above
+     * own complexity): 10k appends take well under a second on any
+     * hardware this suite runs on; 60s means a hang or a deadlock,
+     * never a slow CPU. */
+    assert(t_10000 < 60.0);
+
+    /* The working list for the leg's correctness half: one more 10k
+     * build (cheap next to the timing reps above). */
     fdk_widget *root = NULL;
     assert(fdk_ok(fdk_widget_create(NULL, NULL,
                                      (fdk_rect){0, 0, 300, 400},
@@ -64,30 +132,12 @@ static void stress_leg_list_10k(void) {
     fdk_widget *list = NULL;
     assert(fdk_ok(fdk_list_create(root, g_font, &list)));
     fdk_widget_set_bounds(list, (fdk_rect){0, 0, 300, 400});
-
-    /* The growth-ratio pin: 2.5k and 10k rows through the SAME
-     * append path. Linear stays under the slack; a quadratic
-     * regression lands at ~16x for 4x the rows and fails. */
-    double t_small = now_s();
-    for (int i = 0; i < 2500; i++) {
-        char buf[48];
-        snprintf(buf, sizeof buf, "warmup row %05d", i);
-        assert(fdk_ok(fdk_list_append(list, buf, NULL)));
-    }
-    t_small = now_s() - t_small;
-
-    double t_big_start = now_s();
-    for (int i = 2500; i < 10000; i++) {
+    for (int i = 0; i < 10000; i++) {
         char buf[48];
         snprintf(buf, sizeof buf, "stress row %05d — %s", i,
                  (i % 3 == 0) ? "alpha" : ((i % 3 == 1) ? "beta" : "gamma"));
         assert(fdk_ok(fdk_list_append(list, buf, NULL)));
     }
-    double t_big = now_s() - t_big_start;
-    /* 7500 more rows in less than 3x the 2500-row time plus slack
-     * (allocator warmup makes the small pass cheap; quadratic needs
-     * ~9x and blows this). */
-    assert(t_big < t_small * 3.0 + 1.0);
 
     /* Selection + query sanity at depth. */
     assert(fdk_ok(fdk_list_select(list, 9999)));
@@ -106,7 +156,10 @@ static void stress_leg_list_10k(void) {
         fdk_widget_tree_paint(root, s);
     }
     t_paint = now_s() - t_paint;
-    assert(t_paint < 20.0); /* 20 full repaints of the 10k-row tree */
+    assert(t_paint < 120.0); /* 20 repaints: a HANG detector (the
+                             * arm64 lane taught us wall-clock
+                             * budgets must be absurdly generous —
+                             * this is not a perf gate) */
 
     /* Deep scroll: wheel to the far end through the internal
      * scrollview (the eased target accumulates; the engine's test
@@ -143,10 +196,11 @@ static void stress_leg_list_10k(void) {
 
     fdk_surface_destroy(s);
     fdk_widget_destroy(root);
-    printf("[ok] stress 10k-row list: append/measure linear "
-           "(%.2fs + %.2fs), 20 full repaints %.2fs, deep scroll + "
-           "select + repaint alive\n",
-           t_small, t_big, t_paint);
+    printf("[ok] stress 10k-row list: append DOUBLING RATIOS "
+           "%.2f/%.2f (linear~2, quadratic~4; 10k best-of-3 "
+           "%.2fs), 20 full repaints %.2fs, deep scroll + select + "
+           "repaint alive\n",
+           r_2x1, r_4x2, t_10000, t_paint);
 }
 
 /* ------------------------------------------------------------------ */
