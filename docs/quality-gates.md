@@ -96,6 +96,22 @@ reasoning lives in `fdk_core.h`'s `fdk_init_ex` comment; the
 16-byte-caller regression test (under ASan) is
 `tests/test_core.c::test_init_ex_size_contract`.
 
+**The second pass (same day): the legacy symbol frozen.** The
+first pass only protected callers who switched to `fdk_init_ex`;
+an old binary calling the exported `fdk_init` could still be
+over-read once a field was appended. Now the exported symbol is
+pinned to the 1.0 layout (`FDK_INIT_OPTIONS_SIZE_1_0`, 24 bytes
+— static-asserted against the real struct), and the header
+redirects source-level `fdk_init(...)` to a `static inline` that
+passes the CALLER's `sizeof`. ABI delta: **none** (same symbols,
+same signatures — the redirect is compile-time only); baseline
+re-verified, no refresh needed. Verified against: all 18 in-tree
+`fdk_init` callers (tests, examples, test-apps), both build-system
+consumers (`make consumer-test`: cmake + meson both build, link,
+run), a C++ TU with `extern "C"` and `&fdk_init`, and
+`dlsym("fdk_init")` against `libfdk.so` (resolves to the frozen
+symbol).
+
 ## clang-tidy
 
 `make tidy` (advisory, never fails the build) runs clang-tidy over

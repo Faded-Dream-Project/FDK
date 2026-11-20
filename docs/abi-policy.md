@@ -158,6 +158,26 @@ SONAME stays `libfdk.so.1`, only the file name moves (the numeric
 name — Alpine's abuild derives apk so:provides versions from the
 filename tail, which rejected a suffixed name outright).
 
+### The fdk_init size contract (2026-11-20, second pass)
+
+`fdk_init_options` grows by appending; `fdk_init_ex` (the first
+pass) protects opt-in callers. The second pass closed the legacy
+hole: the EXPORTED `fdk_init` symbol is FROZEN at the 1.0 layout —
+it reads at most `FDK_INIT_OPTIONS_SIZE_1_0` (24) bytes, so a
+binary that never recompiles (dlsym, non-C bindings) can never be
+over-read no matter how far the struct grows. Recompiled callers
+are handled at compile time: the header defines `fdk_init` as a
+`static inline` that calls `fdk_init_ex` with the caller's own
+`sizeof(fdk_init_options)` — the redirect is invisible, keeps the
+calling convention, `&fdk_init` still compiles (binding the
+inline), and `FDK_NO_INIT_REDIRECT` before the include restores
+the plain prototype for the rare caller that wants the frozen
+symbol explicitly (the library's own `context.c` compiles that
+way). New fields reach the library ONLY through `fdk_init_ex`.
+The pin is executable: `tests/test_core.c` calls the real
+exported symbol (bound via an asm label — the redirect owns the
+token) on a heap allocation of exactly 24 bytes, under ASan.
+
 The extension API's own version moved 1 -> 2 with the D-2
 subsurfaces (the seven `fdk_ext_subsurface_*` functions): a pure
 addition — no existing symbol, type, or field changed — so an add-on

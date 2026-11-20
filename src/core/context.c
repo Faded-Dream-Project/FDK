@@ -1,5 +1,9 @@
 #define FDK_LOG_TAG "core"
 
+/* The size contract's link-time half lives here: this TU must see
+ * the PLAIN fdk_init prototype (the header's redirect inline is
+ * for consumers, not the library's own definition). */
+#define FDK_NO_INIT_REDIRECT 1
 #include "fdk/fdk_core.h"
 
 #include "core/alloc_internal.h"
@@ -587,22 +591,25 @@ fdk_result fdk_init_ex(fdk_context **out_ctx,
 #undef OPT_HAS
 }
 
-/* The frozen entry point: the full current layout, exactly as the
- * pre-contract ABI read it. Every field FDK knows about is read
- * (callers rebuilt against newer headers get newer defaults);
- * callers built against OLDER headers keep passing what they
- * always passed — the struct only ever grows by appending, so
- * their allocation still covers every field THAT EXISTED for
- * them... which fdk_init reads past ONLY IF they compiled against
- * a header older than a field FDK now reads. That is precisely
- * why new fields should be set through fdk_init_ex: it is the
- * form that KNOWS which layout the caller compiled against.
- * fdk_init stays for defaults, for NULL, and for the documented
- * full-layout contract. */
+/* THE FROZEN SYMBOL (the size contract's link-time half; the full
+ * story is fdk_core.h's fdk_init comment). The exported fdk_init
+ * reads AT MOST the 1.0 layout — FDK_INIT_OPTIONS_SIZE_1_0 bytes:
+ * a binary that never rebuilds against a newer header (dlsym, a
+ * non-C binding) passes a 1.0-sized-or-smaller struct, and no
+ * future append makes this function read past it. Recompiled
+ * callers never reach this symbol: the header redirects their
+ * source-level fdk_init to an inline that calls fdk_init_ex with
+ * THEIR sizeof. The static assert pins the constant to the real
+ * struct (a shrink or reorder breaks the build — the point).
+ *
+ * context.c compiles with FDK_NO_INIT_REDIRECT (see the top of
+ * this file) so this TU sees the plain prototype, not the inline. */
 fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
-    return fdk_init_ex(out_ctx, options, options != NULL
-                                          ? sizeof(*options)
-                                          : (size_t)0);
+    _Static_assert(sizeof(fdk_init_options) >= FDK_INIT_OPTIONS_SIZE_1_0,
+                   "fdk_init_options shrank below the frozen 1.0 layout");
+    return fdk_init_ex(out_ctx, options,
+                       options != NULL ? FDK_INIT_OPTIONS_SIZE_1_0
+                                       : (size_t)0);
 }
 
 int fdk_pump_events(fdk_context *ctx, int timeout_ms) {

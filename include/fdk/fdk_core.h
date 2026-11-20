@@ -167,14 +167,52 @@ void fdk_context_render_mode(const fdk_context *ctx,
 /* Initializes FDK and creates a new toolkit context, writing it to
  * *out_ctx on success. `options` may be NULL to accept all defaults.
  *
- * Can fail with:
- *   FDK_ERR_INVALID_ARGUMENT  - out_ctx is NULL
- *   FDK_ERR_OUT_OF_MEMORY     - allocation failure
- *   FDK_ERR_PLATFORM_INIT     - platform backend failed to initialize
- *   FDK_ERR_NO_DISPLAY        - no X11/Wayland display reachable
+ * THE SIZE CONTRACT, SECOND PASS (2026-11-20). fdk_init_ex (below)
+ * protects callers who opt in; the hole was the LEGACY symbol: a
+ * caller compiled against a SMALLER fdk_init_options passes a
+ * smaller allocation, and once a field is appended, the exported
+ * fdk_init reading sizeof(its own layout) over-reads it.
  *
- * On any failure, *out_ctx is left unchanged (not partially initialized). */
-fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options);
+ * The fix has two halves:
+ *
+ *   1. THE REDIRECT (compile time). Source-level fdk_init(...) is
+ *      macro-redirected to this header's static inline, which calls
+ *      fdk_init_ex with sizeof(fdk_init_options) AS THE CALLER'S
+ *      HEADER DEFINED IT. A recompiled app can never be over-read,
+ *      no matter how far the struct grows. The inline keeps the
+ *      exact calling convention, so &fdk_init still works (its
+ *      address type is the same; through the redirect it binds the
+ *      inline, which forwards the caller's own sizeof — the only
+ *      behavior change vs the old symbol, and the one the contract
+ *      wants).
+ *
+ *   2. THE FROZEN SYMBOL (link time). The exported fdk_init is
+ *      pinned to the 1.0 layout — it reads AT MOST
+ *      FDK_INIT_OPTIONS_SIZE_1_0 bytes ({backend, app_id,
+ *      render_mode, image_max_pixels}; 24 on every ABI this
+ *      library has ever shipped). A binary that did NOT rebuild
+ *      against this header (dlsym("fdk_init"), a non-C binding, a
+ *      hand-written declaration) keeps working against future
+ *      libraries exactly as it did against 1.0: no future append
+ *      can make the library read past its 24 bytes. All new fields
+ *      reach the library ONLY through fdk_init_ex.
+ *
+ * Opting out of the redirect (rare): define FDK_NO_INIT_REDIRECT
+ * before including this header — the plain prototype comes back,
+ * the call binds the frozen symbol, and the caller asserts by
+ * doing so that it only passes 1.0-layout structs. */
+#define FDK_INIT_OPTIONS_SIZE_1_0 24
+
+#ifdef FDK_NO_INIT_REDIRECT
+fdk_result fdk_init(fdk_context **out_ctx,
+                    const fdk_init_options *options);
+#else
+/* The redirect: source-level fdk_init calls the static inline at
+ * the BOTTOM of this file (after fdk_init_ex's prototype — C needs
+ * the full declaration before the call). NO prototype here: the
+ * inline IS the declaration; a prototype plus a later static
+ * definition is a hard error. */
+#endif
 
 /* Runs the event loop until fdk_quit() is called or the last top-level
  * window is closed (whichever comes first). Blocks the calling thread.
@@ -288,5 +326,27 @@ void fdk_shutdown(fdk_context *ctx);
 #ifdef __cplusplus
 }
 #endif
+
+/* THE REDIRECT (the size contract's compile-time half; see the
+ * fdk_init comment above for the full story). Defined AFTER the
+ * extern-"C" block closes so the static inline gets C++ linkage
+ * rules right in mixed translation units (the body only calls an
+ * extern "C" function, so the inline itself needs no mangling).
+ * FDK_NO_INIT_REDIRECT (defined before including this header)
+ * removes it: the plain call binds the frozen symbol. */
+#ifndef FDK_NO_INIT_REDIRECT
+/* C++ note: this inline deliberately has C++ (not extern "C")
+ * linkage — 'extern "C" static' is ill-formed, and the body only
+ * CALLS an extern "C" function, so no mangling concern arises.
+ * Its address differs from the frozen symbol's; callers needing
+ * the stable exported address (dlopen'd plugin tables) should
+ * take &fdk_init from a TU compiled with FDK_NO_INIT_REDIRECT,
+ * or dlsym("fdk_init"). */
+static inline fdk_result fdk_init(fdk_context **out_ctx,
+                                  const fdk_init_options *options) {
+    return fdk_init_ex(out_ctx, options,
+                       options != NULL ? sizeof(*options) : (size_t)0);
+}
+#endif /* FDK_NO_INIT_REDIRECT */
 
 #endif /* FDK_CORE_H */
