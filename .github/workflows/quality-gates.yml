@@ -127,6 +127,52 @@ jobs:
         run: make perf-gate
 
   arm64:
+    name: x11 flake soak (test-x11 x20, loaded)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libx11-dev libxext-dev libxrandr-dev libxrender-dev \
+            libxi-dev libxtst-dev libwayland-dev libxkbcommon-dev \
+            zlib1g-dev xvfb stress-ng
+      - name: build the X11 suite
+        run: make build/tests/test_x11_integration
+      - name: "soak: 20 runs under CPU load on software Xvfb"
+        run: |
+          XVFB_NUM=91
+          rm -f "/tmp/.X11-unix/X$XVFB_NUM"
+          Xvfb ":$XVFB_NUM" -screen 0 1024x768x24 >/tmp/xvfb.log 2>&1 &
+          XVFB_PID=$!
+          # CPU pressure: two stress-ng cpu workers (the shared
+          # runner has 2-4 cores; the load makes the per-connection
+          # request-ordering races window as wide as they get).
+          stress-ng --cpu 2 --cpu-load 80 --timeout 0 >/dev/null 2>&1 &
+          LOAD_PID=$!
+          export DISPLAY=":$XVFB_NUM"
+          export LSAN_OPTIONS="suppressions=$(pwd)/tests/data/lsan-gl.supp"
+          fails=0
+          for i in $(seq 1 20); do
+            if ! ./build/tests/test_x11_integration >/tmp/soak-iter.log 2>&1; then
+              fails=$((fails+1))
+              echo "=== ITER $i FAILED ==="
+              grep -E "Assertion|FAILED" /tmp/soak-iter.log | head -3
+              cp /tmp/soak-iter.log "soak-fail-$i.log"
+            fi
+            echo "iteration $i: $fails failure(s) so far"
+          done
+          kill $LOAD_PID $XVFB_PID 2>/dev/null || true
+          test "$fails" -eq 0
+      - name: upload failure logs on flake
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: x11-soak-failures
+          path: soak-fail-*.log
+          if-no-files-found: ignore
+
     name: arm64 (make test)
     runs-on: ubuntu-24.04-arm
     steps:
