@@ -97,6 +97,7 @@ overridable: `LIBDIR`, `INCDIR`, `BINDIR`, `DATADIR`):
 | `$(INCDIR)/fdk/`                      | public headers                |
 | `$(LIBDIR)/libfdk.a`, `libfdk.so`     | the library                  |
 | `$(LIBDIR)/pkgconfig/fdk.pc`          | pkg-config file               |
+| `$(LIBDIR)/cmake/fdk/fdkConfig.cmake` | CMake config package          |
 | `$(BINDIR)/fdk-theme`, `fdk-set`,
 `fdk-prefs`                  | the command-line tools        |
 | `$(DATADIR)/fdk/.FDKThemes/*.fdk`     | the one shipped face (faded-dream — the packaged copy of the built-in default) |
@@ -318,3 +319,55 @@ public-but-unexported, a real bug, and the check fails loudly.
 Run it alongside the builds in both configurations: the archive
 differs per config (ASan instrumentation symbols exist only in
 debug), but the exported surface must not.
+
+
+## Consumer build systems (tested against an INSTALLED FDK)
+
+The install is consumable from all three of the common build
+systems — each verified against a `DESTDIR`-staged install, the
+shape every distro package build produces:
+
+**pkg-config** (the canonical path):
+
+```sh
+cc myapp.c $(pkg-config --cflags --libs fdk)
+```
+
+**CMake** — the config package (`$(LIBDIR)/cmake/fdk/`), an
+IMPORTED target with the include path wired in:
+
+```cmake
+find_package(fdk REQUIRED CONFIG)
+target_link_libraries(myapp PRIVATE fdk::fdk)
+```
+
+```sh
+cmake -B build -DCMAKE_PREFIX_PATH=/path/to/prefix
+```
+
+The config derives its paths from its own location (not the baked
+prefix), so DESTDIR-staged and final-prefix installs both resolve;
+`FDK_INCLUDE_DIR` / `FDK_LIBRARY` override for exotic relocations.
+
+**Meson** — plain pkg-config consumption, no wrapper needed:
+
+```meson
+fdk_dep = dependency('fdk')
+executable('myapp', 'myapp.c', dependencies: fdk_dep)
+```
+
+For a DESTDIR-staged tree, export
+`PKG_CONFIG_PATH=<stage>$(LIBDIR)/pkgconfig` (and
+`PKG_CONFIG_SYSROOT_DIR=<stage>` for the staged sysroot), the
+standard packaging posture.
+
+## The API reference (`make docs`)
+
+`make docs` runs Doxygen over the PUBLIC headers only
+(`include/fdk/`; the Doxyfile documents the scope rule) and emits
+`build/docs/html/index.html`. The undocumented-symbol report lands
+in `build/docs/undocumented.txt`; the target prints the count and
+is REPORT-ONLY by default (435 at the 2026-11-20 baseline —
+working it down is an open task). `DOC_WARN_FAIL=1 make docs`
+makes an undocumented public symbol fail the build — the
+enforcement knob for the day the number approaches zero.

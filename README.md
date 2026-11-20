@@ -111,7 +111,9 @@ suite (`docs/testing.md`).
   per-widget min/max limits; automatic reflow on resize.
 - **Text** — TrueType shaping with kerning and subpixel positioning,
   synthetic bold/italic, an LRU glyph cache, labels that wrap,
-  ellipsize, and align — and full-Unicode XIM input on X11.
+  ellipsize, and align — Unicode line breaking (UAX #14: CJK text
+  breaks between ideographs, Latin words move whole, mixed scripts
+  break at the seams) — and full-Unicode XIM input on X11.
 - **Theming** — runtime-switchable `.fdk` theme files with a strict,
   fail-closed grammar; one shipped face (the default); more faces
   are user-installed `.FDKThemes` drop-ins; live re-theming of running
@@ -184,8 +186,10 @@ FDK is **in development — no stable release exists.** The 1.0.0
 re-release was withdrawn on 2026-11-19 (it shipped six GL defects
 found by the first downstream integrator; see CHANGELOG.md and
 `docs/versioning.md`), no tag exists, and builds from main
-self-identify as `1.0.0-dev`. The supported consumption path today
-is building from source (below). The packaging channel stays wired:
+self-identify as `1.0.0-dev` (the release channel — remote and
+published — carries no tag; a withdrawn cut's `v1.0.0` tag exists
+only in old local clones and was never pushed). The supported
+consumption path today is building from source (below). The packaging channel stays wired:
 the table shows what the five distro families produce on the next
 `v*` tag the owner cuts (package versions then carry the tag's
 pre-release spelling per family grammar — e.g. `1.0.0~rc1` on
@@ -348,6 +352,7 @@ Real captured frames from the test rigs — not mockups
 | `PROGRESS.md` | The fast, authoritative implemented-features ledger |
 | `docs/build.md` | Build system reference, release builds, install |
 | `docs/testing.md` | The two-tier test suite and environment quirks |
+| `docs/quality-gates.md` | The fuzz lane, ABI check, tidy report, hardening and perf gates |
 | `docs/rendering.md` | The renderer, the GPU present lane, and its env knobs |
 | `docs/text.md` | The text stack and font discovery |
 | `docs/i18n.md` | The internationalization engine |

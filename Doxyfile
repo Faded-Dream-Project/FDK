@@ -1,0 +1,63 @@
+# Doxyfile — FDK's public API reference (docs/build.md: make docs)
+#
+# Scope discipline: ONLY the installed public headers (include/fdk/)
+# are documented — the internal tree (src/) is not a product surface
+# and documenting it would freeze implementation details that are
+# free to change. EXTRACT_ALL is deliberately OFF: an undocumented
+# PUBLIC symbol must show up as a warning in the build log (and in
+# docs/DOC-GAPS.md's accounting), not be silently papered over.
+#
+# Input is the real install surface: include/fdk/*.h exactly as
+# `make install` deploys it.
+
+DOXYFILE_ENCODING      = UTF-8
+PROJECT_NAME           = "Faded Dream ToolKit (FDK)"
+PROJECT_NUMBER         = 1.0.0-dev
+PROJECT_BRIEF          = "A proprietary C17 widget toolkit for X11 and Wayland"
+INPUT                  = include/fdk
+FILE_PATTERNS          = *.h
+RECURSIVE              = NO
+EXCLUDE_SYMLINKS       = YES
+
+# Output: a local html/ tree (not committed; .gitignore'd) — the
+# served copy is a release-time decision, not a repo artifact.
+OUTPUT_DIRECTORY       = build/docs
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+HTML_OUTPUT            = html
+HTML_EXTRA_STYLESHEET  =
+
+# The undocumented-API gate: EXTRACT_ALL=NO means every public
+# entity WITHOUT a doc comment is reported. The Makefile target
+# greps this stream into build/docs/undocumented.txt and FAILS on
+# it (with DOC-GAPS.md as the recorded exception list).
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+EXTRACT_ANON_NSPACES  = NO
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+WARN_FORMAT            = "warn: $file:$line: $text"
+WARN_LOGFILE           = build/docs/doxygen-warn.log
+
+# C mode (no preprocessing games in the public headers beyond the
+# include guard; fdk_types.h defines the fixed-width types).
+OPTIMIZE_OUTPUT_FOR_C  = YES
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+EXPAND_ONLY_PREDEF     = NO
+
+# Presentation: the reference groups follow the header files' own
+# sectioning; no man pages (the docs/ tree is the canonical prose).
+SHOW_INCLUDE_FILES     = YES
+SORT_MEMBER_DOCS       = NO
+SORT_BRIEF_DOCS        = YES
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = NO
+MULTILINE_CPP_IS_BRIEF = NO
+INHERIT_DOCS           = YES
+SEPARATE_MEMBER_PAGES  = NO
+TAB_SIZE               = 4

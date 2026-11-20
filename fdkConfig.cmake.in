@@ -1,0 +1,74 @@
+# fdkConfig.cmake.in — CMake config package for an INSTALLED FDK.
+#
+# Processed by the Makefile at install time (same @PREFIX@/@LIBDIR@/
+# @INCDIR@/@VERSION@ substitution as fdk.pc, never a second
+# hand-edited copy). CMake consumers then do:
+#
+#   find_package(fdk REQUIRED CONFIG)
+#   target_link_libraries(myapp PRIVATE fdk::fdk)
+#
+# and get the headers + the shared library with its transitive
+# private deps — the same link set pkg-config produces. The IMPORTED
+# target carries INTERFACE_INCLUDE_DIRECTORIES, so no manual
+# include_directories() is needed.
+#
+# LOCATION DISCIPLINE: paths are derived from THIS FILE'S location
+# (get_filename_component), not from the baked @INCDIR@/@LIBDIR@ —
+# a DESTDIR-staged install (what every distro package build does)
+# relocates the whole tree under the staging root while the config
+# still says the final prefix. Deriving from where CMake actually
+# found the file makes both layouts work with zero knobs. The
+# baked paths stay as a LAST-RESORT fallback for exotic layouts
+# where the file itself was moved away from the lib tree.
+
+# Where this config file lives: <prefix>/lib/cmake/fdk/ ->
+# lib is ../.. (fdk -> cmake -> lib), include is ../../.. (+/include)
+get_filename_component(_fdk_config_dir "${CMAKE_CURRENT_LIST_FILE}" PATH)
+get_filename_component(_fdk_lib_dir "${_fdk_config_dir}/../.." ABSOLUTE)
+get_filename_component(_fdk_inc_dir "${_fdk_config_dir}/../../.." ABSOLUTE)
+string(APPEND _fdk_inc_dir "/include")
+
+# Fallbacks (baked at install time) used only when the derived
+# paths do not contain the headers (relocated single-file copies).
+if(NOT EXISTS "${_fdk_inc_dir}/fdk/fdk_core.h")
+  set(_fdk_inc_dir "@INCDIR@")
+endif()
+set(_fdk_library "${_fdk_lib_dir}/libfdk.so")
+if(NOT EXISTS "${_fdk_library}")
+  set(_fdk_library "@LIBDIR@/libfdk.so")
+endif()
+
+if(NOT EXISTS "${_fdk_inc_dir}/fdk/fdk_core.h")
+  message(FATAL_ERROR
+    "fdkConfig: FDK headers not found (tried ${_fdk_inc_dir} and the "
+    "baked @INCDIR@). Set FDK_INCLUDE_DIR to the installed headers.")
+endif()
+
+if(NOT EXISTS "${_fdk_library}")
+  message(FATAL_ERROR
+    "fdkConfig: libfdk.so not found (tried ${_fdk_lib_dir} and the "
+    "baked @LIBDIR@). Set FDK_LIBRARY to the installed library.")
+endif()
+
+# Explicit overrides always win (documented escape hatch).
+if(DEFINED FDK_INCLUDE_DIR)
+  set(_fdk_inc_dir "${FDK_INCLUDE_DIR}")
+endif()
+if(DEFINED FDK_LIBRARY)
+  set(_fdk_library "${FDK_LIBRARY}")
+endif()
+
+add_library(fdk::fdk SHARED IMPORTED)
+set_target_properties(fdk::fdk PROPERTIES
+  IMPORTED_LOCATION "${_fdk_library}"
+  INTERFACE_INCLUDE_DIRECTORIES "${_fdk_inc_dir}"
+  # The .so already carries its private deps (the .pc discipline:
+  # Requires.private equivalent) — CMake consumers need nothing else.
+  IMPORTED_SONAME "libfdk.so.1"
+)
+
+mark_as_advanced(FDK_INCLUDE_DIR FDK_LIBRARY)
+unset(_fdk_config_dir)
+unset(_fdk_lib_dir)
+unset(_fdk_inc_dir)
+unset(_fdk_library)
