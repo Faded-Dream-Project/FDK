@@ -342,7 +342,11 @@ SHARED_LIB := $(BUILD_DIR)/libfdk.so
 EXPORT_MAP := $(BUILD_DIR)/libfdk.exports.map
 
 TEST_SRCS := $(filter-out tests/test_gles_audit.c tests/crosssection.c tests/test_dpi_scale.c tests/test_gpu_paint_wl.c tests/test_x11_share.c tests/test_arbitration.c tests/test_p3_protocols.c tests/test_matrix.c tests/test_dmabuf.c tests/test_x11_integration.c tests/test_gpu_paint.c tests/probe_cpu.c tests/test_wayland_integration.c tests/test_dbus_live.c tests/test_notify_client.c tests/test_tray_item.c tests/test_clip_uris.c tests/bench.c,$(wildcard tests/*.c))
+# The frozen-symbol pin joins the suite with its own build rule
+# (needs -DFDK_NO_INIT_REDIRECT — see the rule below the pattern).
+TEST_SRCS := $(filter-out tests/test_frozen_init.c,$(TEST_SRCS))
 TEST_BINS := $(patsubst tests/%.c,$(BUILD_DIR)/tests/%,$(TEST_SRCS))
+TEST_BINS += $(BUILD_DIR)/tests/test_frozen_init
 
 # Every test binary ALSO depends on every FDK header (public AND
 # private). The one-step test compiles inline whatever headers the
@@ -659,6 +663,14 @@ test: $(TEST_BINS)
 $(BUILD_DIR)/tests/%: tests/%.c $(STATIC_LIB) $(ALL_FDK_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) $(shell pkg-config --cflags xkbcommon 2>/dev/null) -o $@ $(LDFLAGS) $(shell pkg-config --libs xkbcommon 2>/dev/null)
+
+# The frozen-symbol pin: the ONE test TU built with the header's
+# documented redirect opt-out, so plain fdk_init binds the exported
+# 1.0-frozen symbol (tests/test_frozen_init.c explains why this is
+# its own TU). Everything else stays on the redirect.
+$(BUILD_DIR)/tests/test_frozen_init: tests/test_frozen_init.c $(STATIC_LIB) $(ALL_FDK_HEADERS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb -DFDK_NO_INIT_REDIRECT=1 $< $(STATIC_LIB) $(shell pkg-config --cflags xkbcommon 2>/dev/null) -o $@ $(LDFLAGS) $(shell pkg-config --libs xkbcommon 2>/dev/null)
 
 # X11 platform integration test — NOT part of plain `make test` (see
 # docs/testing.md's headless-by-default policy). Requires a reachable

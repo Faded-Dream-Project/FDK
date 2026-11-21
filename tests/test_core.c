@@ -142,17 +142,17 @@ static void test_image_budget_option(void) {
  *   - opts_size = 0 behaves as fdk_init (full layout);
  *   - the image-budget floor still refuses through the ex form;
  *   - fdk_init and fdk_init_ex agree on the full layout. */
-/* The frozen-symbol accessor: a DIFFERENT C name bound to the
- * exported fdk_init symbol through an asm label — the header's
- * static-inline redirect owns the fdk_init TOKEN in this TU, so
- * the raw symbol needs another name. GCC/Clang asm labels are the
- * standard mechanism; MSVC is not a supported FDK toolchain. */
-#if defined(__GNUC__)
-extern fdk_result fdk_test_frozen_init_sym(fdk_context **,
-                                           const fdk_init_options *)
-    __asm__("fdk_init");
-#define FDK_TEST_HAVE_FROZEN_SYM 1
-#endif
+/* The frozen-symbol pin USED to live here, reaching around the
+ * redirect with a GCC asm label (__asm__("fdk_init") on an extern
+ * alias). That put two entities on one assembler name in one TU,
+ * which is fragile across arches and -O levels — on arm64/gcc-13
+ * at -O0 the call returned 0 without entering fdk_init_ex and the
+ * sentinel context faulted in fdk_shutdown. The pin now lives in
+ * tests/test_frozen_init.c, a TU built with -DFDK_NO_INIT_REDIRECT
+ * that calls plain fdk_init: no aliases, the documented opt-out,
+ * the ordinary linker binding. This file keeps the redirect-leg
+ * tests (legacy size through ex, size 0, the floor, and the
+ * redirected fdk_init) — the redirect itself is what they pin. */
 
 static void test_init_ex_size_contract(void) {
     /* The first-generation layout, EXACTLY as a binary compiled
@@ -217,56 +217,9 @@ static void test_init_ex_size_contract(void) {
 
     free(legacy);
 
-    /* ---- SECOND PASS (2026-11-20): the frozen-symbol pin -------
-     * The exported fdk_init reads AT MOST the 1.0 layout, forever.
-     * Proven with a heap allocation of EXACTLY 24 bytes (the 1.0
-     * size): the frozen symbol called on it cannot touch a 25th
-     * byte without ASan aborting. The call goes through the REAL
-     * symbol (dlsym(RTLD_DEFAULT) — this TU sees the redirect
-     * inline, which is NOT the frozen path). */
-    {
-        struct layout_1_0 {
-            fdk_platform_backend backend;
-            const char *app_id;
-            int render_mode;
-            unsigned int image_max_pixels;
-        };
-        _Static_assert(sizeof(fdk_init_options) ==
-                           FDK_INIT_OPTIONS_SIZE_1_0,
-                       "the pin and the real struct must agree");
-        _Static_assert(sizeof(struct layout_1_0) ==
-                           FDK_INIT_OPTIONS_SIZE_1_0,
-                       "the local mirror must be the 1.0 size");
-#if defined(FDK_TEST_HAVE_FROZEN_SYM)
-        struct layout_1_0 *small = calloc(1, sizeof *small);
-        assert(small != NULL);
-        small->backend = FDK_PLATFORM_AUTO;
-        small->app_id = "fdk-frozen-symbol-test";
-        fdk_context *ctx2 = (fdk_context *)0x1;
-        /* DIRECT call, never through a function pointer: on arm64
-         * (gcc 13, the CI lane) materializing &fdk_test_frozen_init_sym
-         * into a pointer VARIABLE at -O0 mislinks — the call lands
-         * somewhere that returns 0 without running fdk_init_ex, the
-         * sentinel survives, and fdk_shutdown(0x1) faults at
-         * ctx->thread_state (offset 0x10). Reproduced under
-         * qemu-aarch64 with the cross toolchain; the direct call
-         * binds the symbol exactly on every arch tried. */
-        fdk_result r2 = fdk_test_frozen_init_sym(
-            &ctx2, (const fdk_init_options *)small);
-        assert(r2 == FDK_ERR_NO_DISPLAY || fdk_ok(r2));
-        if (fdk_ok(r2)) {
-            fdk_shutdown(ctx2);
-        }
-        free(small);
-#else
-        printf("[skip] frozen-symbol pin: asm labels need GCC/Clang "
-               "(unsupported toolchain for FDK)\n");
-#endif
-    }
-
-    printf("[ok] fdk_init_ex size contract: legacy caller + FROZEN "
-           "SYMBOL both not over-read (ASan), 0 = full layout, floor "
-           "enforced\n");
+    printf("[ok] fdk_init_ex size contract: legacy caller not "
+           "over-read (ASan), 0 = full layout, floor enforced, "
+           "redirect agrees with ex\n");
 }
 
 int main(void) {
