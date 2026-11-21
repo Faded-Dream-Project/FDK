@@ -242,12 +242,17 @@ static void test_init_ex_size_contract(void) {
         assert(small != NULL);
         small->backend = FDK_PLATFORM_AUTO;
         small->app_id = "fdk-frozen-symbol-test";
-        fdk_result (*frozen)(fdk_context **,
-                             const fdk_init_options *) =
-            &fdk_test_frozen_init_sym; /* the asm label binds the
-                                       * EXPORTED 1.0-frozen symbol */
         fdk_context *ctx2 = (fdk_context *)0x1;
-        fdk_result r2 = frozen(&ctx2, (const fdk_init_options *)small);
+        /* DIRECT call, never through a function pointer: on arm64
+         * (gcc 13, the CI lane) materializing &fdk_test_frozen_init_sym
+         * into a pointer VARIABLE at -O0 mislinks — the call lands
+         * somewhere that returns 0 without running fdk_init_ex, the
+         * sentinel survives, and fdk_shutdown(0x1) faults at
+         * ctx->thread_state (offset 0x10). Reproduced under
+         * qemu-aarch64 with the cross toolchain; the direct call
+         * binds the symbol exactly on every arch tried. */
+        fdk_result r2 = fdk_test_frozen_init_sym(
+            &ctx2, (const fdk_init_options *)small);
         assert(r2 == FDK_ERR_NO_DISPLAY || fdk_ok(r2));
         if (fdk_ok(r2)) {
             fdk_shutdown(ctx2);
